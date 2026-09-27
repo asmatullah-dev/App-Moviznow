@@ -32,6 +32,7 @@ import { AnalyticsTracker } from './components/AnalyticsTracker';
 import { AdSenseScriptManager } from './components/AdSenseScriptManager';
 import { CpmScriptManager } from './components/CpmScriptManager';
 import { AdBlockDetector } from './components/AdBlockDetector';
+import { NotificationPermissionPrompt } from './components/NotificationPermissionPrompt';
 
 // Eager Loaded User Pages for Instant Client-Side Navigation
 import Home from './pages/user/Home';
@@ -298,6 +299,7 @@ export default function App() {
                     <SyncUserDataManager />
                     <RefreshAppDataManager />
                     <SystemNotificationWrapper />
+                    <NotificationPermissionPrompt />
                     <BrowserRouter>
                     <GlobalNavigationLoader />
                     <ScrollToTopOrRestore />

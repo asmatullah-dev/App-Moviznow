@@ -4015,32 +4015,83 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     return oldTokens;
   }
 
-  // Subscribe to FCM topic & enforce single device token per user
+  // Subscribe to FCM topic & enforce single device token per user or guest
   app.post(
     ["/api/notifications/subscribe", "/notifications/subscribe"],
     async (req, res) => {
       try {
-        const { token, userId } = req.body;
+        const { token, userId, isGuest, guestId, previousGuestId } = req.body;
         if (!token) return res.status(400).json({ error: "Token required" });
 
-        // Check if messaging is available (requires service account)
+        const isUserLoggedIn = !!userId && userId !== 'guest' && userId !== 'anonymous';
+
         try {
           if (admin.apps.length === 0) {
             throw new Error("Firebase Admin not initialized");
           }
 
-          // Cleanup previous tokens for this user to ensure only 1 active device receives notifications
-          if (userId && db) {
-            await cleanupOldUserFcmTokens(db, userId, token);
-          }
+          if (isUserLoggedIn) {
+            // Unsubscribe from guest topic if it was previously a guest device
+            try { await admin.messaging().unsubscribeFromTopic(token, "guest_users"); } catch (e) {}
 
-          await admin.messaging().subscribeToTopic(token, "all_users");
-          
-          if (userId) {
+            // Cleanup previous tokens for this user
+            if (db) {
+              await cleanupOldUserFcmTokens(db, userId, token);
+            }
+
+            await admin.messaging().subscribeToTopic(token, "all_users");
+            await admin.messaging().subscribeToTopic(token, "registered_users");
             await admin.messaging().subscribeToTopic(token, `user_${userId}`);
+
+            // Update token document in Firestore
+            if (db) {
+              const tokenDocId = token.substring(0, 100).replace(/[/#$\[\]]/g, '_');
+              await db.collection("fcm_tokens").doc(tokenDocId).set(
+                {
+                  token,
+                  userId: userId,
+                  isGuest: false,
+                  updatedAt: new Date().toISOString()
+                },
+                { merge: true }
+              ).catch(() => {});
+
+              // Safe merge: if previous guest ID existed, update any matching docs
+              if (previousGuestId) {
+                const guestDocs = await db.collection("fcm_tokens").where("guestId", "==", previousGuestId).get();
+                for (const gDoc of guestDocs.docs) {
+                  gDoc.ref.set(
+                    {
+                      userId: userId,
+                      isGuest: false,
+                      updatedAt: new Date().toISOString()
+                    },
+                    { merge: true }
+                  ).catch(() => {});
+                }
+              }
+            }
+          } else {
+            // Guest FCM token registration
+            await admin.messaging().subscribeToTopic(token, "all_users");
+            await admin.messaging().subscribeToTopic(token, "guest_users");
+
+            if (db) {
+              const tokenDocId = token.substring(0, 100).replace(/[/#$\[\]]/g, '_');
+              await db.collection("fcm_tokens").doc(tokenDocId).set(
+                {
+                  token,
+                  userId: 'guest',
+                  isGuest: true,
+                  guestId: guestId || 'guest_device',
+                  updatedAt: new Date().toISOString()
+                },
+                { merge: true }
+              ).catch(() => {});
+            }
           }
           
-          res.json({ success: true });
+          res.json({ success: true, isGuest: !isUserLoggedIn });
         } catch (fcmError: any) {
           const isAuthError =
             fcmError.message.includes("401") ||
@@ -4048,7 +4099,6 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           console.warn(
             `FCM Subscription failed: ${fcmError.message}${isAuthError ? " (This usually means a Service Account Key is missing or invalid in the environment)" : ""}`,
           );
-          // Return success anyway to avoid client-side errors, as we can't fix this without user action
           res.json({
             success: true,
             warning: "FCM not fully configured",
@@ -4072,6 +4122,8 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
         if (admin.apps.length > 0 && token) {
           try { await admin.messaging().unsubscribeFromTopic(token, "all_users"); } catch (e) {}
+          try { await admin.messaging().unsubscribeFromTopic(token, "guest_users"); } catch (e) {}
+          try { await admin.messaging().unsubscribeFromTopic(token, "registered_users"); } catch (e) {}
           if (userId) {
             try { await admin.messaging().unsubscribeFromTopic(token, `user_${userId}`); } catch (e) {}
           }
@@ -4089,7 +4141,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     ["/api/notifications/send", "/notifications/send"],
     async (req, res) => {
       try {
-        const { title, body, imageUrl, url, buttonUrl, targetUserIds } = req.body;
+        const { title, body, imageUrl, url, buttonUrl, targetUserIds, targetAudience } = req.body;
         const targetUrl = buttonUrl || url || "/";
 
         let totalSuccess = 0;
@@ -4101,8 +4153,18 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             const tokensSnap = await db.collection("fcm_tokens").get();
             let matchedDocs = tokensSnap.docs;
 
-            if (Array.isArray(targetUserIds) && targetUserIds.length > 0) {
-              matchedDocs = matchedDocs.filter(d => targetUserIds.includes(d.data().userId));
+            if (targetAudience === 'guests') {
+              matchedDocs = matchedDocs.filter(d => {
+                const data = d.data();
+                return data.isGuest === true || data.userId === 'guest' || data.userId === 'anonymous';
+              });
+            } else if (targetAudience === 'registered') {
+              matchedDocs = matchedDocs.filter(d => {
+                const data = d.data();
+                return data.isGuest !== true && data.userId && data.userId !== 'guest' && data.userId !== 'anonymous';
+              });
+            } else if (targetAudience === 'specific' || (Array.isArray(targetUserIds) && targetUserIds.length > 0)) {
+              matchedDocs = matchedDocs.filter(d => targetUserIds && targetUserIds.includes(d.data().userId));
             }
 
             const activeTokens = Array.from(
@@ -4114,7 +4176,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             );
 
             if (activeTokens.length > 0) {
-              console.log(`[FCM Multicast] Dispatching to ${activeTokens.length} direct tokens...`);
+              console.log(`[FCM Multicast] Dispatching to ${activeTokens.length} tokens (Audience: ${targetAudience || 'all'})...`);
               for (let i = 0; i < activeTokens.length; i += 500) {
                 const batchTokens = activeTokens.slice(i, i + 500);
                 const multicastPayload: any = {
@@ -4182,7 +4244,14 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
         // 2. Topic Messaging Fallback / Broadcast
         try {
-          if (Array.isArray(targetUserIds) && targetUserIds.length > 0) {
+          let targetTopic = "all_users";
+          if (targetAudience === 'guests') {
+            targetTopic = "guest_users";
+          } else if (targetAudience === 'registered') {
+            targetTopic = "registered_users";
+          }
+
+          if ((targetAudience === 'specific' || (!targetAudience && Array.isArray(targetUserIds))) && targetUserIds && targetUserIds.length > 0) {
             let activeUserIds = targetUserIds;
             if (db) {
               const filteredList: string[] = [];
@@ -4280,7 +4349,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                   },
                 },
               },
-              topic: "all_users",
+              topic: targetTopic,
             };
 
             const response = await admin.messaging().send(message);

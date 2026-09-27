@@ -72,6 +72,8 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           const parsed = JSON.parse(cachedData);
           if (Array.isArray(parsed)) {
             let filtered = parsed.filter(n => {
+              if (n.targetAudience === 'registered' && (!profile?.uid && !user?.uid)) return false;
+              if (n.targetAudience === 'guests' && (profile?.uid || user?.uid)) return false;
               const isTargeted = n.targetUserId || (n.targetUserIds && n.targetUserIds.length > 0);
               if (isTargeted) {
                 if (!profile?.uid) return false;
@@ -124,6 +126,8 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
           const parsed = JSON.parse(cachedData);
           if (Array.isArray(parsed)) {
             let filtered = parsed.filter(n => {
+              if (n.targetAudience === 'registered' && (!profile?.uid && !user?.uid)) return false;
+              if (n.targetAudience === 'guests' && (profile?.uid || user?.uid)) return false;
               const isTargeted = n.targetUserId || (n.targetUserIds && n.targetUserIds.length > 0);
               if (isTargeted) {
                 if (!profile?.uid) return false;
@@ -165,6 +169,8 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       safeStorage.setItem('cached_notifications_data', JSON.stringify(allNotifs));
 
       let filtered = allNotifs.filter(n => {
+        if (n.targetAudience === 'registered' && (!profile?.uid && !user?.uid)) return false;
+        if (n.targetAudience === 'guests' && (profile?.uid || user?.uid)) return false;
         const isTargeted = n.targetUserId || (n.targetUserIds && n.targetUserIds.length > 0);
         if (isTargeted) {
           if (!profile?.uid) return false;

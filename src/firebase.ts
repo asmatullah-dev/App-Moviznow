@@ -105,18 +105,70 @@ export const analyticsPromise = typeof window !== 'undefined'
 export let analytics: any = null;
 analyticsPromise.then(a => { analytics = a; });
 
-// Function to request notification permission and get token
+export const getGuestDeviceId = (): string => {
+  if (typeof window === 'undefined') return 'guest_server';
+  let guestId = safeStorage.getItem('guest_device_id');
+  if (!guestId) {
+    guestId = 'guest_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString(36);
+    safeStorage.setItem('guest_device_id', guestId);
+  }
+  return guestId;
+};
+
+// Function to safely merge / update a guest FCM token to a logged-in user upon login
+export const syncGuestFcmToUser = async (userId: string, userEmail?: string) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const activeToken = safeStorage.getItem('active_fcm_token') || safeStorage.getItem('guest_fcm_token');
+    const guestId = safeStorage.getItem('guest_device_id');
+    
+    if (activeToken) {
+      const tokenDocRef = doc(db, 'fcm_tokens', activeToken.substring(0, 100).replace(/[/#$\[\]]/g, '_'));
+      await runWithNetwork(() => setDoc(tokenDocRef, {
+        token: activeToken,
+        userId: userId,
+        isGuest: false,
+        guestId: null,
+        userEmail: userEmail || null,
+        updatedAt: new Date().toISOString()
+      }, { merge: true }));
+
+      // Notify backend to transition FCM topic subscriptions
+      await fetch('/api/notifications/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: activeToken,
+          userId: userId,
+          isGuest: false,
+          previousGuestId: guestId || undefined
+        })
+      }).catch(() => {});
+
+      // Clear guest-specific flags
+      safeStorage.removeItem('guest_fcm_token');
+      safeStorage.removeItem('guest_fcm_registered');
+      const CACHE_KEY = `fcm_token_v4_last_update_${userId}`;
+      safeStorage.setItem(CACHE_KEY, JSON.stringify({ token: activeToken, timestamp: Date.now(), userId, isGuest: false }));
+    }
+  } catch (err) {
+    console.warn("Error syncing guest FCM to logged in user:", err);
+  }
+};
+
+// Function to request notification permission and get token for guest or logged in user
 export const requestNotificationPermission = async (force: boolean = false) => {
   if (!messaging || typeof window === 'undefined') return null;
   
   try {
     const permission = await Notification.requestPermission();
     if (permission === 'granted') {
-      const CACHE_KEY = `fcm_token_v3_last_update_${auth.currentUser?.uid || 'anon'}`;
-      const lastUpdate = localStorage.getItem(CACHE_KEY);
+      const isUser = !!auth.currentUser?.uid;
+      const guestId = !isUser ? getGuestDeviceId() : null;
+      const currentUserId = auth.currentUser?.uid || 'guest';
+      const CACHE_KEY = `fcm_token_v4_last_update_${currentUserId}`;
+      const lastUpdate = safeStorage.getItem(CACHE_KEY);
       const now = Date.now();
-      const ONE_DAY = 24 * 60 * 60 * 1000;
-      const currentUserId = auth.currentUser?.uid || 'anonymous';
 
       let parsedCache: any = null;
       try {
@@ -156,10 +208,18 @@ export const requestNotificationPermission = async (force: boolean = false) => {
       const token = await getToken(messaging, tokenOptions);
       
       if (token) {
+        // Cache active FCM token locally
+        safeStorage.setItem('active_fcm_token', token);
+        if (!isUser) {
+          safeStorage.setItem('guest_fcm_token', token);
+          safeStorage.setItem('guest_fcm_registered', 'true');
+        }
+
         // Fast path: If token is already cached for this user/device, skip all Firestore reads and writes
         const tokenAlreadySynced = parsedCache && 
           parsedCache.token === token && 
           parsedCache.userId === currentUserId &&
+          parsedCache.isGuest === !isUser &&
           (now - (parsedCache.timestamp || 0) < 30 * 24 * 60 * 60 * 1000);
 
         if (!force && tokenAlreadySynced) {
@@ -167,13 +227,18 @@ export const requestNotificationPermission = async (force: boolean = false) => {
         }
 
         try {
-          // Store token in current user's device doc directly to avoid reading/writing large chunks or chunk_meta
           const tokenDocRef = doc(db, 'fcm_tokens', token.substring(0, 100).replace(/[/#$\[\]]/g, '_'));
-          const tokenData = {
+          const tokenData: any = {
             token,
             updatedAt: new Date().toISOString(),
-            userId: auth.currentUser?.uid || 'anonymous'
+            userId: isUser ? auth.currentUser!.uid : 'guest',
+            isGuest: !isUser,
+            guestId: !isUser ? guestId : null,
+            platform: typeof navigator !== 'undefined' ? navigator.userAgent : 'web'
           };
+          if (isUser && auth.currentUser?.email) {
+            tokenData.userEmail = auth.currentUser.email;
+          }
           await runWithNetwork(() => setDoc(tokenDocRef, tokenData, { merge: true }));
 
           if (auth.currentUser) {
@@ -190,12 +255,17 @@ export const requestNotificationPermission = async (force: boolean = false) => {
             }
           }
 
-          localStorage.setItem(CACHE_KEY, JSON.stringify({ token, timestamp: now, userId: currentUserId }));
+          safeStorage.setItem(CACHE_KEY, JSON.stringify({ token, timestamp: now, userId: currentUserId, isGuest: !isUser }));
           
           await fetch('/api/notifications/subscribe', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token, userId: auth.currentUser?.uid })
+            body: JSON.stringify({ 
+              token, 
+              userId: isUser ? auth.currentUser!.uid : undefined,
+              isGuest: !isUser,
+              guestId: !isUser ? guestId : undefined
+            })
           }).catch(() => {});
         } catch (e) {
           console.warn("Could not sync FCM token to server:", e);

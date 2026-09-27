@@ -7,7 +7,7 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import { auth, db, runWithNetwork } from "../firebase";
+import { auth, db, runWithNetwork, syncGuestFcmToUser, requestNotificationPermission } from "../firebase";
 import { safeStorage } from "../utils/safeStorage";
 import { getUtcVersion, parseVersionTime } from "../utils/chunkMeta";
 import { isValidGmailAddress } from "../utils/emailValidation";
@@ -740,6 +740,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
             const realKeysToPush = Object.keys(updatesToPush).filter(k => k !== 'lastActive' && k !== 'updatedAt');
             if (realKeysToPush.length > 0) {
+              updatesToPush.uid = currentUser.uid; // Always ensure uid is written to satisfy security rules on create/set
               updatesToPush.lastActive = new Date().toISOString();
               batch.set(userRef, updatesToPush, { merge: true });
               batch.set(doc(db, "chunk_meta", "versions"), {
@@ -844,8 +845,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          // Whitelist check for non-admin accounts with phone numbers
-          if (!hasAdminPrivileges) {
+          // Whitelist check for non-admin accounts with phone numbers (skip if already approved/active)
+          if (!hasAdminPrivileges && data.status !== "active") {
             let phoneToCheck = data.phone || currentUser.phoneNumber || "";
             if (!phoneToCheck && currentUser.email?.endsWith("@moviznow.com")) {
               phoneToCheck = currentUser.email.replace("@moviznow.com", "");
@@ -1480,6 +1481,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           console.warn("Initial profile sync failed:", err);
         });
 
+        // Auto-merge guest FCM token to logged in user account
+        syncGuestFcmToUser(currentUser.uid, currentUser.email || undefined).catch(() => {});
+
         // Always initialize the ref for this React lifecycle to ensure interval tracking works
         if (!sessionStartTimeRef.current) {
           sessionStartTimeRef.current = now;
@@ -1931,7 +1935,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (e) {}
 
         const loginVerTime = getUtcVersion();
-        batch.update(doc(db, "users", result.user.uid), updates);
+        batch.set(doc(db, "users", result.user.uid), { ...updates, uid: result.user.uid }, { merge: true });
         batch.set(doc(db, "chunk_meta", "versions"), {
           users: {
             [result.user.uid]: getUtcVersion()
@@ -2051,6 +2055,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const batch = writeBatch(db);
         const signupTime = getUtcVersion();
         batch.set(doc(db, "users", userCredential.user.uid), {
+          uid: userCredential.user.uid,
           displayName: cleanSignupName,
           phone: phone ? standardizePhone(phone) : "",
           email: email,
@@ -2170,6 +2175,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const batch = writeBatch(db);
         const signupTime = getUtcVersion();
         batch.set(doc(db, "users", userCredential.user.uid), {
+          uid: userCredential.user.uid,
           displayName: cleanPhoneSignupName,
           phone: standardizedPhone || "",
           email: signupEmail,

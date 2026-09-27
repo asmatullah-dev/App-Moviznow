@@ -92,10 +92,11 @@ export default function Notifications() {
 
   // Send Modal State
   const [isSendModalOpen, setIsSendModalOpen] = useState(false);
+  const [historyAudienceFilter, setHistoryAudienceFilter] = useState<'all' | 'registered' | 'guests' | 'specific'>('all');
   const [sendForm, setSendForm] = useState({ 
     title: '', 
     body: '', 
-    targetType: 'all' as 'all' | 'specific',
+    targetType: 'all' as 'all' | 'registered' | 'guests' | 'specific',
     targetUserIds: [] as string[],
     targetUserNames: [] as string[],
     buttonLabel: '',
@@ -262,6 +263,7 @@ export default function Notifications() {
       const notificationData: any = {
         title: sendForm.title,
         body: sendForm.body,
+        targetAudience: sendForm.targetType,
         targetUserIds: sendForm.targetType === 'specific' ? sendForm.targetUserIds : null,
         targetUserNames: sendForm.targetType === 'specific' ? sendForm.targetUserNames : null,
         buttonLabel: sendForm.buttonLabel || null,
@@ -287,6 +289,7 @@ export default function Notifications() {
             body: JSON.stringify({
               title: sendForm.title,
               body: sendForm.body,
+              targetAudience: sendForm.targetType,
               targetUserIds: sendForm.targetType === 'specific' ? sendForm.targetUserIds : undefined,
               buttonLabel: sendForm.buttonLabel,
               buttonUrl: sendForm.buttonUrl
@@ -441,11 +444,24 @@ export default function Notifications() {
     }));
   };
 
-  const filteredNotifications = notifications.filter(
-    (n) =>
+  const filteredNotifications = notifications.filter((n) => {
+    const matchesSearch =
       n.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      n.body.toLowerCase().includes(searchTerm.toLowerCase()),
-  );
+      n.body.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    if (!matchesSearch) return false;
+
+    if (historyAudienceFilter === 'guests') {
+      return n.targetAudience === 'guests';
+    }
+    if (historyAudienceFilter === 'registered') {
+      return n.targetAudience === 'registered';
+    }
+    if (historyAudienceFilter === 'specific') {
+      return n.targetAudience === 'specific' || !!n.targetUserId || (!!n.targetUserIds && n.targetUserIds.length > 0);
+    }
+    return true;
+  });
 
   const notificationsToday = notifications.filter((n) =>
     isToday(new Date(n.createdAt)),
@@ -527,8 +543,8 @@ export default function Notifications() {
 
       {activeTab === 'history' ? (
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden flex flex-col h-[calc(100vh-280px)] transition-colors duration-300">
-          <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
-            <div className="relative">
+          <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 transition-colors duration-300 flex flex-col md:flex-row gap-3 md:items-center justify-between">
+            <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
               <input
                 type="text"
@@ -537,6 +553,38 @@ export default function Notifications() {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-9 pr-3 py-2 focus:outline-none focus:border-blue-500 text-zinc-900 dark:text-white text-sm transition-colors duration-300"
               />
+            </div>
+
+            {/* Audience filter tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 shrink-0">
+              <button
+                type="button"
+                onClick={() => setHistoryAudienceFilter('all')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${historyAudienceFilter === 'all' ? 'bg-blue-500 text-white shadow-xs' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+              >
+                All
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryAudienceFilter('registered')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${historyAudienceFilter === 'registered' ? 'bg-emerald-500 text-white shadow-xs' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+              >
+                Registered
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryAudienceFilter('guests')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${historyAudienceFilter === 'guests' ? 'bg-amber-500 text-white shadow-xs' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+              >
+                Guests Only 👻
+              </button>
+              <button
+                type="button"
+                onClick={() => setHistoryAudienceFilter('specific')}
+                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${historyAudienceFilter === 'specific' ? 'bg-purple-500 text-white shadow-xs' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+              >
+                Specific
+              </button>
             </div>
           </div>
 
@@ -571,9 +619,23 @@ export default function Notifications() {
                         {notification.title}
                       </h4>
                       <div className="flex items-center gap-2 shrink-0">
-                        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded ${notification.targetUserId || notification.targetUserIds ? 'bg-emerald-500/10 text-emerald-500' : 'bg-blue-500/10 text-blue-500'}`}>
-                          {notification.targetUserId || notification.targetUserIds ? 'Targeted' : 'Global'}
-                        </span>
+                        {notification.targetAudience === 'guests' ? (
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                            👻 Guests Only
+                          </span>
+                        ) : notification.targetAudience === 'registered' ? (
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                            👤 Registered
+                          </span>
+                        ) : notification.targetAudience === 'specific' || notification.targetUserId || (notification.targetUserIds && notification.targetUserIds.length > 0) ? (
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-purple-500/10 text-purple-500 border border-purple-500/20">
+                            🎯 Specific ({notification.targetUserIds?.length || 1})
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                            🌐 Users & Guests
+                          </span>
+                        )}
                         <button
                           onClick={() => setSelectedNotification(notification)}
                           className="p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
@@ -715,22 +777,38 @@ export default function Notifications() {
         maxWidth="max-w-lg"
       >
         <form onSubmit={handleSendNotification} className="space-y-4">
-          <div className="flex gap-2 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl mb-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-900 rounded-xl mb-4">
             <button
               type="button"
               onClick={() => setSendForm(prev => ({ ...prev, targetType: 'all' }))}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${sendForm.targetType === 'all' ? 'bg-white dark:bg-zinc-800 text-blue-500 shadow-sm' : 'text-zinc-500'}`}
+              className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition-all ${sendForm.targetType === 'all' ? 'bg-white dark:bg-zinc-800 text-blue-500 shadow-sm' : 'text-zinc-500'}`}
             >
-              <Users className="w-4 h-4" />
+              <Users className="w-3.5 h-3.5" />
               All Users
             </button>
             <button
               type="button"
-              onClick={() => setSendForm(prev => ({ ...prev, targetType: 'specific' }))}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all ${sendForm.targetType === 'specific' ? 'bg-white dark:bg-zinc-800 text-emerald-500 shadow-sm' : 'text-zinc-500'}`}
+              onClick={() => setSendForm(prev => ({ ...prev, targetType: 'registered' }))}
+              className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition-all ${sendForm.targetType === 'registered' ? 'bg-white dark:bg-zinc-800 text-emerald-500 shadow-sm' : 'text-zinc-500'}`}
             >
-              <User className="w-4 h-4" />
-              Specific User
+              <User className="w-3.5 h-3.5 text-emerald-500" />
+              Registered
+            </button>
+            <button
+              type="button"
+              onClick={() => setSendForm(prev => ({ ...prev, targetType: 'guests' }))}
+              className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition-all ${sendForm.targetType === 'guests' ? 'bg-white dark:bg-zinc-800 text-amber-500 shadow-sm' : 'text-zinc-500'}`}
+            >
+              <span>👻</span>
+              Guests
+            </button>
+            <button
+              type="button"
+              onClick={() => setSendForm(prev => ({ ...prev, targetType: 'specific' }))}
+              className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-xs font-bold transition-all ${sendForm.targetType === 'specific' ? 'bg-white dark:bg-zinc-800 text-purple-500 shadow-sm' : 'text-zinc-500'}`}
+            >
+              <User className="w-3.5 h-3.5 text-purple-500" />
+              Specific
             </button>
           </div>
 

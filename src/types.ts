@@ -127,6 +127,7 @@ export interface AppNotification {
   targetUserId?: string;
   targetUserIds?: string[];
   targetUserNames?: string[];
+  targetAudience?: 'all' | 'registered' | 'guests' | 'specific';
   buttonLabel?: string;
   buttonUrl?: string;
   sendFcm?: boolean;

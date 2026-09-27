@@ -277,7 +277,7 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                   <button
                     onClick={() => {
                       setIsOpen(false);
-                      navigate('/login', { state: { from: location } });
+                      navigate('/login', { state: { from: location, switch: true } });
                     }}
                     className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-600 text-black dark:text-zinc-950 font-black text-xs shadow-md shadow-emerald-500/20 active:scale-95 transition-all cursor-pointer"
                   >

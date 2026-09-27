@@ -91,9 +91,9 @@ service cloud.firestore {
       allow read: if true;
       allow write: if isAdmin();
     }
-    match /fcm_tokens/{chunkId} {
+    match /fcm_tokens/{tokenId} {
       allow read: if true;
-      allow write: if isSignedIn() || isAdmin();
+      allow write: if true;
     }
     match /referral/{docId} {
       allow read: if true;
