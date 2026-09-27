@@ -22,7 +22,12 @@ service cloud.firestore {
 
     // Users Collection
     match /users/{userId} {
-      allow read: if isSignedIn() && (isOwner(userId) || isAdmin());
+      allow read: if isSignedIn() && (
+        isOwner(userId) ||
+        isAdmin() ||
+        (request.auth.token.email != null && resource.data.email == request.auth.token.email) ||
+        (request.auth.token.phone_number != null && (resource.data.phone == request.auth.token.phone_number || resource.data.phoneNumber == request.auth.token.phone_number))
+      );
       allow create: if isSignedIn() && (
         isAdmin() ||
         (isOwner(userId) && request.resource.data.uid == userId)

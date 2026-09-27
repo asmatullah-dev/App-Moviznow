@@ -1788,7 +1788,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
         } catch (queryErr) {
-          console.warn("Could not check duplicate email doc during login:", queryErr);
+          // Fallback to locally cached users list if Firestore query is restricted or offline
+          try {
+            const cachedUsersStr = safeStorage.getItem("cached_all_users");
+            if (cachedUsersStr) {
+              const cachedUsers = JSON.parse(cachedUsersStr);
+              if (Array.isArray(cachedUsers)) {
+                const lowerEmail = result.user.email.toLowerCase();
+                const existing = cachedUsers.find(
+                  (u: any) => u.uid !== result.user.uid && u.email?.toLowerCase() === lowerEmail
+                );
+                if (existing) {
+                  oldDocData = existing;
+                  if (oldDocData.status === "deleted") {
+                    shouldSignOutDeleted = true;
+                  }
+                }
+              }
+            }
+          } catch (e) {}
         }
       }
 

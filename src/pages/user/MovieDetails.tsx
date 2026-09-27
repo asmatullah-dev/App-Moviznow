@@ -244,6 +244,7 @@ export default function MovieDetails() {
     isCloudflare?: boolean;
     formattedTitle?: string;
   } | null>(null);
+  const [isLinkCopied, setIsLinkCopied] = useState(false);
   const [isPosterExpanded, setIsPosterExpanded] = useState(false);
   const [tmdbGalleryImages, setTmdbGalleryImages] = useState<{ posters: string[]; backdrops: string[] }>({ posters: [], backdrops: [] });
   const [loadingTmdbGallery, setLoadingTmdbGallery] = useState(false);
@@ -2259,6 +2260,7 @@ export default function MovieDetails() {
   const closeLinkPopup = () => {
     if (linkPopup) {
       setLinkPopup(null);
+      setIsLinkCopied(false);
     }
   };
 
@@ -2300,10 +2302,73 @@ export default function MovieDetails() {
     }
   };
 
+  const handleCopyDownloadLink = async () => {
+    if (!linkPopup) return;
+
+    let copyUrl = linkPopup.url;
+    const lowerUrl = copyUrl.toLowerCase();
+    if (
+      lowerUrl.includes("hubcloud") ||
+      lowerUrl.includes("hubcould") ||
+      lowerUrl.includes("hubdrive") ||
+      lowerUrl.includes("vcloud")
+    ) {
+      setAlertConfig({
+        isOpen: true,
+        title: t("Extraction Error"),
+        message: t("Error in extracting links, please try again"),
+      });
+      closeLinkPopup();
+      return;
+    }
+
+    if (!copyUrl.startsWith("http")) {
+      copyUrl = "https://" + copyUrl;
+    }
+
+    registerAppWhitelistedUrl(copyUrl);
+
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(copyUrl);
+      } else {
+        const textarea = document.createElement("textarea");
+        textarea.value = copyUrl;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        try {
+          if (textarea.parentNode) textarea.parentNode.removeChild(textarea);
+        } catch (e) {}
+      }
+      setIsLinkCopied(true);
+      setTimeout(() => setIsLinkCopied(false), 2500);
+    } catch (err) {
+      console.error("Failed to copy link:", err);
+    }
+
+    if (profile?.uid) {
+      logEvent("link_click", profile.uid, {
+        contentId: mergedContent.id,
+        contentTitle: mergedContent.title,
+        linkId: linkPopup.id,
+        linkName: linkPopup.name,
+        playerType: "copy",
+      }, true);
+    }
+  };
+
   const handlePlayExternal = (
     player: "vlc" | "mx" | "generic" | "download" | "browser",
   ) => {
     if (!linkPopup) return;
+
+    if (player === "download") {
+      handleCopyDownloadLink();
+      return;
+    }
 
     let urlToPlay = linkPopup.url;
 
@@ -2323,28 +2388,14 @@ export default function MovieDetails() {
       return;
     }
 
-    if (player === "download") {
-      let copyUrl = urlToPlay;
-      registerAppWhitelistedUrl(copyUrl);
-      navigator.clipboard
-        .writeText(copyUrl)
-        .catch((err) => {
-          console.error("Failed to copy", err);
-        });
+    // Launch player (VLC, MX Player, or Generic) on iOS, Android, or Desktop
+    playInExternalPlayer({
+      player,
+      url: urlToPlay,
+      title: linkPopup.formattedTitle || mergedContent.title,
+    });
 
-      // Open the download link directly in a new tab / browser download manager
-      openInNewTab(copyUrl);
-      closeLinkPopup();
-    } else {
-      // Launch player (VLC, MX Player, or Generic) on iOS, Android, or Desktop
-      playInExternalPlayer({
-        player,
-        url: urlToPlay,
-        title: linkPopup.formattedTitle || mergedContent.title,
-      });
-
-      closeLinkPopup();
-    }
+    closeLinkPopup();
 
     const executeAction = async () => {
       if (profile?.uid) {
@@ -4634,10 +4685,23 @@ export default function MovieDetails() {
 
                   <div className="grid grid-cols-2 gap-3">
                     <button
-                      onClick={() => handlePlayExternal("download")}
-                      className="w-full bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white font-bold py-3 px-4 text-sm rounded-xl transition-colors flex items-center justify-center gap-2"
+                      onClick={handleCopyDownloadLink}
+                      className={`w-full font-bold py-3 px-4 text-sm rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                        isLinkCopied
+                          ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/30"
+                          : "bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white"
+                      }`}
+                      title={t("Copy Link")}
                     >
-                      <Copy className="w-4 h-4" /> {t('Copy Link')}
+                      {isLinkCopied ? (
+                        <>
+                          <Check className="w-4 h-4 text-white" /> {t("Copied!")}
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-4 h-4" /> {t("Copy Link")}
+                        </>
+                      )}
                     </button>
 
                     <button
