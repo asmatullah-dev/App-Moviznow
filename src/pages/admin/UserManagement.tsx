@@ -3,13 +3,14 @@ import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment, onSnapshot } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
-import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy, Users, CheckCircle, ShieldCheck } from 'lucide-react';
+import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, ArrowLeft, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy, Users, CheckCircle, ShieldCheck, Database } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import AlertModal from '../../components/AlertModal';
 import ConfirmModal from '../../components/ConfirmModal';
 import { Button } from '../../components/Button';
+import { UserDataFieldsView } from '../../components/UserDataFieldsView';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { formatDateToMonthDDYYYY } from '../../utils/contentUtils';
 import { useAuth, standardizePhone } from '../../contexts/AuthContext';
@@ -102,6 +103,7 @@ export default function UserManagement() {
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [copiedUid, setCopiedUid] = useState(false);
   const [isEditingOverlay, setIsEditingOverlay] = useState(false);
+  const [showAllFields, setShowAllFields] = useState(false);
   const [isAnalyticsLoading, setIsAnalyticsLoading] = useState(false);
   const [scannedAnalytics, setScannedAnalytics] = useState<Record<string, { timeSpent: number, favoritesCount: number, watchLaterCount: number, lastActive: string | null, hasScanned: boolean, sessionsCount: number }>>({});
   const [userRequests, setUserRequests] = useState<any[]>([]);
@@ -911,6 +913,8 @@ export default function UserManagement() {
     if (editingId === user.uid) return;
     
     setSelectedUser(user);
+    setShowAllFields(false);
+    setIsEditingOverlay(false);
     setAssignedIds(new Set(user.assignedContent || []));
     
     const cached = safeStorage.getItem(`user_analytics_${user.uid}`);
@@ -939,6 +943,7 @@ export default function UserManagement() {
   const handleEdit = (user: UserProfile) => {
     if (user.role === 'owner' && user.uid !== profile?.uid) return; // Cannot edit owner unless it's yourself
     setSelectedUser(user);
+    setShowAllFields(false);
     setEditingId(user.uid);
     setIsEditingOverlay(true);
     setEditForm({
@@ -1164,6 +1169,38 @@ export default function UserManagement() {
       handleFirestoreError(error, OperationType.UPDATE, `users/${editingId}`);
     } finally {
       setProcessing(prev => ({ ...prev, save: false }));
+    }
+  };
+
+  const handleSaveAllUserFields = async (updatedFields: Record<string, any>, deletedKeys?: string[]) => {
+    if (!selectedUser) return;
+    setProcessing(prev => ({ ...prev, saveAllFields: true }));
+    try {
+      // 1. Buffer and persist locally via UsersContext
+      updateUserFields(selectedUser.uid, updatedFields);
+
+      // 2. Finalize changes to Firestore database
+      await finalizeUserChanges(true);
+
+      // 3. Update active selectedUser state so the details view reflects the new fields immediately
+      setSelectedUser(prev => {
+        if (!prev) return null;
+        const next = { ...prev, ...updatedFields };
+        if (deletedKeys && deletedKeys.length > 0) {
+          deletedKeys.forEach(k => delete (next as any)[k]);
+        }
+        for (const k in next) {
+          if ((next as any)[k] === '__DELETE_FIELD__') {
+            delete (next as any)[k];
+          }
+        }
+        return next as UserProfile;
+      });
+    } catch (err: any) {
+      console.error("Failed to save all user fields:", err);
+      throw err;
+    } finally {
+      setProcessing(prev => ({ ...prev, saveAllFields: false }));
     }
   };
 
@@ -2602,6 +2639,19 @@ export default function UserManagement() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          setSelectedUser(user);
+                          setShowAllFields(true);
+                          setIsEditingOverlay(false);
+                          setEditingId(null);
+                        }}
+                        className="p-1.5 text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-colors"
+                        title="View & Edit All Data Fields (Firestore /users/uid)"
+                      >
+                        <Database className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
                           handleBulkSyncContacts([user.uid]);
                         }}
                         className="p-1.5 text-indigo-500 hover:bg-indigo-500/10 rounded-lg transition-colors"
@@ -2660,18 +2710,80 @@ export default function UserManagement() {
             <motion.div
               {...modalContainerAnimation}
               style={modalGpuStyle}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-md overflow-hidden flex flex-col max-h-[90vh] relative z-10 shadow-2xl transform-gpu"
+              className={clsx(
+                "bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full overflow-hidden flex flex-col max-h-[92vh] relative z-10 shadow-2xl transform-gpu transition-all duration-300",
+                showAllFields ? "max-w-4xl" : "max-w-md"
+              )}
               onClick={(e) => e.stopPropagation()}
             >
             <div className="p-4 md:p-6 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center shrink-0">
-              <h2 className="text-xl font-bold">{isEditingOverlay ? 'Edit User' : 'User Details'}</h2>
-              <button onClick={() => { setSelectedUser(null); setIsEditingOverlay(false); setEditingId(null); }} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-xl font-bold">
+                  {showAllFields ? 'User Data Fields' : isEditingOverlay ? 'Edit User' : 'User Details'}
+                </h2>
+                {/* Tabs to toggle between User Details and All Data Fields */}
+                <div className="flex items-center gap-1 bg-zinc-200 dark:bg-zinc-800 p-1 rounded-xl text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => { setShowAllFields(false); setIsEditingOverlay(false); }}
+                    className={clsx(
+                      "px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer",
+                      !showAllFields && !isEditingOverlay
+                        ? "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-xs font-bold"
+                        : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
+                    )}
+                  >
+                    Details
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowAllFields(true); setIsEditingOverlay(false); }}
+                    className={clsx(
+                      "px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer",
+                      showAllFields
+                        ? "bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-xs font-bold"
+                        : "text-zinc-600 dark:text-zinc-400 hover:text-emerald-500"
+                    )}
+                  >
+                    <Database className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>All Fields</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-mono">
+                      {Object.keys(selectedUser).length}
+                    </span>
+                  </button>
+                  {selectedUser.role !== 'owner' && (
+                    <button
+                      type="button"
+                      onClick={() => { setShowAllFields(false); handleEdit(selectedUser); }}
+                      className={clsx(
+                        "px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer",
+                        isEditingOverlay
+                          ? "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-xs font-bold"
+                          : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
+                      )}
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+              <button onClick={() => { setSelectedUser(null); setIsEditingOverlay(false); setShowAllFields(false); setEditingId(null); }} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors cursor-pointer">
                 <X className="w-6 h-6" />
               </button>
             </div>
             
             <div className="overflow-y-auto flex-1">
-              {isEditingOverlay ? (
+              {showAllFields ? (
+                <div className="p-4 md:p-6 h-full min-h-[400px]">
+                  <UserDataFieldsView
+                    user={selectedUser}
+                    onSaveUserFields={handleSaveAllUserFields}
+                    isProcessing={processing.saveAllFields}
+                    onBack={() => setShowAllFields(false)}
+                  />
+                </div>
+              ) : isEditingOverlay ? (
                 <div className="p-4 md:p-6 space-y-4">
                   <div className="flex gap-4">
                     <div className="flex-1">
@@ -2858,6 +2970,34 @@ export default function UserManagement() {
                       </div>
                     </div>
                   </div>
+
+                  {/* Show All User Data Fields Quick Access Banner */}
+                  <button
+                    type="button"
+                    onClick={() => setShowAllFields(true)}
+                    className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 hover:from-emerald-500/20 hover:to-indigo-500/20 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold text-xs flex items-center justify-between transition-all group shadow-xs cursor-pointer text-left"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="p-2.5 rounded-xl bg-emerald-500 text-white shrink-0 group-hover:scale-105 transition-transform shadow-xs">
+                        <Database className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="font-bold text-xs text-zinc-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                          <span>Show All User Data Fields</span>
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold">
+                            Firestore /users/{selectedUser.uid}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-normal mt-0.5">
+                          View & edit all received and locally saved data fields with Firestore schemas ({Object.keys(selectedUser).length} fields)
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-xl shrink-0 group-hover:translate-x-0.5 transition-transform">
+                      <span>View & Edit</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </div>
+                  </button>
 
                   <div className="grid grid-cols-1 gap-3">
                     <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
@@ -3491,8 +3631,26 @@ export default function UserManagement() {
               )}
             </div>
 
-            <div className="p-4 md:p-6 border-t border-zinc-200 dark:border-zinc-800 flex justify-between gap-2 shrink-0">
-              {isEditingOverlay ? (
+            <div className="p-4 md:p-6 border-t border-zinc-200 dark:border-zinc-800 flex justify-between items-center gap-2 shrink-0 flex-wrap">
+              {showAllFields ? (
+                <>
+                  <Button
+                    onClick={() => setShowAllFields(false)}
+                    variant="secondary"
+                    className="px-4 py-2.5 text-sm"
+                    icon={<ArrowLeft className="w-4 h-4" />}
+                  >
+                    Back to User Details
+                  </Button>
+                  <Button
+                    onClick={() => { setSelectedUser(null); setShowAllFields(false); setIsEditingOverlay(false); setEditingId(null); }}
+                    variant="secondary"
+                    className="px-4 py-2.5 text-sm"
+                  >
+                    Close
+                  </Button>
+                </>
+              ) : isEditingOverlay ? (
                 <>
                   <Button
                     onClick={() => { setIsEditingOverlay(false); setEditingId(null); }}
@@ -3518,27 +3676,38 @@ export default function UserManagement() {
                       sendWhatsAppReminder(selectedUser);
                       setSelectedUser(null);
                       setIsEditingOverlay(false);
+                      setShowAllFields(false);
                       setEditingId(null);
                     }}
                     variant="emerald"
-                    className="px-5 py-2.5 text-sm"
+                    className="px-4 py-2.5 text-sm"
                     loading={processing[`reminder_${selectedUser.uid}`]}
                     icon={<MessageCircle className="w-4 h-4" />}
                   >
                     Send Reminder
                   </Button>
-                  {(selectedUser.role !== 'owner' || selectedUser.uid === profile?.uid) && (
+                  <div className="flex items-center gap-2">
                     <Button
-                      onClick={() => {
-                        handleEdit(selectedUser);
-                      }}
+                      onClick={() => setShowAllFields(true)}
                       variant="secondary"
-                      className="px-5 py-2.5 text-sm"
-                      icon={<Edit2 className="w-4 h-4" />}
+                      className="px-3.5 py-2.5 text-sm font-semibold"
+                      icon={<Database className="w-4 h-4 text-emerald-500" />}
                     >
-                      Edit User
+                      All Fields
                     </Button>
-                  )}
+                    {(selectedUser.role !== 'owner' || selectedUser.uid === profile?.uid) && (
+                      <Button
+                        onClick={() => {
+                          handleEdit(selectedUser);
+                        }}
+                        variant="secondary"
+                        className="px-4 py-2.5 text-sm"
+                        icon={<Edit2 className="w-4 h-4" />}
+                      >
+                        Edit User
+                      </Button>
+                    )}
+                  </div>
                 </>
               )}
             </div>

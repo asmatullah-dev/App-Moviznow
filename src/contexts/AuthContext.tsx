@@ -499,6 +499,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           : null;
 
         if (!mergedProfile && currentUser) {
+          let cachedUserTime = 0;
+          try {
+            const cachedAllStr = safeStorage.getItem("cached_all_users");
+            if (cachedAllStr) {
+              const cachedAll = JSON.parse(cachedAllStr);
+              const found = cachedAll.find((u: any) => u.uid === currentUser.uid);
+              if (found && typeof found.timeSpent === 'number') cachedUserTime = found.timeSpent;
+            }
+          } catch (e) {}
           mergedProfile = {
             uid: currentUser.uid,
             email: currentUser.email || "",
@@ -509,7 +518,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             favorites: [],
             watchLater: [],
             orders: [],
-            timeSpent: 0,
+            timeSpent: cachedUserTime,
           } as UserProfile;
         }
         if (serverProfile) {
@@ -564,10 +573,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               });
               return merged;
             })(),
-            timeSpent: Math.max(
-              serverProfile.timeSpent || 0,
-              localProfile?.timeSpent || 0,
-            ),
+            timeSpent: (() => {
+              let cachedUserTime = 0;
+              try {
+                const cachedAllStr = safeStorage.getItem("cached_all_users");
+                if (cachedAllStr) {
+                  const cachedAll = JSON.parse(cachedAllStr);
+                  const found = cachedAll.find((u: any) => u.uid === currentUser.uid);
+                  if (found && typeof found.timeSpent === 'number') {
+                    cachedUserTime = found.timeSpent;
+                  }
+                }
+              } catch (e) {}
+              const accSecs = parseInt(safeStorage.getItem(`accumulated_time_seconds_${currentUser.uid}`) || "0", 10) || 0;
+              return Math.max(
+                serverProfile.timeSpent || 0,
+                localProfile?.timeSpent || 0,
+                cachedUserTime,
+              ) + (accSecs > 0 ? accSecs : 0);
+            })(),
           };
         }
 
@@ -1562,7 +1586,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
-    // Track time spent accurately every second and save to local storage
+    // Track time spent accurately every second and update local profile & safe storage
     const timeTrackerInterval = setInterval(() => {
       if (auth.currentUser && sessionStartTimeRef.current) {
         // Skip analytics for owner account
@@ -1588,74 +1612,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             safeStorage.setItem(globalTickKey, now.toString());
 
             const cacheKey = `accumulated_time_seconds_${uid}`;
-            const lastSyncKey = `last_time_sync_${uid}`;
-
             let accSeconds = parseInt(safeStorage.getItem(cacheKey) || "0", 10);
             if (isNaN(accSeconds)) accSeconds = 0;
             accSeconds += 1;
             safeStorage.setItem(cacheKey, accSeconds.toString());
 
-            // Initialize last sync time if it doesn't exist so the 12-hour timer starts correctly
-            let lastSyncTimeStr = safeStorage.getItem(lastSyncKey);
-            if (!lastSyncTimeStr) {
-              lastSyncTimeStr = Date.now().toString();
-              safeStorage.setItem(lastSyncKey, lastSyncTimeStr);
-            }
+            // Live-update the React profile state and profile_cache every 5 seconds so timeSpent never resets or lags
+            if (accSeconds % 5 === 0) {
+              setProfile((prev) => {
+                if (!prev || prev.uid !== uid) return prev;
+                const newTime = (prev.timeSpent || 0) + 5;
+                const updated = { ...prev, timeSpent: newTime, lastActive: new Date().toISOString() };
+                persistProfileCache(updated);
+                return updated;
+              });
 
-            let lastSyncTime = parseInt(lastSyncTimeStr, 10);
-            if (isNaN(lastSyncTime)) lastSyncTime = Date.now();
-            const twelveHoursMs = 12 * 60 * 60 * 1000;
-            const forceSync = Date.now() - lastSyncTime >= twelveHoursMs;
-
-            // We no longer trigger partial time syncs. We just accumulate locally.
-            // When daily sync or logout happens, it will be flushed.
-            if (forceSync && navigator.onLine) {
-              let secondsToSync = accSeconds;
-
-              if (secondsToSync > 0) {
-                // Critical multi-tab lock: Deduct exactly what we consume immediately BEFORE the async request
-                const actualSecondsToConsume = secondsToSync;
-
-                // Prevent double-counting if multiple tabs are active (wall-clock precision lock)
-                let currentSafeSeconds = parseInt(
-                  safeStorage.getItem(cacheKey) || "0",
-                  10,
-                );
-                if (isNaN(currentSafeSeconds)) currentSafeSeconds = 0;
-
-                // If another tab already synced and emptied this, abort
-                if (currentSafeSeconds < actualSecondsToConsume) {
-                  return;
-                }
-
-                const remainingSeconds = Math.max(
-                  0,
-                  currentSafeSeconds - actualSecondsToConsume,
-                );
-                const optimisticSyncTime = Date.now().toString();
-
-                safeStorage.setItem(cacheKey, remainingSeconds.toString());
-                safeStorage.setItem(lastSyncKey, optimisticSyncTime);
-
-                // Update local cached_all_users for UI updates, but avoid triggering "pending changes"
-                const cachedUsersStr =
-                  safeStorage.getItem("cached_all_users") || "[]";
-                let cachedUsers: any[] = [];
-                try {
-                  cachedUsers = JSON.parse(cachedUsersStr);
-                } catch (e) {}
+              // Keep cached_all_users updated as well
+              const cachedUsersStr = safeStorage.getItem("cached_all_users") || "[]";
+              try {
+                let cachedUsers: any[] = JSON.parse(cachedUsersStr);
                 const userIndex = cachedUsers.findIndex((u) => u.uid === uid);
-
                 if (userIndex !== -1) {
-                  cachedUsers[userIndex].timeSpent =
-                    (cachedUsers[userIndex].timeSpent || 0) + secondsToSync;
+                  cachedUsers[userIndex].timeSpent = (cachedUsers[userIndex].timeSpent || 0) + 5;
                   cachedUsers[userIndex].lastActive = new Date().toISOString();
-                  safeStorage.setItem(
-                    "cached_all_users",
-                    JSON.stringify(cachedUsers),
-                  );
-
-                  // Only dispatch custom event if user is currently loaded
+                  safeStorage.setItem("cached_all_users", JSON.stringify(cachedUsers));
                   window.dispatchEvent(
                     new CustomEvent("user_local_update", {
                       detail: {
@@ -1668,16 +1648,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     }),
                   );
                 }
+              } catch (e) {}
+            }
 
-                // Removed writing to pending_user_updates here as per user request to avoid auto updating pending state.
-                // Time spent will be synced when another event triggers profile update.
+            // Sync to analytics in chunks
+            const lastSyncKey = `last_time_sync_${uid}`;
+            let lastSyncTimeStr = safeStorage.getItem(lastSyncKey);
+            if (!lastSyncTimeStr) {
+              lastSyncTimeStr = Date.now().toString();
+              safeStorage.setItem(lastSyncKey, lastSyncTimeStr);
+            }
 
+            let lastSyncTime = parseInt(lastSyncTimeStr, 10);
+            if (isNaN(lastSyncTime)) lastSyncTime = Date.now();
+            const fiveMinutesMs = 5 * 60 * 1000;
+            const forceSync = Date.now() - lastSyncTime >= fiveMinutesMs;
+
+            if (forceSync && navigator.onLine) {
+              const secondsToSync = accSeconds;
+              if (secondsToSync > 0) {
+                safeStorage.setItem(lastSyncKey, Date.now().toString());
                 logEvent("time_spent", uid, { duration: secondsToSync }).catch(
                   (err) => {
-                    console.error(
-                      "Failed to sync time spent to analytics:",
-                      err,
-                    );
+                    console.error("Failed to sync time spent to analytics:", err);
                   },
                 );
               }
@@ -1687,65 +1680,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }, 1000);
 
-    // Sync any remaining full minutes on visibility change
+    // Sync accumulated time on visibility change & beforeunload
     const handleVisibilityChange = () => {
       if (
         document.visibilityState === "hidden" &&
-        auth.currentUser &&
-        navigator.onLine
+        auth.currentUser
       ) {
-        // Skip analytics for owner account
-        try {
-          const cachedProfileStr = safeStorage.getItem("profile_cache");
-          if (cachedProfileStr) {
-            const p = JSON.parse(cachedProfileStr);
-            if (p.role === "owner") return;
-          }
-        } catch (e) {}
-
         const uid = auth.currentUser.uid;
         const cacheKey = `accumulated_time_seconds_${uid}`;
-        const lastSyncKey = `last_time_sync_${uid}`;
-
         let accSeconds = parseInt(safeStorage.getItem(cacheKey) || "0", 10);
-        if (isNaN(accSeconds)) accSeconds = 0;
-
-        const secondsToSync = accSeconds;
-
-        // Only execute a Firestore update on hide if there are actually seconds to sync
-        if (secondsToSync > 0) {
-          const actualSecondsToConsume = secondsToSync;
-
-          // Read latest cache to prevent cross-tab overlap deduction
-          let currentSafeSeconds = parseInt(
-            safeStorage.getItem(cacheKey) || "0",
-            10,
-          );
-          if (isNaN(currentSafeSeconds)) currentSafeSeconds = 0;
-
-          if (currentSafeSeconds < actualSecondsToConsume) {
-            return; // Another tab synced it
-          }
-
-          const optimisticSyncTime = Date.now().toString();
-
-          // We zero out the cache since we consumed it, BUT wait!
-          // Since we are NOT syncing to pending_updates or Firestore here,
-          // we actually just want to keep it in `accumulated_time_seconds` until refreshProfile or another action flush it.
-          // Therefore, doing anything in handleVisibilityChange for time tracking is unnecessary.
-          // I will just leave this empty for `timeSpent`, the cacheKey remains accumulated.
-          return;
+        if (accSeconds > 0) {
+          const pendingStr = safeStorage.getItem("pending_user_updates") || "{}";
+          try {
+            let pendingAll = JSON.parse(pendingStr);
+            pendingAll[uid] = pendingAll[uid] || {};
+            let cachedP: any = null;
+            try {
+              const cachedStr = safeStorage.getItem("profile_cache");
+              if (cachedStr) cachedP = JSON.parse(cachedStr);
+            } catch (e) {}
+            const currentBase = typeof pendingAll[uid].timeSpent === "number"
+              ? pendingAll[uid].timeSpent
+              : (cachedP?.timeSpent || 0);
+            pendingAll[uid].timeSpent = Math.max(currentBase, (cachedP?.timeSpent || 0));
+            safeStorage.setItem("pending_user_updates", JSON.stringify(pendingAll));
+          } catch (e) {}
         }
       }
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("beforeunload", handleVisibilityChange);
 
     return () => {
       clearTimeout(safetyTimer);
       unsubscribe();
       clearInterval(timeTrackerInterval);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("beforeunload", handleVisibilityChange);
     };
   }, []);
 
@@ -1868,11 +1840,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           updates.photoURL = result.user.photoURL;
         }
       } else if (oldDocData) {
-        // Safely merge existing email data into new uid (except timeSpent and uid)
+        // Safely merge existing email data into new uid (preserve timeSpent and user stats)
         for (const key of Object.keys(oldDocData)) {
-          if (key !== "timeSpent" && key !== "uid" && key !== "sessionId" && key !== "createdAt" && key !== "updatedAt") {
+          if (key !== "uid" && key !== "sessionId" && key !== "createdAt" && key !== "updatedAt") {
             updates[key] = oldDocData[key];
           }
+        }
+        if (oldDocData.timeSpent !== undefined) {
+          updates.timeSpent = Math.max(updates.timeSpent || 0, oldDocData.timeSpent || 0);
         }
         updates.email = result.user.email;
         if (result.user.displayName) updates.displayName = result.user.displayName;

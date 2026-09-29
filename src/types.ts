@@ -32,15 +32,15 @@ export interface UserNotificationPreferences {
 }
 
 export interface UpcomingSubscription {
-  id: string;
+  id?: string;
   contentId: string;
-  contentTitle: string;
+  contentTitle?: string;
   posterUrl?: string;
   seasonNumber?: number;
   episodeNumber?: number;
   episodeTitle?: string;
   airDate?: string;
-  createdAt: string;
+  createdAt?: string;
   notified?: boolean;
   notifiedAt?: string;
 }
@@ -80,7 +80,7 @@ export interface UserProfile {
   requirePasswordReset?: boolean;
   hasPassword?: boolean;
   sessionId?: string;
-  orders?: Order[];
+  orders?: (Order | any)[];
   referralCode?: string;
   referredBy?: string;
   signupRewardClaimed?: boolean;
@@ -91,7 +91,7 @@ export interface UserProfile {
   reviewRewardClaimed?: boolean;
   claimedReferralSignups?: string[];
   claimedReferralActivations?: string[];
-  upcomingSubscriptions?: UpcomingSubscription[];
+  upcomingSubscriptions?: (string | UpcomingSubscription)[];
   referralStats?: {
     total_clicks: number;
     lastUpdated: string;

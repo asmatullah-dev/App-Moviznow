@@ -1,13 +1,112 @@
-import { UpcomingSubscription, Content, Season, Episode, UserProfile } from '../types';
+import { UpcomingSubscription, Content, Season, UserProfile } from '../types';
 import { safeStorage } from './safeStorage';
 
 const LOCAL_STORAGE_KEY = 'moviznow_upcoming_subscriptions';
 
+export interface ParsedUpcomingSubscription {
+  id: string;
+  contentId: string;
+  seasonNumber?: number;
+  episodeNumber?: number;
+  notified: boolean;
+  rawString: string;
+}
+
 /**
- * Get all upcoming notifications registered locally or in user profile
+ * Format subscription parameters into an ultra-minimal compact string
+ * Format: contentId[:s<seasonNumber>][:e<episodeNumber>][:<1|0>]
+ * Examples:
+ *   - "ghxc79aye:s2:e2:1" (Episode subscription, notified)
+ *   - "ghxc79aye:s2:e2:0" (Episode subscription, pending)
+ *   - "ghxc79aye:s2:0"    (Season subscription, pending)
+ *   - "ghxc79aye:0"       (Movie/content subscription, pending)
  */
-export function getUpcomingSubscriptions(userProfile?: UserProfile | null): UpcomingSubscription[] {
-  let localSubs: UpcomingSubscription[] = [];
+export function formatSubscriptionString(
+  contentId: string,
+  seasonNumber?: number,
+  episodeNumber?: number,
+  notified: boolean = false
+): string {
+  const parts: string[] = [contentId.trim()];
+  if (seasonNumber !== undefined && seasonNumber !== null) {
+    parts.push(`s${seasonNumber}`);
+  }
+  if (episodeNumber !== undefined && episodeNumber !== null) {
+    parts.push(`e${episodeNumber}`);
+  }
+  parts.push(notified ? '1' : '0');
+  return parts.join(':');
+}
+
+/**
+ * Parse a subscription entry (supports both ultra-minimal string format and legacy JSON objects)
+ */
+export function parseSubscription(raw: string | UpcomingSubscription | any): ParsedUpcomingSubscription {
+  if (!raw) {
+    return {
+      id: '',
+      contentId: '',
+      notified: false,
+      rawString: '',
+    };
+  }
+
+  // Handle legacy object format
+  if (typeof raw === 'object' && raw !== null) {
+    const cId = String(raw.contentId || '').trim();
+    const sNum = raw.seasonNumber !== undefined && raw.seasonNumber !== null ? Number(raw.seasonNumber) : undefined;
+    const eNum = raw.episodeNumber !== undefined && raw.episodeNumber !== null ? Number(raw.episodeNumber) : undefined;
+    const isNotified = Boolean(raw.notified);
+    const compactStr = formatSubscriptionString(cId, sNum, eNum, isNotified);
+    const derivedId = raw.id || `sub_${cId}${sNum !== undefined ? `_S${sNum}` : ''}${eNum !== undefined ? `_E${eNum}` : ''}`;
+    return {
+      id: derivedId,
+      contentId: cId,
+      seasonNumber: sNum,
+      episodeNumber: eNum,
+      notified: isNotified,
+      rawString: compactStr,
+    };
+  }
+
+  // Handle ultra-minimal string format
+  const str = String(raw).trim();
+  const parts = str.split(':');
+  const contentId = parts[0] || '';
+
+  let seasonNumber: number | undefined = undefined;
+  let episodeNumber: number | undefined = undefined;
+  let notified = false;
+
+  for (let i = 1; i < parts.length; i++) {
+    const part = parts[i].trim();
+    if (part.startsWith('s') && !isNaN(parseInt(part.slice(1), 10))) {
+      seasonNumber = parseInt(part.slice(1), 10);
+    } else if (part.startsWith('e') && !isNaN(parseInt(part.slice(1), 10))) {
+      episodeNumber = parseInt(part.slice(1), 10);
+    } else if (part === '1' || part.toLowerCase() === 'true') {
+      notified = true;
+    } else if (part === '0' || part.toLowerCase() === 'false') {
+      notified = false;
+    }
+  }
+
+  const derivedId = `sub_${contentId}${seasonNumber !== undefined ? `_S${seasonNumber}` : ''}${episodeNumber !== undefined ? `_E${episodeNumber}` : ''}`;
+  return {
+    id: derivedId,
+    contentId,
+    seasonNumber,
+    episodeNumber,
+    notified,
+    rawString: formatSubscriptionString(contentId, seasonNumber, episodeNumber, notified),
+  };
+}
+
+/**
+ * Get all upcoming subscription strings registered locally or in user profile
+ */
+export function getUpcomingSubscriptionStrings(userProfile?: UserProfile | null): string[] {
+  let localSubs: (string | UpcomingSubscription)[] = [];
   try {
     const raw = safeStorage.getItem(LOCAL_STORAGE_KEY);
     if (raw) {
@@ -17,23 +116,49 @@ export function getUpcomingSubscriptions(userProfile?: UserProfile | null): Upco
     console.warn('Failed to parse upcoming subscriptions from local storage:', e);
   }
 
-  // Merge with profile subscriptions if user is logged in
-  if (userProfile && Array.isArray(userProfile.upcomingSubscriptions)) {
-    const map = new Map<string, UpcomingSubscription>();
-    localSubs.forEach(s => map.set(s.id, s));
-    userProfile.upcomingSubscriptions.forEach(s => map.set(s.id, s));
-    return Array.from(map.values());
+  const map = new Map<string, string>();
+
+  // Process local items
+  if (Array.isArray(localSubs)) {
+    localSubs.forEach(item => {
+      const parsed = parseSubscription(item);
+      if (parsed.contentId) {
+        map.set(parsed.id, parsed.rawString);
+      }
+    });
   }
 
-  return localSubs;
+  // Merge with profile subscriptions if user is logged in
+  if (userProfile && Array.isArray(userProfile.upcomingSubscriptions)) {
+    userProfile.upcomingSubscriptions.forEach(item => {
+      const parsed = parseSubscription(item);
+      if (parsed.contentId) {
+        map.set(parsed.id, parsed.rawString);
+      }
+    });
+  }
+
+  return Array.from(map.values());
 }
 
 /**
- * Save upcoming subscriptions to local storage
+ * Backward-compatible helper to get parsed upcoming subscriptions
  */
-export function saveUpcomingSubscriptions(subs: UpcomingSubscription[]): void {
+export function getUpcomingSubscriptions(userProfile?: UserProfile | null): ParsedUpcomingSubscription[] {
+  const strings = getUpcomingSubscriptionStrings(userProfile);
+  return strings.map(s => parseSubscription(s));
+}
+
+/**
+ * Save upcoming subscriptions to local storage in ultra-minimal string array format
+ */
+export function saveUpcomingSubscriptions(subs: (string | UpcomingSubscription)[]): void {
   try {
-    safeStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(subs));
+    const minimalStrings = subs.map(s => {
+      const parsed = parseSubscription(s);
+      return parsed.rawString;
+    });
+    safeStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(minimalStrings));
   } catch (e) {
     console.warn('Failed to save upcoming subscriptions to local storage:', e);
   }
@@ -48,6 +173,7 @@ export function isSubscribedToUpcoming(
   episodeNumber?: number,
   userProfile?: UserProfile | null
 ): boolean {
+  if (!contentId) return false;
   const subs = getUpcomingSubscriptions(userProfile);
   return subs.some(s => {
     if (s.contentId !== contentId) return false;
@@ -58,12 +184,12 @@ export function isSubscribedToUpcoming(
 }
 
 /**
- * Toggle upcoming subscription (register or remove)
+ * Toggle upcoming subscription (register or remove) in ultra-minimal string format
  */
 export function toggleUpcomingSubscription(
   item: {
     contentId: string;
-    contentTitle: string;
+    contentTitle?: string;
     posterUrl?: string;
     seasonNumber?: number;
     episodeNumber?: number;
@@ -72,32 +198,34 @@ export function toggleUpcomingSubscription(
   },
   userProfile?: UserProfile | null,
   updateUserProfile?: (updates: Partial<UserProfile>) => Promise<void> | void
-): { isSubscribed: boolean; subscriptions: UpcomingSubscription[] } {
-  const id = `sub_${item.contentId}${item.seasonNumber !== undefined ? `_S${item.seasonNumber}` : ''}${item.episodeNumber !== undefined ? `_E${item.episodeNumber}` : ''}`;
-  let currentSubs = getUpcomingSubscriptions(userProfile);
-  const exists = currentSubs.some(s => s.id === id);
+): { isSubscribed: boolean; subscriptions: string[] } {
+  const currentSubs = getUpcomingSubscriptions(userProfile);
+  
+  const existingIdx = currentSubs.findIndex(s => {
+    if (s.contentId !== item.contentId) return false;
+    if (item.seasonNumber !== undefined && s.seasonNumber !== item.seasonNumber) return false;
+    if (item.episodeNumber !== undefined && s.episodeNumber !== item.episodeNumber) return false;
+    return true;
+  });
 
-  let updatedSubs: UpcomingSubscription[];
+  let updatedStringList: string[];
   let isSubscribedNow = false;
 
-  if (exists) {
-    // Unsubscribe
-    updatedSubs = currentSubs.filter(s => s.id !== id);
+  if (existingIdx !== -1) {
+    // Unsubscribe: remove item
+    updatedStringList = currentSubs
+      .filter((_, idx) => idx !== existingIdx)
+      .map(s => s.rawString);
   } else {
-    // Subscribe
-    const newSub: UpcomingSubscription = {
-      id,
-      contentId: item.contentId,
-      contentTitle: item.contentTitle,
-      posterUrl: item.posterUrl,
-      seasonNumber: item.seasonNumber,
-      episodeNumber: item.episodeNumber,
-      episodeTitle: item.episodeTitle,
-      airDate: item.airDate,
-      createdAt: new Date().toISOString(),
-      notified: false,
-    };
-    updatedSubs = [newSub, ...currentSubs];
+    // Subscribe: create new minimal entry
+    const newEntry = formatSubscriptionString(
+      item.contentId,
+      item.seasonNumber,
+      item.episodeNumber,
+      false
+    );
+    const existingStrings = currentSubs.map(s => s.rawString);
+    updatedStringList = [newEntry, ...existingStrings];
     isSubscribedNow = true;
 
     // Request System Notification permission if available
@@ -108,17 +236,17 @@ export function toggleUpcomingSubscription(
     }
   }
 
-  saveUpcomingSubscriptions(updatedSubs);
+  saveUpcomingSubscriptions(updatedStringList);
 
   if (userProfile && updateUserProfile) {
     try {
-      updateUserProfile({ upcomingSubscriptions: updatedSubs });
+      updateUserProfile({ upcomingSubscriptions: updatedStringList });
     } catch (e) {
       console.warn('Failed to sync upcoming subscriptions to user profile:', e);
     }
   }
 
-  return { isSubscribed: isSubscribedNow, subscriptions: updatedSubs };
+  return { isSubscribed: isSubscribedNow, subscriptions: updatedStringList };
 }
 
 /**
@@ -137,14 +265,13 @@ export function checkUpcomingSubscriptionsAndNotify(
   if (subs.length === 0) return 0;
 
   let triggeredCount = 0;
-  let updatedSubs = [...subs];
   let hasChanges = false;
 
-  updatedSubs = updatedSubs.map(sub => {
-    if (sub.notified) return sub;
+  const updatedStrings: string[] = subs.map(sub => {
+    if (sub.notified) return sub.rawString;
 
     const content = contentList.find(c => c.id === sub.contentId);
-    if (!content) return sub;
+    if (!content) return sub.rawString;
 
     let isAvailableNow = false;
 
@@ -187,12 +314,12 @@ export function checkUpcomingSubscriptionsAndNotify(
       hasChanges = true;
       triggeredCount++;
 
-      const notifTitle = `🎬 New Release: ${sub.contentTitle}`;
-      let notifBody = `${sub.contentTitle} is now available to stream!`;
+      const notifTitle = `🎬 New Release: ${content.title}`;
+      let notifBody = `${content.title} is now available to stream!`;
       if (sub.seasonNumber !== undefined) {
         notifBody = sub.episodeNumber !== undefined
-          ? `S${String(sub.seasonNumber).padStart(2, '0')} E${String(sub.episodeNumber).padStart(2, '0')} of ${sub.contentTitle} is now available!`
-          : `Season ${sub.seasonNumber} of ${sub.contentTitle} is now available!`;
+          ? `S${String(sub.seasonNumber).padStart(2, '0')} E${String(sub.episodeNumber).padStart(2, '0')} of ${content.title} is now available!`
+          : `Season ${sub.seasonNumber} of ${content.title} is now available!`;
       }
 
       // Trigger System Web Notification if permitted
@@ -200,7 +327,7 @@ export function checkUpcomingSubscriptionsAndNotify(
         try {
           new Notification(notifTitle, {
             body: notifBody,
-            icon: sub.posterUrl || '/pwa-192x192.png',
+            icon: content.posterUrl || '/pwa-192x192.png',
             tag: sub.id,
           });
         } catch (e) {}
@@ -212,25 +339,21 @@ export function checkUpcomingSubscriptionsAndNotify(
           title: notifTitle,
           body: notifBody,
           contentId: sub.contentId,
-          posterUrl: sub.posterUrl,
+          posterUrl: content.posterUrl,
         });
       }
 
-      return {
-        ...sub,
-        notified: true,
-        notifiedAt: new Date().toISOString(),
-      };
+      return formatSubscriptionString(sub.contentId, sub.seasonNumber, sub.episodeNumber, true);
     }
 
-    return sub;
+    return sub.rawString;
   });
 
   if (hasChanges) {
-    saveUpcomingSubscriptions(updatedSubs);
+    saveUpcomingSubscriptions(updatedStrings);
     if (userProfile && updateUserProfile) {
       try {
-        updateUserProfile({ upcomingSubscriptions: updatedSubs });
+        updateUserProfile({ upcomingSubscriptions: updatedStrings });
       } catch (e) {}
     }
   }

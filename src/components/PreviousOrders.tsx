@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, Package, Clock, CheckCircle, XCircle, Send, X }
 import { motion, AnimatePresence } from 'framer-motion';
 import ConfirmModal from './ConfirmModal';
 import AlertModal from './AlertModal';
+import { normalizeOrder, toMinimalOrder } from '../utils/orderUtils';
 
 export default function PreviousOrders() {
   const { profile, updateUserProfileData, refreshProfile } = useAuth();
@@ -34,17 +35,22 @@ export default function PreviousOrders() {
   const [alertConfig, setAlertConfig] = useState<{isOpen: boolean; title: string; message: string;}>({ isOpen: false, title: '', message: '' });
 
   const orders = React.useMemo(() => {
-    if (!profile?.orders) return [];
-    return [...profile.orders].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [profile?.orders]);
+    if (!profile?.orders || !Array.isArray(profile.orders)) return [];
+    const normalized = profile.orders.map(o => normalizeOrder(o, profile || undefined));
+    return normalized.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [profile?.orders, profile]);
 
   const handleCancelOrder = async (orderId: string) => {
     try {
-      const updatedOrders = orders.map(o => o.id === orderId ? { ...o, status: 'cancelled' as const } : o);
+      const rawOrders = profile?.orders || [];
+      const updatedOrders = rawOrders.map((o: any) => {
+        if (o.id === orderId) {
+          const norm = normalizeOrder(o);
+          return toMinimalOrder({ ...norm, status: 'cancelled' });
+        }
+        return toMinimalOrder(o);
+      });
       
-      // A user cancelling an order shouldn't force an immediate Firestore write unless they really need it
-      // Let's pass true because order status change might be expected instantly (or false based on prompt)
-      // The prompt specifically says "order changes ... will sync to Firestore"
       await updateUserProfileData({
         orders: updatedOrders
       }, undefined, true);

@@ -286,7 +286,16 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     setUsers(prev => {
       const next = prev.map(u => {
         if (updates[u.uid]) {
-          return normalizeUserStatusAndExpiry({ ...u, ...updates[u.uid] });
+          const userUpdates = { ...updates[u.uid] };
+          const userObj = { ...u };
+          for (const k in userUpdates) {
+            if ((userUpdates as any)[k] === '__DELETE_FIELD__') {
+              delete (userObj as any)[k];
+            } else {
+              (userObj as any)[k] = (userUpdates as any)[k];
+            }
+          }
+          return normalizeUserStatusAndExpiry(userObj);
         }
         return u;
       });
@@ -312,7 +321,16 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       if (cachedProfileStr) {
         const currentProfile = JSON.parse(cachedProfileStr);
         if (currentProfile?.uid && updates[currentProfile.uid]) {
-          const updatedActiveProfile = normalizeUserStatusAndExpiry({ ...currentProfile, ...updates[currentProfile.uid] });
+          const activeUpdates = { ...updates[currentProfile.uid] };
+          const updatedActive = { ...currentProfile };
+          for (const k in activeUpdates) {
+            if ((activeUpdates as any)[k] === '__DELETE_FIELD__') {
+              delete (updatedActive as any)[k];
+            } else {
+              (updatedActive as any)[k] = (activeUpdates as any)[k];
+            }
+          }
+          const updatedActiveProfile = normalizeUserStatusAndExpiry(updatedActive);
           safeStorage.setItem('profile_cache', JSON.stringify(updatedActiveProfile));
           safeStorage.setItemAsync('profile_cache', JSON.stringify(updatedActiveProfile)).catch(() => {});
           try { window.localStorage.setItem('profile_cache', JSON.stringify(updatedActiveProfile)); } catch (e) {}

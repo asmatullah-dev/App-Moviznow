@@ -18,6 +18,7 @@ import {
   fullScreenModalAnimation,
   modalGpuStyle,
 } from '../../utils/modalAnimations';
+import { normalizeOrder, toMinimalOrder } from '../../utils/orderUtils';
 
 const CACHE_KEY = 'admin_orders_cache';
 const PHONES_CACHE_KEY = 'admin_user_phones_cache';
@@ -28,7 +29,7 @@ export default function OrdersManagement() {
   const { settings } = useSettings();
   const [orders, setOrders] = useState<Order[]>(() => {
     const cached = safeStorage.getItem(CACHE_KEY);
-    return cached ? JSON.parse(cached) : [];
+    return cached ? JSON.parse(cached).map((o: any) => normalizeOrder(o)) : [];
   });
   const [loading, setLoading] = useState(orders.length === 0);
   const [filter, setFilter] = useState<string>(() => sessionStorage.getItem('orders_mgmt_filter') || 'all');
@@ -156,7 +157,7 @@ export default function OrdersManagement() {
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    const allOrders = allUsers.flatMap(u => (u.orders || []).filter(order => {
+    const allOrders = allUsers.flatMap(u => (u.orders || []).map(order => normalizeOrder(order, u)).filter(order => {
       const createdAt = (order.createdAt as any)?.seconds 
         ? new Date((order.createdAt as any).seconds * 1000) 
         : new Date(order.createdAt);
@@ -216,7 +217,7 @@ export default function OrdersManagement() {
         }
       }
 
-      const updatedOrders = userData.orders?.map(o => o.id === order.id ? { ...o, status: 'approved' } : o) || [];
+      const updatedOrders = userData.orders?.map(o => o.id === order.id ? toMinimalOrder({ ...normalizeOrder(o), status: 'approved' }) : toMinimalOrder(o)) || [];
       updates.orders = updatedOrders;
 
       updateUserFields(order.userId, updates);
@@ -270,7 +271,7 @@ export default function OrdersManagement() {
       const orderUser = allUsers.find(u => u.orders?.some(o => o.id === orderId));
       if (!orderUser) throw new Error("User not found");
 
-      const updatedOrders = orderUser.orders!.map(o => o.id === orderId ? { ...o, status: 'declined' as const } : o);
+      const updatedOrders = orderUser.orders!.map(o => o.id === orderId ? toMinimalOrder({ ...normalizeOrder(o), status: 'declined' }) : toMinimalOrder(o));
       updateUserFields(orderUser.uid, { orders: updatedOrders });
       await finalizeUserChanges(true);
       if (selectedOrder?.id === orderId) {
@@ -289,7 +290,7 @@ export default function OrdersManagement() {
       const orderUser = allUsers.find(u => u.orders?.some(o => o.id === orderId));
       if (!orderUser) throw new Error("User not found");
 
-      const updatedOrders = orderUser.orders!.filter(o => o.id !== orderId);
+      const updatedOrders = orderUser.orders!.filter(o => o.id !== orderId).map(o => toMinimalOrder(o));
       updateUserFields(orderUser.uid, { orders: updatedOrders });
       await finalizeUserChanges(true);
       if (selectedOrder?.id === orderId) {

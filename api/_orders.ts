@@ -29,6 +29,62 @@ function generate9DigitOrderId(): string {
   return Math.floor(100000000 + Math.random() * 900000000).toString();
 }
 
+function toMinimalOrder(o: any) {
+  if (!o) return o;
+  const min: Record<string, any> = {
+    id: String(o.id || ''),
+    amt: Number(o.amt !== undefined ? o.amt : (o.amount || 0)),
+    type: o.type === 'content' ? 'content' : 'membership',
+    status: o.status || o.st || 'pending',
+    cat: o.cat || o.createdAt || new Date().toISOString(),
+  };
+
+  const mVal = o.m !== undefined ? o.m : o.months;
+  if (mVal !== undefined && mVal !== null) min.m = Number(mVal);
+
+  const trxVal = o.trx || o.trxId;
+  if (trxVal && String(trxVal).trim()) min.trx = String(trxVal).trim();
+
+  const dtVal = o.dt || o.pdt || o.paymentDateTime;
+  if (dtVal && String(dtVal).trim()) min.dt = String(dtVal).trim();
+
+  const planVal = o.plan || o.planName;
+  if (planVal) min.plan = planVal;
+
+  const roleVal = o.role || o.planRole;
+  if (roleVal) min.role = roleVal;
+
+  if (Array.isArray(o.items) && o.items.length > 0) {
+    min.items = o.items.map((it: any) => ({
+      id: it.id,
+      title: it.title,
+      type: it.type,
+      price: Number(it.price) || 0,
+      seasonNumber: it.seasonNumber,
+    }));
+  }
+
+  const accVal = o.acc || o.accountTitle;
+  if (accVal && String(accVal).trim()) min.acc = String(accVal).trim();
+
+  const acc4Val = o.acc4 || o.accountNumberLast4;
+  if (acc4Val && String(acc4Val).trim()) min.acc4 = String(acc4Val).trim().slice(-4);
+
+  const bankVal = o.bank || o.senderBank;
+  if (bankVal && String(bankVal).trim()) min.bank = String(bankVal).trim();
+
+  const vbVal = o.vb || o.verifiedBy;
+  if (vbVal) {
+    min.vb = (vbVal === 'AI Auto-Approval' || vbVal === 'AI Gemini Auto-Approval' || vbVal === 'ai') ? 'ai' : String(vbVal);
+  }
+
+  const aicVal = o.aic || o.aiConfidence;
+  if (aicVal) min.aic = aicVal;
+
+  // Never keep heavy base64 screenshots or verbose debug strings
+  return min;
+}
+
 // Retrieve stored Gmail Token from Firestore or memory with Auto-Refresh capability
 async function getActiveGmailToken(providedToken?: string): Promise<string | null> {
   if (providedToken && providedToken.trim()) {
@@ -951,9 +1007,10 @@ ordersRouter.post("/verify-and-confirm", async (req, res) => {
       newOrder.matchedEmailDate = aiVerdict.matchedEmailDate || "";
     }
 
-    // Prepare Firestore batch / write
+    // Prepare Firestore batch / write with minimal short-key format (no base64 images or verbose text)
+    const minimalNewOrder = toMinimalOrder(newOrder);
     const existingOrders = Array.isArray(existingUserData.orders) ? existingUserData.orders : [];
-    const updatedOrders = [newOrder, ...existingOrders.filter((o: any) => o.id !== orderId)];
+    const updatedOrders = [minimalNewOrder, ...existingOrders.filter((o: any) => o.id !== orderId).map((o: any) => toMinimalOrder(o))];
 
     const userUpdates: any = {
       orders: updatedOrders,
@@ -1182,7 +1239,7 @@ ordersRouter.post("/admin-verify-order", async (req, res) => {
         aiConfidence: aiVerdict.confidence,
       };
 
-      const newOrdersList = orders.map((o) => (o.id === orderId ? updatedOrder : o));
+      const newOrdersList = orders.map((o) => (o.id === orderId ? toMinimalOrder(updatedOrder) : toMinimalOrder(o)));
       const userUpdates: any = {
         orders: newOrdersList,
         lastActive: nowIso,
