@@ -1,6 +1,6 @@
 import { safeStorage } from './safeStorage';
 
-export const HUBCLOUD_DOMAIN = 'https://hubcloud.cx';
+export const HUBCLOUD_DOMAIN = 'https://hubcloud.ist';
 export const HUBDRIVE_DOMAIN = 'https://hubdrive.space';
 
 export function getHubcloudDomain(): string {
@@ -11,7 +11,7 @@ export function getHubcloudDomain(): string {
       domain = 'https://' + domain;
     }
     const clean = domain.replace(/\/+$/, '');
-    if (clean.includes('hubcloud.one') || clean.includes('hubcloud.foo') || clean.includes('hubcould')) {
+    if (clean.includes('hubcloud.one') || clean.includes('hubcloud.foo') || clean.includes('hubcould') || clean.includes('hubcloud.cx')) {
       safeStorage.setItem('custom_hubcloud_domain', HUBCLOUD_DOMAIN);
       return HUBCLOUD_DOMAIN;
     }

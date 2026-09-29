@@ -2016,8 +2016,8 @@ export default function MovieDetails() {
     try {
       const u = new URL(targetUrl);
       const host = u.hostname.toLowerCase();
-      if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud')) {
-        u.hostname = 'hubcloud.cx';
+      if (host.includes('hubcould') || host.includes('hubcloud')) {
+        u.hostname = 'hubcloud.ist';
         targetUrl = u.toString();
       } else if (host.includes('hubdrive')) {
         u.hostname = 'hubdrive.space';
@@ -2118,21 +2118,37 @@ export default function MovieDetails() {
 
         if (shouldExtract) {
           let attempts = 0;
-          const maxAttempts = 3;
+          const maxAttempts = 2;
           let successExtraction = false;
 
           while (attempts < maxAttempts && !successExtraction) {
             attempts++;
             try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 15000);
               const res = await fetch("/api/hubcloud/direct-link", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ url: targetUrl, isVcloud, forceExtract: isVcloudName }),
+                body: JSON.stringify({ url: targetUrl, isVcloud, forceExtract: isVcloudName, force: attempts > 1 }),
+                signal: controller.signal,
               });
+              clearTimeout(timeoutId);
               if (res.ok) {
                 const data = await res.json();
-                if (data.url && data.url !== targetUrl && !isHubcloudRawLink(data.url)) {
-                  finalUrl = data.url;
+                let candidateDirectUrl = data.url;
+
+                // If data.url is still raw or intermediate, check data.candidates for direct links
+                if ((!candidateDirectUrl || candidateDirectUrl === targetUrl || isHubcloudRawLink(candidateDirectUrl)) && Array.isArray(data.candidates) && data.candidates.length > 0) {
+                  const directCand = data.candidates.find((c: any) =>
+                    c.href && !isHubcloudRawLink(c.href) && !c.href.toLowerCase().includes("hubcloud") && !c.href.toLowerCase().includes("vcloud")
+                  );
+                  if (directCand?.href) {
+                    candidateDirectUrl = directCand.href;
+                  }
+                }
+
+                if (candidateDirectUrl && candidateDirectUrl !== targetUrl && !isHubcloudRawLink(candidateDirectUrl)) {
+                  finalUrl = candidateDirectUrl;
                   finalTinyUrl = undefined;
                   finalCandidates = Array.isArray(data.candidates)
                     ? data.candidates.filter((c: any) => {
@@ -2675,8 +2691,8 @@ export default function MovieDetails() {
             try {
               const u = new URL(link.url);
               const host = u.hostname.toLowerCase();
-              if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud')) {
-                u.hostname = 'hubcloud.cx';
+              if (host.includes('hubcould') || host.includes('hubcloud')) {
+                u.hostname = 'hubcloud.ist';
                 return u.toString();
               } else if (host.includes('hubdrive')) {
                 u.hostname = 'hubdrive.space';
@@ -2803,8 +2819,8 @@ export default function MovieDetails() {
                           try {
                             const u = new URL(link.url);
                             const host = u.hostname.toLowerCase();
-                            if (host.includes('hubcould') || host.includes('hubcloud') || host.includes('vcloud')) {
-                              u.hostname = 'hubcloud.cx';
+                            if (host.includes('hubcould') || host.includes('hubcloud')) {
+                              u.hostname = 'hubcloud.ist';
                               return u.toString();
                             } else if (host.includes('hubdrive')) {
                               u.hostname = 'hubdrive.space';

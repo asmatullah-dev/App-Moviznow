@@ -64,9 +64,9 @@ export function normalizeUrl(input: string) {
     const url = new URL(trimmed);
     const host = url.hostname.toLowerCase().replace(/^www\./, "");
 
-    // Route old or legacy hubcloud domains (hubcloud.one, hubcloud.foo, hubcould) to new active domain hubcloud.cx
-    if (host.includes("hubcloud.one") || host.includes("hubcloud.foo") || host.includes("hubcould") || host === "hubcloud.club" || host === "hubcloud.lol") {
-      url.hostname = "hubcloud.cx";
+    // Route old or legacy hubcloud domains (hubcloud.one, hubcloud.foo, hubcould, hubcloud.cx) to active domain hubcloud.ist
+    if (host.includes("hubcloud.one") || host.includes("hubcloud.foo") || host.includes("hubcould") || host === "hubcloud.club" || host === "hubcloud.lol" || host === "hubcloud.cx") {
+      url.hostname = "hubcloud.ist";
     }
 
     const isPixeldrain =
@@ -83,7 +83,9 @@ export function normalizeUrl(input: string) {
 
     if (isHubcloudOrVcloudOrHubdrive) {
       const eVal = url.searchParams.get("e");
-      url.search = eVal ? `?e=${eVal}` : "";
+      if (eVal && url.searchParams.size === 1) {
+        url.search = `?e=${eVal}`;
+      }
       url.hash = "";
       return url.toString().replace(/\/$/, "");
     } else if (isPixeldrain) {
@@ -128,8 +130,8 @@ export function normalizeUrl(input: string) {
       trimmed.includes("pixel.drain/") ||
       trimmed.includes("pixeldra.in/");
 
-    if (trimmed.includes("hubcloud.one") || trimmed.includes("hubcloud.foo") || trimmed.includes("hubcould")) {
-      trimmed = trimmed.replace(/https?:\/\/(?:www\.)?(?:hubcloud\.one|hubcloud\.foo|hubcould\.\w+)/i, "https://hubcloud.cx");
+    if (trimmed.includes("hubcloud.one") || trimmed.includes("hubcloud.foo") || trimmed.includes("hubcould") || trimmed.includes("hubcloud.cx")) {
+      trimmed = trimmed.replace(/https?:\/\/(?:www\.)?(?:hubcloud\.one|hubcloud\.foo|hubcould\.\w+|hubcloud\.cx)/i, "https://hubcloud.ist");
     }
 
     if (trimmed.includes("hubcloud") || trimmed.includes("vcloud") || trimmed.includes("hubdrive")) {
@@ -957,13 +959,13 @@ export async function performFullLinkScan(
       statusLabel: "WORKING",
       message: "Assuming working (initial)",
     };
-    for (let attempt = 1; attempt <= 1; attempt++) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const extractController = new AbortController();
-        const extractTimeout = setTimeout(() => extractController.abort(), 6000);
+        const extractTimeout = setTimeout(() => extractController.abort(), 15000);
         
         const directController = new AbortController();
-        const directTimeout = setTimeout(() => directController.abort(), 6000);
+        const directTimeout = setTimeout(() => directController.abort(), 15000);
 
         const currentForce = attempt === 2 ? true : force;
 

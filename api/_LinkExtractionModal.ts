@@ -349,22 +349,30 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-async function fetchDirect(url: string, timeout = 6000) {
+async function fetchDirect(url: string, timeout = 12000) {
   const headers = {
     "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
     "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "no-cache",
-    Pragma: "no-cache",
+    "Cache-Control": "max-age=0",
+    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"Windows"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
   };
   return axios.get(url, {
     headers,
     validateStatus: () => true,
     timeout,
-    maxContentLength: 5242880,
-    maxBodyLength: 5242880,
+    maxRedirects: 8,
+    maxContentLength: 10485760,
+    maxBodyLength: 10485760,
   });
 }
 
@@ -382,7 +390,9 @@ function isCloudflareResponse(response: any) {
     dataLower.includes("<title>ddos protection</title>") ||
     dataLower.includes("<title>attention required!") ||
     dataLower.includes("enable javascript and cookies") ||
-    dataLower.includes("checking your browser")
+    dataLower.includes("checking your browser") ||
+    dataLower.includes("error 1005") ||
+    dataLower.includes("banned the autonomous system")
   ) {
     return true;
   }
@@ -390,28 +400,12 @@ function isCloudflareResponse(response: any) {
 }
 
 async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
-  const apiKey = process.env.SCRAPER_API_KEY || "9cd207e5fa77b2c6ef6072a7ea4c4326";
-
-  // Try ScraperAPI first for vcloud
-  if (isVcloud || url.includes("vcloud")) {
-    try {
-      const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
-      const res = await axios.get(scraperApiUrl, {
-        validateStatus: () => true,
-        timeout,
-        maxContentLength: 5242880,
-        maxBodyLength: 5242880,
-      });
-      if (!isCloudflareResponse(res)) return res;
-    } catch (err) {}
-  }
-
-  // Try Microlink for non-vcloud
+  // Try Microlink first
   try {
     const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`;
     const res = await axios.get(microlinkUrl, {
       validateStatus: () => true,
-      timeout: Math.min(timeout, 8000),
+      timeout: Math.min(timeout, 7000),
     });
     if (res.data && res.data.data && res.data.data.body && typeof res.data.data.body === "string" && res.data.data.body.length > 200) {
       const fakeResp = { data: res.data.data.body, status: 200, headers: res.headers };
@@ -419,31 +413,20 @@ async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
     }
   } catch (err) {}
 
-  // Fallback to ScraperAPI for all Hubcloud variants if Microlink failed or returned Cloudflare
-  try {
-    const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
-    const scraperRes = await axios.get(scraperApiUrl, {
-      validateStatus: () => true,
-      timeout,
-      maxContentLength: 5242880,
-      maxBodyLength: 5242880,
-    });
-    if (!isCloudflareResponse(scraperRes)) return scraperRes;
-  } catch (err) {}
-
-  // Fallback to Jina AI Reader
-  try {
-    const jinaUrl = `https://r.jina.ai/${url}`;
-    const jinaRes = await axios.get(jinaUrl, {
-      headers: { "X-No-Cache": "true" },
-      validateStatus: () => true,
-      timeout: 8000,
-    });
-    if (jinaRes.data && typeof jinaRes.data === "string" && jinaRes.data.length > 100) {
-      const fakeResp = { data: jinaRes.data, status: 200, headers: jinaRes.headers || {} };
-      if (!isCloudflareResponse(fakeResp)) return fakeResp;
-    }
-  } catch (err) {}
+  // Try custom ScraperAPI only if a non-exhausted key is provided via env
+  const apiKey = process.env.SCRAPER_API_KEY;
+  if (apiKey && apiKey !== "9cd207e5fa77b2c6ef6072a7ea4c4326") {
+    try {
+      const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
+      const scraperRes = await axios.get(scraperApiUrl, {
+        validateStatus: () => true,
+        timeout: Math.min(timeout, 8000),
+        maxContentLength: 5242880,
+        maxBodyLength: 5242880,
+      });
+      if (!isCloudflareResponse(scraperRes)) return scraperRes;
+    } catch (err) {}
+  }
 
   return { data: "", status: 500, headers: {} };
 }
@@ -451,25 +434,26 @@ async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
 async function fetchHtmlFallback(url: string, isVcloud = false) {
   let response;
   
-  // Vercel IPs are blocked by Cloudflare, so skip direct fetch to save time
-  if (!process.env.VERCEL) {
-    try {
-      response = await fetchDirect(url, 6000);
-      if (!isCloudflareResponse(response)) return response;
-    } catch (err) {}
-  }
-
+  // Try direct fetch with 12s timeout
   try {
-    response = await fetchWithApi(url, 12000, isVcloud);
+    response = await fetchDirect(url, 12000);
     if (!isCloudflareResponse(response)) return response;
   } catch (err) {}
 
+  // Quick retry with small delay (many transient network or CF handshakes succeed on retry)
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+    response = await fetchDirect(url, 12000);
+    if (!isCloudflareResponse(response)) return response;
+  } catch (err) {}
+
+  // Fallback to fetchWithApi if direct fetch failed
   try {
     response = await fetchWithApi(url, 14000, isVcloud);
-  } catch (err) {
-    response = { data: "", status: 500, headers: {} };
-  }
-  return response;
+    if (!isCloudflareResponse(response)) return response;
+  } catch (err) {}
+
+  return response || { data: "", status: 500, headers: {} };
 }
 
 export async function fetchHtml(url: string, isVcloud = false, force = false) {
@@ -725,6 +709,7 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
         !url ||
         (!isVcloud && 
           !url.includes("hubcloud") &&
+          !url.includes("hubcould") &&
           !url.includes("moviesdrive") &&
           !url.includes("skymovies") &&
           !url.includes("mdrive") &&
@@ -756,20 +741,38 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       let nextUrl =
         $("#download").attr("href") ||
         $('a:contains("Generate Direct Download Link")').attr("href") ||
+        $('a:contains("Download Link")').attr("href") ||
+        $('a[href*="hubcloud.php"]').attr("href") ||
+        $('a[href*="gamerxyt"]').attr("href") ||
+        $('a[href*="vcloud.php"]').attr("href") ||
         $("a.btn-zip").attr("href") ||
         "";
+
+      // If nextUrl is relative, make it absolute!
+      if (nextUrl && !nextUrl.startsWith("http")) {
+        try {
+          nextUrl = new URL(nextUrl, url).toString();
+        } catch (e) {}
+      }
 
       // Extract url from script for vcloud if href is missing
       if (!nextUrl) {
          const scriptHtml = $.html();
-         const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i);
+         const match = scriptHtml.match(/var\s+url\s*=\s*['"]([^'"]+)['"]/i) ||
+                       scriptHtml.match(/window\.location(?:\.href)?\s*=\s*['"]([^'"]+)['"]/i) ||
+                       scriptHtml.match(/href\s*=\s*['"]([^'"]*(?:hubcloud\.php|vcloud\.php|download)[^'"]*)['"]/i);
          if (match && match[1]) {
             nextUrl = match[1];
+            if (nextUrl && !nextUrl.startsWith("http")) {
+              try {
+                nextUrl = new URL(nextUrl, url).toString();
+              } catch (e) {}
+            }
          }
       }
 
       if (!nextUrl) {
-        if ($("a.btn").length > 0) {
+        if ($("a.btn, a[class*='btn']").length > 0) {
           $2 = $;
         } else {
           return { url };
@@ -778,86 +781,86 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
 
       if (!$2 && nextUrl) {
         let res2 = await fetchHtml(nextUrl, isVcloud, force);
-        $2 = cheerio.load(res2.data);
-
-        const titleText2 = $2("title").text().toLowerCase();
-        const isCf2 =
-          titleText2.includes("just a moment") ||
-          titleText2.includes("cloudflare") ||
-          titleText2.includes("ddos protection") ||
-          res2.status === 403 ||
-          res2.status === 503;
-
-        if (isCf2) {
-           // We could return isCloudflare here if it's completely unbypassable
-           // but keeping original behavior we just ignore and continue with what we have
+        if (res2 && res2.data && typeof res2.data === "string" && res2.data.length > 100) {
+          $2 = cheerio.load(res2.data);
+        } else {
+          $2 = $;
         }
+      }
+
+      if (!$2) {
+        $2 = $;
       }
 
       const candidateLinks: { text: string; href: string }[] = [];
       const seenCandidateUrls = new Set<string>();
 
-      $2('a.btn, a[class*="btn"], a[id], .btn a, a[href*="pixeldrain"], a[href*="workers.dev"], a[href*="fsl"], a[href*="bbdownload"], a[href*="download"], a[href*="drive"]').each((i, el) => {
-        let href = $2(el).attr("href") || "";
-        const text = $2(el).text().toLowerCase();
-        const id = $2(el).attr("id");
+      const parseCandidatesFrom = ($context: cheerio.CheerioAPI) => {
+        $context('a.btn, a[class*="btn"], a[id], .btn a, a[href*="pixeldrain"], a[href*="workers.dev"], a[href*="fsl"], a[href*="bbdownload"], a[href*="download"], a[href*="drive"]').each((i, el) => {
+          let href = $context(el).attr("href") || "";
+          const text = $context(el).text().toLowerCase();
+          const id = $context(el).attr("id");
 
-        if (id) {
-          $2("script").each((_, scriptEl) => {
-            const scriptContent = $2(scriptEl).html();
-            if (!scriptContent) return;
+          if (id) {
+            $context("script").each((_, scriptEl) => {
+              const scriptContent = $context(scriptEl).html();
+              if (!scriptContent) return;
 
-            if (
-              scriptContent.includes(`getElementById("${id}")`) ||
-              scriptContent.includes(`getElementById('${id}')`)
-            ) {
-              const assignmentMatch = scriptContent.match(
-                new RegExp(
-                  `getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*([a-zA-Z0-9_]+)`,
-                ),
-              );
-              if (assignmentMatch && assignmentMatch[1]) {
-                const varName = assignmentMatch[1];
-                const varMatch = scriptContent.match(
+              if (
+                scriptContent.includes(`getElementById("${id}")`) ||
+                scriptContent.includes(`getElementById('${id}')`)
+              ) {
+                const assignmentMatch = scriptContent.match(
                   new RegExp(
-                    `(?:var|let|const)\\s+${varName}\\s*=\\s*['"]([^'"]+)['"]`,
+                    `getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*([a-zA-Z0-9_]+)`,
                   ),
                 );
-                if (varMatch && varMatch[1]) {
-                  href = varMatch[1];
-                }
-              } else {
-                const directMatch = scriptContent.match(
-                  new RegExp(
-                    `getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*['"]([^'"]+)['"]`,
-                  ),
-                );
-                if (directMatch && directMatch[1]) {
-                  href = directMatch[1];
+                if (assignmentMatch && assignmentMatch[1]) {
+                  const varName = assignmentMatch[1];
+                  const varMatch = scriptContent.match(
+                    new RegExp(
+                      `(?:var|let|const)\\s+${varName}\\s*=\\s*['"]([^'"]+)['"]`,
+                    ),
+                  );
+                  if (varMatch && varMatch[1]) {
+                    href = varMatch[1];
+                  }
+                } else {
+                  const directMatch = scriptContent.match(
+                    new RegExp(
+                      `getElementById\\(['"]${id}['"]\\)\\.href\\s*=\\s*['"]([^'"]+)['"]`,
+                    ),
+                  );
+                  if (directMatch && directMatch[1]) {
+                    href = directMatch[1];
+                  }
                 }
               }
-            }
-          });
-        }
-        const lowerHref = (href || "").toLowerCase();
-        const lowerText = (text || "").toLowerCase();
-        const isExcluded =
-          lowerText.includes("telegram") || lowerHref.includes("telegram") ||
-          lowerText.includes("login") || lowerHref.includes("login") ||
-          lowerText.includes("moviesdrive") || lowerHref.includes("moviesdrive") ||
-          lowerText.includes("mdrive") || lowerHref.includes("mdrive");
+            });
+          }
+          const lowerHref = (href || "").toLowerCase();
+          const lowerText = (text || "").toLowerCase();
+          const isExcluded =
+            lowerText.includes("telegram") || lowerHref.includes("telegram") ||
+            lowerText.includes("login") || lowerHref.includes("login") ||
+            lowerText.includes("moviesdrive") || lowerHref.includes("moviesdrive") ||
+            lowerText.includes("mdrive") || lowerHref.includes("mdrive");
 
-        if (href && !isExcluded && !seenCandidateUrls.has(href)) {
-          seenCandidateUrls.add(href);
-          candidateLinks.push({ text, href });
-        }
-      });
+          if (href && !isExcluded && !seenCandidateUrls.has(href)) {
+            seenCandidateUrls.add(href);
+            candidateLinks.push({ text, href });
+          }
+        });
+      };
+
+      if ($2) parseCandidatesFrom($2);
+      if (candidateLinks.length === 0 && $ && $ !== $2) parseCandidatesFrom($);
 
       if (candidateLinks.length === 0) {
         return { url };
       }
 
-      // Sort: pixeldrain first, then .workers.dev
+      // Sort: pixeldrain first, then buzz/fast, then .workers.dev, then fsl
       candidateLinks.sort((a, b) => {
         const isA_PD =
           /pixeldrain|pixel\.drain|pixeldra\.in/i.test(a.text) ||
@@ -867,6 +870,11 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
           /pixeldrain|pixel\.drain|pixeldra\.in/i.test(b.href);
         if (isA_PD && !isB_PD) return -1;
         if (!isA_PD && isB_PD) return 1;
+
+        const isA_Fast = /fast|buzz|fuckingfast/i.test(a.text) || /fast|buzz|fuckingfast/i.test(a.href);
+        const isB_Fast = /fast|buzz|fuckingfast/i.test(b.text) || /fast|buzz|fuckingfast/i.test(b.href);
+        if (isA_Fast && !isB_Fast) return -1;
+        if (!isA_Fast && isB_Fast) return 1;
 
         const isA_Worker = /\.workers\.dev/i.test(a.href);
         const isB_Worker = /\.workers\.dev/i.test(b.href);
@@ -881,9 +889,14 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
         return 0;
       });
 
-      // Find first working link
+      // Find first working link - prioritize direct candidate links
       let workingLink = url; 
-      if (candidateLinks.length > 0) { 
+      const directCandidate = candidateLinks.find(
+        (c) => c.href && !isExtractableIntermediate(c.href) && !c.href.toLowerCase().includes("hubcloud") && !c.href.toLowerCase().includes("vcloud") && !c.href.toLowerCase().includes("hubdrive")
+      );
+      if (directCandidate) {
+        workingLink = directCandidate.href;
+      } else if (candidateLinks.length > 0) { 
         workingLink = candidateLinks[0].href; 
       }
 
@@ -1022,16 +1035,17 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
   linkExtractionRouter.post("/api/hubcloud/direct-link", async (req, res) => {
     try {
       const { url, checkOnly, isVcloud, force } = req.body;
+      const targetUrl = normalizeDomain(url) || url;
       const isCheckOnly = Boolean(checkOnly);
       const isVcloudBool = Boolean(isVcloud);
-      const cacheKey = `direct_${url}_${isCheckOnly}`;
+      const cacheKey = `direct_${targetUrl}_${isCheckOnly}`;
       
-      const cached = extractionCache.get(cacheKey);
+      const cached = extractionCache.get(cacheKey) || extractionCache.get(`direct_${url}_${isCheckOnly}`);
       if (!force && cached && Date.now() - cached.timestamp < CACHE_TTL) {
         if (isCheckOnly) {
           return res.json(cached.data);
         }
-        if (hasValidDirectLink(cached.data, url)) {
+        if (hasValidDirectLink(cached.data, targetUrl)) {
           return res.json(cached.data);
         }
         // Cached entry did not contain a valid direct link - delete it and re-extract!
@@ -1044,7 +1058,7 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
         return res.json(data);
       }
 
-      const extractPromise = performExtraction(url, isCheckOnly, 0, isVcloudBool, force);
+      const extractPromise = performExtraction(targetUrl, isCheckOnly, 0, isVcloudBool, force);
       inFlightRequests.set(cacheKey, extractPromise);
 
       try {
