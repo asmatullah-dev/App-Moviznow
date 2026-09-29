@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "5.1.03",
+  "version": "5.1.04",
   "type": "module",
   "engines": {
     "node": "24.x"
