@@ -2724,11 +2724,12 @@ export default function ContentManagement() {
               existingSeason.isUpcoming = fetchedSeason.isUpcoming;
 
             (fetchedSeason.episodes || []).forEach((fetchedEp: any) => {
+              const epNum = fetchedEp.episodeNumber ?? fetchedEp.episode_number;
               const existingEpIndex = existingSeason.episodes.findIndex(
-                (ep) => ep.episodeNumber === fetchedEp.episodeNumber,
+                (ep) => ep.episodeNumber === epNum,
               );
               if (existingEpIndex !== -1) {
-                // Update title, description, duration, airDate, keep existing links
+                // Update title, description, duration, airDate, keep existing links (released episode)
                 const currentEp = existingSeason.episodes[existingEpIndex];
                 const hasLinks = currentEp.links && currentEp.links.some((l) => l.url && l.url.trim() !== "");
                 const airDate = fetchedEp.airDate || currentEp.airDate || "";
@@ -2737,29 +2738,21 @@ export default function ContentManagement() {
 
                 existingSeason.episodes[existingEpIndex] = {
                   ...currentEp,
-                  title:
-                    (!currentEp.title ||
-                      /^Episode\s+\d+$/i.test(currentEp.title)) &&
-                    fetchedEp.title
-                      ? fetchedEp.title
-                      : currentEp.title,
-                  description:
-                    fetchedEp.description || currentEp.description,
-                  duration:
-                    fetchedEp.duration || currentEp.duration,
-                  airDate,
+                  title: fetchedEp.title || fetchedEp.name || currentEp.title || `Episode ${epNum}`,
+                  description: (fetchedEp.description !== undefined && fetchedEp.description !== "") ? fetchedEp.description : (currentEp.description || ""),
+                  duration: fetchedEp.duration || (fetchedEp.runtime ? `${fetchedEp.runtime}m` : currentEp.duration) || "",
+                  airDate: isUpcoming ? airDate : (currentEp.airDate || airDate),
                   isUpcoming,
                 };
-              } else {
-                // TMDB episode not yet in content form -> add as upcoming episode
+              } else if (data.addUpcomingEpisodes !== false) {
+                // TMDB episode not yet in content form -> ONLY add as upcoming episode if addUpcomingEpisodes is true!
                 const airDate = fetchedEp.airDate || "";
-                const isFuture = airDate ? new Date(airDate).getTime() > Date.now() : false;
                 existingSeason.episodes.push({
-                  id: `ep_tmdb_${existingSeason.seasonNumber}_${fetchedEp.episodeNumber}`,
-                  episodeNumber: fetchedEp.episodeNumber,
-                  title: fetchedEp.title || `Episode ${fetchedEp.episodeNumber}`,
+                  id: `ep_tmdb_${existingSeason.seasonNumber}_${epNum}`,
+                  episodeNumber: epNum,
+                  title: fetchedEp.title || fetchedEp.name || `Episode ${epNum}`,
                   description: fetchedEp.description || "",
-                  duration: fetchedEp.duration || "",
+                  duration: fetchedEp.duration || (fetchedEp.runtime ? `${fetchedEp.runtime}m` : "") || "",
                   links: [],
                   airDate,
                   isUpcoming: true,
@@ -2770,16 +2763,17 @@ export default function ContentManagement() {
             existingSeason.episodes.sort(
               (a, b) => a.episodeNumber - b.episodeNumber,
             );
-          } else {
-            // Add entire new season from TMDB with upcoming episodes
+          } else if (data.addUpcomingEpisodes !== false) {
+            // Add entire new season from TMDB ONLY if addUpcomingEpisodes is not false
             const newEpisodes = (fetchedSeason.episodes || []).map((fetchedEp: any) => {
+              const epNum = fetchedEp.episodeNumber ?? fetchedEp.episode_number;
               const airDate = fetchedEp.airDate || "";
               return {
-                id: `ep_tmdb_${fetchedSeason.seasonNumber}_${fetchedEp.episodeNumber}`,
-                episodeNumber: fetchedEp.episodeNumber,
-                title: fetchedEp.title || `Episode ${fetchedEp.episodeNumber}`,
+                id: `ep_tmdb_${fetchedSeason.seasonNumber}_${epNum}`,
+                episodeNumber: epNum,
+                title: fetchedEp.title || fetchedEp.name || `Episode ${epNum}`,
                 description: fetchedEp.description || "",
-                duration: fetchedEp.duration || "",
+                duration: fetchedEp.duration || (fetchedEp.runtime ? `${fetchedEp.runtime}m` : "") || "",
                 links: [],
                 airDate,
                 isUpcoming: true,

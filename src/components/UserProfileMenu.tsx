@@ -8,7 +8,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useUsers } from '../contexts/UsersContext';
 import { 
   User, Settings, LogOut, Heart, Clock, MessageCircle, 
-  Sun, Moon, Monitor, LayoutDashboard, Film, Users, Plus, Download, RefreshCw, Eye, X, Menu, Home as HomeIcon, PlayCircle, Tv, Gift, Star, Info, Phone, Award, CheckCircle2, Sparkles, LogIn, ShieldAlert
+  Sun, Moon, Monitor, LayoutDashboard, Film, Users, Plus, Download, RefreshCw, Eye, X, Menu, Home as HomeIcon, PlayCircle, Tv, Gift, Star, Info, Phone, Award, CheckCircle2, Sparkles, LogIn, ShieldAlert, FileText, ShieldCheck
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { format } from 'date-fns';
@@ -539,6 +539,14 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                 <Link to="/contact" onClick={() => setIsOpen(false)} className={clsx("group flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all", location.pathname === "/contact" ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 font-bold" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60")}>
                   <Phone className="w-4 h-4 text-zinc-400 group-hover:text-emerald-500 transition-colors" /> 
                   <span>{t("Contact")}</span>
+                </Link>
+                <Link to="/terms" onClick={() => setIsOpen(false)} className={clsx("group flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all", location.pathname === "/terms" ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 font-bold" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60")}>
+                  <FileText className="w-4 h-4 text-zinc-400 group-hover:text-emerald-500 transition-colors" /> 
+                  <span>{t("Terms of Service")}</span>
+                </Link>
+                <Link to="/privacy" onClick={() => setIsOpen(false)} className={clsx("group flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all", location.pathname === "/privacy" ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 font-bold" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60")}>
+                  <ShieldCheck className="w-4 h-4 text-zinc-400 group-hover:text-emerald-500 transition-colors" /> 
+                  <span>{t("Privacy Policy")}</span>
                 </Link>
                 <Link to="/settings" onClick={() => setIsOpen(false)} className={clsx("group flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all", location.pathname === "/settings" ? "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 font-bold" : "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800/60")}>
                   <Settings className="w-4 h-4 text-zinc-400 group-hover:text-emerald-500 transition-colors" /> 

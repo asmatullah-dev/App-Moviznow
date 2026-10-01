@@ -476,18 +476,65 @@ export function applyPreferencesToContent(
   let seasonsStr: string | undefined = baseContent.seasons;
   if (finalType === 'series') {
     if (p.seasons && tmdbData?.seasons && tmdbData.seasons.length > 0) {
-      let finalSeasons = tmdbData.seasons;
-      if (p.upcomingEpisodes === false) {
-        finalSeasons = tmdbData.seasons.map((s: any) => ({
-          ...s,
-          episodes: (s.episodes || []).filter((ep: any) => {
-            const rawAirDate = ep.air_date || ep.airDate || '';
-            const isFuture = rawAirDate ? new Date(rawAirDate).getTime() > Date.now() : false;
-            const hasLinks = ep.links && Array.isArray(ep.links) && ep.links.some((l: any) => l.url && l.url.trim() !== '');
-            const isUpcoming = ep.isUpcoming || isFuture || !hasLinks;
-            return !isUpcoming;
-          })
-        }));
+      let existingSeasons: any[] = [];
+      try {
+        if (seasonsStr) existingSeasons = JSON.parse(seasonsStr);
+      } catch (e) {}
+
+      let finalSeasons: any[] = [];
+      if (existingSeasons.length > 0) {
+        finalSeasons = existingSeasons.map((es: any) => {
+          const tmdbSeason = tmdbData.seasons.find((ts: any) => (ts.seasonNumber ?? ts.season) === es.seasonNumber);
+          if (!tmdbSeason) return es;
+          const mergedEps = [...(es.episodes || [])];
+          (tmdbSeason.episodes || []).forEach((tEp: any) => {
+            const epNum = tEp.episode_number ?? tEp.episodeNumber;
+            const exIndex = mergedEps.findIndex((e: any) => e.episodeNumber === epNum);
+            if (exIndex !== -1) {
+              mergedEps[exIndex] = {
+                ...mergedEps[exIndex],
+                title: tEp.name || tEp.title || mergedEps[exIndex].title,
+                duration: tEp.runtime ? `${tEp.runtime}m` : (tEp.duration || mergedEps[exIndex].duration || ''),
+                description: p.description ? (tEp.overview || tEp.description || mergedEps[exIndex].description || '') : mergedEps[exIndex].description,
+                airDate: tEp.air_date || tEp.airDate || mergedEps[exIndex].airDate || '',
+              };
+            } else if (p.upcomingEpisodes !== false) {
+              mergedEps.push({
+                id: `ep_tmdb_${es.seasonNumber}_${epNum}`,
+                episodeNumber: epNum,
+                title: tEp.name || tEp.title || `Episode ${epNum}`,
+                description: p.description ? (tEp.overview || tEp.description || '') : '',
+                duration: tEp.runtime ? `${tEp.runtime}m` : '',
+                links: [],
+                airDate: tEp.air_date || tEp.airDate || '',
+                isUpcoming: true,
+              });
+            }
+          });
+          const tName = (tmdbSeason as any).name || tmdbSeason.title || '';
+          return {
+            ...es,
+            title: tName && !/^Season\s+\d+$/i.test(tName) ? tName : es.title,
+            year: tmdbSeason.year || es.year,
+            airDate: (tmdbSeason as any).air_date || tmdbSeason.airDate || es.airDate,
+            episodes: mergedEps.sort((a: any, b: any) => a.episodeNumber - b.episodeNumber),
+          };
+        });
+      } else {
+        finalSeasons = tmdbData.seasons.map((s: any) => {
+          let eps = s.episodes || [];
+          if (p.upcomingEpisodes === false) {
+            eps = eps.filter((ep: any) => {
+              const rawAirDate = ep.air_date || ep.airDate || '';
+              const isFuture = rawAirDate ? new Date(rawAirDate).getTime() > Date.now() : false;
+              return !isFuture;
+            });
+          }
+          return {
+            ...s,
+            episodes: eps,
+          };
+        });
       }
       seasonsStr = JSON.stringify(finalSeasons);
     } else if (!seasonsStr) {

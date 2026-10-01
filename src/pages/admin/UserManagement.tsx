@@ -3,7 +3,7 @@ import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
 import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment, onSnapshot } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
-import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, ArrowLeft, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy, Users, CheckCircle, ShieldCheck, Database } from 'lucide-react';
+import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, ArrowLeft, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, AlertTriangle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy, Users, CheckCircle, ShieldCheck, Database } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -11,6 +11,7 @@ import AlertModal from '../../components/AlertModal';
 import ConfirmModal from '../../components/ConfirmModal';
 import { Button } from '../../components/Button';
 import { UserDataFieldsView } from '../../components/UserDataFieldsView';
+import { ChunkMetaDocModal } from '../../components/ChunkMetaDocModal';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { formatDateToMonthDDYYYY } from '../../utils/contentUtils';
 import { useAuth, standardizePhone } from '../../contexts/AuthContext';
@@ -64,7 +65,7 @@ type SortField = 'createdAt' | 'displayName' | 'phone' | 'expiryDate' | 'lastAct
 type SortOrder = 'asc' | 'desc';
 
 export default function UserManagement() {
-  const { profile, findUsersByEmailOrPhone, authLoading } = useAuth();
+  const { profile, findUsersByEmailOrPhone, authLoading, whitelistPhoneNumber, unwhitelistPhoneNumber } = useAuth();
   const { settings } = useSettings();
   const { contentList, updateContentFields } = useAdminContent();
   const location = useLocation();
@@ -82,6 +83,8 @@ export default function UserManagement() {
   const [filterRole, setFilterRole] = useState<Role | 'all'>(() => (sessionStorage.getItem('user_mgmt_role') as any) || 'all');
   const [filterLanguage, setFilterLanguage] = useState<string>(() => sessionStorage.getItem('user_mgmt_lang') || 'all');
   const [filterStatus, setFilterStatus] = useState<Status | 'all'>(() => (sessionStorage.getItem('user_mgmt_status') as any) || 'all');
+  const [filterWhitelist, setFilterWhitelist] = useState<'all' | 'whitelisted' | 'not_whitelisted'>('all');
+  const [whitelistedPhones, setWhitelistedPhones] = useState<string[]>([]);
   const [hideAnonymousAndInvalid, setHideAnonymousAndInvalid] = useState(() => {
     const cached = sessionStorage.getItem('user_mgmt_hide_anonymous_invalid');
     return cached === null ? true : cached === 'true';
@@ -120,6 +123,7 @@ export default function UserManagement() {
   // Add User State
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
   const [isWhitelistModalOpen, setIsWhitelistModalOpen] = useState(false);
+  const [isChunkMetaModalOpen, setIsChunkMetaModalOpen] = useState(false);
   const [newUserForm, setNewUserForm] = useState({ email: '', phone: '', displayName: '', city: '', role: 'user' as Role, status: 'pending' as 'pending' | 'active', expiryDate: '' });
   const [foundUser, setFoundUser] = useState<UserProfile | null>(null);
   const [searchStatus, setSearchStatus] = useState<'idle' | 'searching' | 'found' | 'not_found'>('idle');
@@ -207,6 +211,65 @@ export default function UserManagement() {
       unsubscribe();
     };
   }, []);
+
+  // Synchronize whitelisted phone numbers in real-time
+  useEffect(() => {
+    let isMounted = true;
+    const unsub = onSnapshot(doc(db, 'settings', 'whitelisted_phones'), (snap) => {
+      if (!isMounted) return;
+      if (snap.exists()) {
+        const data = snap.data();
+        const list: string[] = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
+        setWhitelistedPhones(list);
+      } else {
+        setWhitelistedPhones([]);
+      }
+    }, (err) => {
+      console.warn('[UserManagement] Whitelisted phones listener warning:', err);
+    });
+
+    return () => {
+      isMounted = false;
+      unsub();
+    };
+  }, []);
+
+  const isUserPhoneWhitelisted = useCallback((phone?: string | null) => {
+    if (!phone) return false;
+    const std = standardizePhone(phone);
+    if (!std) return false;
+    const stdDigits = std.replace(/\D/g, "");
+    const last10 = stdDigits.slice(-10);
+    return whitelistedPhones.some((n) => {
+      if (!n || typeof n !== 'string') return false;
+      const stdN = standardizePhone(n);
+      if (stdN && stdN === std) return true;
+      const nDigits = n.replace(/\D/g, "");
+      if (nDigits.slice(-10) === last10 && last10.length === 10) return true;
+      return n.trim() === phone.trim() || n.trim() === std;
+    });
+  }, [whitelistedPhones]);
+
+  const handleToggleWhitelist = useCallback(async (phone: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const std = standardizePhone(phone);
+    if (!std) return;
+    const isCurrentlyWhitelisted = isUserPhoneWhitelisted(std);
+    setProcessing(prev => ({ ...prev, [`whitelist_${std}`]: true }));
+    try {
+      if (isCurrentlyWhitelisted) {
+        await unwhitelistPhoneNumber(std);
+        setAlertConfig({ isOpen: true, title: 'Whitelist Updated', message: `${std} has been removed from authorized whitelist.` });
+      } else {
+        await whitelistPhoneNumber(std);
+        setAlertConfig({ isOpen: true, title: 'Whitelist Updated', message: `${std} is now authorized and whitelisted!` });
+      }
+    } catch (err: any) {
+      setAlertConfig({ isOpen: true, title: 'Error', message: err?.message || 'Failed to update whitelist' });
+    } finally {
+      setProcessing(prev => ({ ...prev, [`whitelist_${std}`]: false }));
+    }
+  }, [isUserPhoneWhitelisted, unwhitelistPhoneNumber, whitelistPhoneNumber]);
 
   const autoSyncUserToContacts = useCallback(async (userToSync: UserProfile, interactive = false) => {
     if (!userToSync.phone) return;
@@ -1235,7 +1298,7 @@ export default function UserManagement() {
       
       // 1. Delete user document
       batch.delete(doc(db, 'users', currentDeleteConfirm));
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentDeleteConfirm]: deleteField() } }, { merge: true });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentDeleteConfirm]: -1 } }, { merge: true });
 
       await batch.commit();
 
@@ -1330,7 +1393,7 @@ export default function UserManagement() {
 
         chunkUids.forEach(uid => {
           batch.delete(doc(db, 'users', uid));
-          versionUsersUpdate[uid] = deleteField();
+          versionUsersUpdate[uid] = -1;
         });
 
         batch.set(doc(db, 'chunk_meta', 'versions'), { users: versionUsersUpdate }, { merge: true });
@@ -1667,7 +1730,7 @@ export default function UserManagement() {
 
       batch.update(u1Ref, updates);
       batch.delete(u2Ref);
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user1.uid]: getUtcVersion(), [user2.uid]: deleteField() } }, { merge: true });
+      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user1.uid]: getUtcVersion(), [user2.uid]: -1 } }, { merge: true });
 
       // Migrate FCM token from user2 to user1 if present
       if ((user2 as any).fcmToken && !(user1 as any).fcmToken) {
@@ -1835,6 +1898,13 @@ export default function UserManagement() {
     if (filterStatus !== 'all') {
       result = result.filter(u => u.status === filterStatus);
     }
+    if (filterWhitelist !== 'all') {
+      if (filterWhitelist === 'whitelisted') {
+        result = result.filter(u => u.phone && isUserPhoneWhitelisted(u.phone));
+      } else if (filterWhitelist === 'not_whitelisted') {
+        result = result.filter(u => u.phone && !isUserPhoneWhitelisted(u.phone) && (!u.email || u.email.endsWith('@moviznow.com')));
+      }
+    }
 
     // Sort
     result.sort((a, b) => {
@@ -1938,7 +2008,7 @@ export default function UserManagement() {
     });
 
     return result;
-  }, [users, searchTerm, filterRole, filterStatus, filterLanguage, sortField, sortOrder, allUsers, hideAnonymousAndInvalid]);
+  }, [users, searchTerm, filterRole, filterStatus, filterLanguage, filterWhitelist, sortField, sortOrder, allUsers, hideAnonymousAndInvalid, isUserPhoneWhitelisted]);
 
   const handleAddUser = async () => {
     if (!foundUser && !newUserForm.phone && !newUserForm.email) {
@@ -2152,6 +2222,15 @@ export default function UserManagement() {
               icon={<RefreshCw className={`w-5 h-5 ${(usersLoading || isManualRefreshing) ? 'animate-spin' : ''}`} />}
               title={hasPendingChanges ? "Sync pending changes" : "Refresh users"}
             />
+            {(profile?.role === 'admin' || profile?.role === 'owner') && (
+              <Button
+                onClick={() => setIsChunkMetaModalOpen(true)}
+                variant="secondary"
+                className="px-3 text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+                icon={<Database className="w-5 h-5 text-indigo-500 dark:text-indigo-400" />}
+                title="Chunk Meta Document (chunk_meta/versions)"
+              />
+            )}
             {(profile?.role === 'admin' || profile?.role === 'owner') && (
               <Button
                 onClick={() => setIsWhitelistModalOpen(true)}
@@ -2401,13 +2480,14 @@ export default function UserManagement() {
               </div>
             )}
             <div className="flex gap-2 flex-1 overflow-x-auto pb-1 md:pb-0 items-center">
-              {(searchTerm || filterRole !== 'all' || filterStatus !== 'all' || filterLanguage !== 'all' || sortField !== 'createdAt' || sortOrder !== 'desc' || !hideAnonymousAndInvalid) && (
+              {(searchTerm || filterRole !== 'all' || filterStatus !== 'all' || filterLanguage !== 'all' || filterWhitelist !== 'all' || sortField !== 'createdAt' || sortOrder !== 'desc' || !hideAnonymousAndInvalid) && (
                 <button
                   onClick={() => {
                     setSearchTerm('');
                     setFilterRole('all');
                     setFilterStatus('all');
                     setFilterLanguage('all');
+                    setFilterWhitelist('all');
                     setSortField('createdAt');
                     setSortOrder('desc');
                     setHideAnonymousAndInvalid(true);
@@ -2458,6 +2538,15 @@ export default function UserManagement() {
                 <option value="ur">Urdu</option>
                 <option value="ur-roman">Roman Urdu</option>
                 <option value="none">No Language</option>
+              </select>
+              <select
+                value={filterWhitelist}
+                onChange={(e) => setFilterWhitelist(e.target.value as any)}
+                className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 focus:outline-none focus:border-emerald-500 min-w-[130px] text-xs"
+              >
+                <option value="all">All Whitelist Status</option>
+                <option value="whitelisted">Whitelisted Phone</option>
+                <option value="not_whitelisted">Phone Not Whitelisted (Blocked Phone Users)</option>
               </select>
               
               <label className="flex items-center gap-2 cursor-pointer bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg px-3 py-1.5 shrink-0 select-none">
@@ -2538,9 +2627,45 @@ export default function UserManagement() {
                         <div className="text-zinc-500 dark:text-zinc-400 text-xs mt-0.5 truncate" title={user.email}>
                           {user.email && !user.email.endsWith('@moviznow.com') ? user.email : (user.phone ? `${user.phone} (Phone)` : 'No Email')}
                         </div>
-                        <div className="text-zinc-500 text-xs mt-0.5 flex items-center gap-1 truncate">
+                        <div className="text-zinc-500 text-xs mt-0.5 flex items-center gap-1.5 flex-wrap truncate">
                           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>
-                          {user.phone || 'No phone'}
+                          <span>{user.phone || 'No phone'}</span>
+                          {user.phone && (
+                            (() => {
+                              const isGoogleAccount = Boolean(
+                                (user.email && !user.email.endsWith('@moviznow.com') && user.email.includes('@')) ||
+                                user.provider === 'google.com' ||
+                                user.isGoogleUser === true
+                              );
+
+                              // No need to show allowed or whitelist status for Google users
+                              if (isGoogleAccount) {
+                                return null;
+                              }
+
+                              const isWhitelisted = isUserPhoneWhitelisted(user.phone);
+
+                              if (isWhitelisted) {
+                                return (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" title="Whitelisted WhatsApp Number">
+                                    <ShieldCheck className="w-2.5 h-2.5" /> Whitelisted
+                                  </span>
+                                );
+                              }
+
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleToggleWhitelist(user.phone!, e)}
+                                  disabled={processing[`whitelist_${standardizePhone(user.phone)}`]}
+                                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20 transition-colors cursor-pointer"
+                                  title="Phone-only user is blocked without whitelist. Click to authorize."
+                                >
+                                  <AlertTriangle className="w-2.5 h-2.5" /> Not Whitelisted
+                                </button>
+                              );
+                            })()
+                          )}
                         </div>
 
                       </div>
@@ -2817,7 +2942,33 @@ export default function UserManagement() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">WhatsApp Number</label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400">WhatsApp Number</label>
+                      {editForm.phone && (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleWhitelist(editForm.phone!)}
+                          disabled={processing[`whitelist_${standardizePhone(editForm.phone)}`]}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold border transition-all cursor-pointer ${
+                            isUserPhoneWhitelisted(editForm.phone)
+                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
+                          }`}
+                        >
+                          {isUserPhoneWhitelisted(editForm.phone) ? (
+                            <>
+                              <ShieldCheck className="w-3.5 h-3.5" />
+                              <span>Phone Whitelisted (Revoke)</span>
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              <span>{Boolean(editForm.email && !editForm.email.endsWith('@moviznow.com')) ? 'Phone Not Whitelisted (Optional Authorize)' : 'Phone Not Whitelisted (Authorize)'}</span>
+                            </>
+                          )}
+                        </button>
+                      )}
+                    </div>
                     <input
                       type="text"
                       value={editForm.phone || ''}
@@ -2919,7 +3070,35 @@ export default function UserManagement() {
                       </h3>
                       {selectedUser.city && <p className="text-zinc-600 dark:text-zinc-300 font-medium text-sm">{selectedUser.city}</p>}
                       <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.email?.endsWith('@moviznow.com') ? 'No Email' : selectedUser.email}</p>
-                      <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.phone || 'No WhatsApp Number'}</p>
+                      <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                        <span className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.phone || 'No WhatsApp Number'}</span>
+                        {selectedUser.phone && (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={(e) => handleToggleWhitelist(selectedUser.phone!, e)}
+                              disabled={processing[`whitelist_${standardizePhone(selectedUser.phone)}`]}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold border transition-all cursor-pointer ${
+                                isUserPhoneWhitelisted(selectedUser.phone)
+                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
+                              }`}
+                            >
+                              {isUserPhoneWhitelisted(selectedUser.phone) ? (
+                                <>
+                                  <ShieldCheck className="w-3.5 h-3.5" />
+                                  <span>Phone Whitelisted (Revoke)</span>
+                                </>
+                              ) : (
+                                <>
+                                  <AlertTriangle className="w-3.5 h-3.5" />
+                                  <span>Phone Not Whitelisted (Authorize)</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
+                      </div>
                       <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                         <span className="text-zinc-500 dark:text-zinc-400 font-mono text-[10px] break-all border border-zinc-200 dark:border-zinc-800 rounded px-1.5 py-0.5 inline-flex items-center gap-1 bg-zinc-50 dark:bg-zinc-900">
                           <span className="font-semibold text-zinc-600 dark:text-zinc-300">UID:</span> {selectedUser.uid}
@@ -2970,34 +3149,6 @@ export default function UserManagement() {
                       </div>
                     </div>
                   </div>
-
-                  {/* Show All User Data Fields Quick Access Banner */}
-                  <button
-                    type="button"
-                    onClick={() => setShowAllFields(true)}
-                    className="w-full p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-indigo-500/10 hover:from-emerald-500/20 hover:to-indigo-500/20 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold text-xs flex items-center justify-between transition-all group shadow-xs cursor-pointer text-left"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2.5 rounded-xl bg-emerald-500 text-white shrink-0 group-hover:scale-105 transition-transform shadow-xs">
-                        <Database className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-xs text-zinc-900 dark:text-white flex items-center gap-1.5 flex-wrap">
-                          <span>Show All User Data Fields</span>
-                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-semibold">
-                            Firestore /users/{selectedUser.uid}
-                          </span>
-                        </div>
-                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-normal mt-0.5">
-                          View & edit all received and locally saved data fields with Firestore schemas ({Object.keys(selectedUser).length} fields)
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1 text-[11px] font-bold text-emerald-500 bg-emerald-500/10 px-2.5 py-1 rounded-xl shrink-0 group-hover:translate-x-0.5 transition-transform">
-                      <span>View & Edit</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </div>
-                  </button>
 
                   <div className="grid grid-cols-1 gap-3">
                     <div className="bg-white dark:bg-zinc-950 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
@@ -3686,15 +3837,6 @@ export default function UserManagement() {
                   >
                     Send Reminder
                   </Button>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      onClick={() => setShowAllFields(true)}
-                      variant="secondary"
-                      className="px-3.5 py-2.5 text-sm font-semibold"
-                      icon={<Database className="w-4 h-4 text-emerald-500" />}
-                    >
-                      All Fields
-                    </Button>
                     {(selectedUser.role !== 'owner' || selectedUser.uid === profile?.uid) && (
                       <Button
                         onClick={() => {
@@ -3707,7 +3849,6 @@ export default function UserManagement() {
                         Edit User
                       </Button>
                     )}
-                  </div>
                 </>
               )}
             </div>
@@ -3918,6 +4059,12 @@ export default function UserManagement() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Chunk Meta Document Modal */}
+      <ChunkMetaDocModal
+        isOpen={isChunkMetaModalOpen}
+        onClose={() => setIsChunkMetaModalOpen(false)}
+      />
 
       {/* Add User Modal */}
       <AnimatePresence>

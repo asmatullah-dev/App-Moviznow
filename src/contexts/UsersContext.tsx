@@ -613,6 +613,21 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
+        // Check for orphaned/deleted users that exist in local cache but are absent from chunk_meta.users on server
+        if (Object.keys(serverUsersVersion).length > 0) {
+          for (const [cachedUid] of currentUsersMap) {
+            const serverVer = serverUsersVersion[cachedUid];
+            if (serverVer === -1 || (typeof serverVer === 'object' && (serverVer as any)?.deleted)) {
+              currentUsersMap.delete(cachedUid);
+              delete localUsersVersion[cachedUid];
+              hadDeletions = true;
+            } else if (serverVer === undefined) {
+              // Absent from chunk_meta: add to uidsToFetch to verify against Firestore doc. If missing, it will be pruned below.
+              uidsToFetch.add(cachedUid);
+            }
+          }
+        }
+
         if (uidsToFetch.size === 0 && !hadDeletions) {
           let finalUsers = Array.from(currentUsersMap.values());
           const pendingStr = safeStorage.getItem('pending_user_updates');
@@ -672,6 +687,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
                 if (currentUsersMap.has(reqUid)) {
                   currentUsersMap.delete(reqUid);
                   delete localUsersVersion[reqUid];
+                  hadDeletions = true;
                 }
               }
             });

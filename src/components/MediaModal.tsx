@@ -1030,6 +1030,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
     });
 
     if (fetchedData.seasons && selectedSeasons.length > 0) {
+      dataToApply.addUpcomingEpisodes = addUpcomingEpisodes;
       dataToApply.seasons = fetchedData.seasons.filter((s: any) => selectedSeasons.includes(s.season)).map((s: any) => ({
         id: `s${s.season}`,
         seasonNumber: s.season,
@@ -1039,21 +1040,10 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
         airDate: s.airDate || s.air_date || '',
         isUpcoming: Boolean((s.airDate || s.air_date) && new Date(s.airDate || s.air_date).getTime() > Date.now()),
         trailerUrl: s.trailerUrl || '',
-        episodes: (s.episodes || [])
-          .filter((e: any) => {
-            if (addUpcomingEpisodes) return true;
-            const rawAirDate = e.air_date || e.airDate || '';
-            const isFuture = rawAirDate ? new Date(rawAirDate).getTime() > Date.now() : false;
-            const hasLinks = e.links && Array.isArray(e.links) && e.links.some((l: any) => l.url && l.url.trim() !== '');
-            const isUpcoming = isFuture || !hasLinks;
-            return !isUpcoming;
-          })
-          .map((e: any) => {
+        episodes: (s.episodes || []).map((e: any) => {
           const rawAirDate = e.air_date || e.airDate || '';
           const isFuture = rawAirDate ? new Date(rawAirDate).getTime() > Date.now() : false;
-          const hasLinks = e.links && Array.isArray(e.links) && e.links.some((l: any) => l.url && l.url.trim() !== '');
-          const isUpcoming = isFuture || !hasLinks;
-          const airDate = isUpcoming ? rawAirDate : (includeEpisodeReleaseDates ? rawAirDate : '');
+          const airDate = isFuture ? rawAirDate : (includeEpisodeReleaseDates ? rawAirDate : '');
 
           return {
             id: `e${e.episode_number || e.episodeNumber}`,
@@ -1063,7 +1053,7 @@ export const MediaModal: React.FC<MediaModalProps> = ({ isOpen, onClose, initial
             duration: e.runtime ? `${e.runtime}m` : (e.duration || ''),
             links: e.links || [],
             airDate,
-            isUpcoming,
+            isUpcoming: isFuture,
           };
         })
       }));

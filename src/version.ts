@@ -9,7 +9,7 @@ declare const __BUILD_TIME__: string | undefined;
 export const APP_VERSION: string =
   typeof __APP_VERSION__ !== 'undefined'
     ? __APP_VERSION__
-    : (pkg.version || '3.2.2');
+    : (pkg.version || '0.0.0');
 
 export const BUILD_ID: string =
   typeof __BUILD_ID__ !== 'undefined'

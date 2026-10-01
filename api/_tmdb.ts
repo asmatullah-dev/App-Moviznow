@@ -6,7 +6,7 @@ export const tmdbRouter = express.Router();
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY || 'f71c2391161526fa9d19bd0b2759efaf';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
-const APP_VERSION = pkg.version || '3.2.2';
+const APP_VERSION = pkg.version || '0.0.0';
 
 // In-memory caching for TMDB responses to speed up repeated queries and minimize external traffic (0 Firestore cost)
 const tmdbMemoryCache = new Map<string, { data: any; expiry: number }>();

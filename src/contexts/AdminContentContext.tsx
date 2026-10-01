@@ -16,7 +16,7 @@ import { safeStorage } from '../utils/safeStorage';
 import { expandContent, CONTENT_CHUNK_MOVIE_SIZE, CONTENT_CHUNK_SERIES_SIZE } from '../utils/chunkUtils';
 import { getUtcVersion, parseVersionTime } from '../utils/chunkMeta';
 import { useAuth } from './AuthContext';
-import { useUsers } from './UsersContext';
+import { useUsers, ADMIN_EMAILS } from './UsersContext';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import { resetCollectionsFromStaticJson, getStaticExportCollections } from '../utils/staticContentLoader';
@@ -358,54 +358,61 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   };
 
   const finalizeChanges = async () => {
-    if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
+    const isAuthorized = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '') ||
+      (user?.email && ADMIN_EMAILS.includes(user.email.toLowerCase()));
+    if (!isAuthorized) {
+      throw new Error("Unauthorized: Only admins and content managers can sync content to the server.");
+    }
+
+    if (!navigator.onLine) {
+      throw new Error("Cannot sync while offline. Please check your internet connection and try again.");
+    }
 
     // First check and balance all content chunks locally before constructing the sync payload
     const { rebalanceLocalChunks } = await import('../utils/chunkUtils');
-    rebalanceLocalChunks();
+    rebalanceLocalChunks('admin_');
 
     const contentPendingStr = safeStorage.getItem('admin_pending_chunk_updates');
     const collectionPendingStr = safeStorage.getItem('admin_pending_collection_updates');
     const metadataPending = safeStorage.getItem('admin_pending_metadata_updates') === 'true';
+    const pendingItemsStr = safeStorage.getItem('admin_pending_item_updates');
 
     let pendingChunkIds: string[] = [];
     let pendingCollChunkIds: string[] = [];
     try { 
         if (contentPendingStr) {
             const rawIds: string[] = JSON.parse(contentPendingStr);
-            const uniqueIds = Array.from(new Set(rawIds));
-            // Filter out content chunks that are identical to the last known server state to minimize Firestore writes
-            pendingChunkIds = uniqueIds.filter(cid => {
-                const currentChunkStr = safeStorage.getItem('admin_content_chunk_' + cid);
-                const syncedStr = safeStorage.getItem('admin_synced_content_chunk_' + cid);
-                if (syncedStr && currentChunkStr === syncedStr) {
-                    console.log(`Bypassing write for content chunk ${cid} - matches server state`);
-                    return false;
+            if (Array.isArray(rawIds)) {
+                pendingChunkIds = Array.from(new Set(rawIds));
+            }
+        }
+    } catch(e) {}
+
+    // Also ensure any chunk IDs mentioned in pending item updates map are included
+    try {
+        if (pendingItemsStr) {
+            const itemsMap: Record<string, string[]> = JSON.parse(pendingItemsStr);
+            Object.keys(itemsMap).forEach(cid => {
+                if (!pendingChunkIds.includes(cid)) {
+                    pendingChunkIds.push(cid);
                 }
-                return true;
             });
         }
     } catch(e) {}
+
     try { 
         if (collectionPendingStr) {
             const rawIds: string[] = JSON.parse(collectionPendingStr);
-            const uniqueIds = Array.from(new Set(rawIds));
-            // Filter out collection chunks that are identical to the last known server state to minimize Firestore writes
-            pendingCollChunkIds = uniqueIds.filter(cid => {
-                const currentChunkStr = safeStorage.getItem('admin_collection_chunk_' + cid);
-                const syncedStr = safeStorage.getItem('admin_synced_collection_chunk_' + cid);
-                if (syncedStr && currentChunkStr === syncedStr) {
-                    console.log(`Bypassing write for collection chunk ${cid} - matches server state`);
-                    return false;
-                }
-                return true;
-            });
+            if (Array.isArray(rawIds)) {
+                pendingCollChunkIds = Array.from(new Set(rawIds));
+            }
         }
     } catch(e) {}
     
     if (pendingChunkIds.length === 0 && pendingCollChunkIds.length === 0 && !metadataPending) {
         safeStorage.removeItem('admin_pending_chunk_updates');
         safeStorage.removeItem('admin_pending_item_updates');
+        safeStorage.removeItem('admin_pending_created_items');
         safeStorage.removeItem('admin_pending_collection_updates');
         safeStorage.removeItem('admin_pending_metadata_updates');
         setHasPendingChanges(false);
@@ -416,8 +423,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         const batches: any[] = [writeBatch(db)];
         let opCount = 0;
         const addBatchOp = (fn: (b: any) => void) => {
-            // Keep batches small (max 5 large documents) to ensure fast, concurrent commits
-            if (opCount >= 5) {
+            if (opCount >= 400) {
                 batches.push(writeBatch(db));
                 opCount = 0;
             }
@@ -430,45 +436,42 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             lastGlobalUpdate: serverTimestamp() 
         };
 
-        // Handle content chunks
+        // Handle content chunks - sync all 100%
         const syncedContentToSave: Record<string, string> = {};
         if (pendingChunkIds.length > 0) {
             for (const cid of pendingChunkIds) {
-                const chunkStr = safeStorage.getItem('admin_content_chunk_' + cid);
-                if (chunkStr) {
-                    const parsedItems = JSON.parse(chunkStr);
-                    addBatchOp((batch) => {
-                        batch.set(doc(db, 'content_chunks', cid), { 
-                            items: parsedItems,
-                            updatedAt: serverTimestamp()
-                        }); // Overwrite document for massive speedups and proper item deletes
+                const chunkStr = safeStorage.getItem('admin_content_chunk_' + cid) || '{}';
+                const parsedItems = JSON.parse(chunkStr);
+                addBatchOp((batch) => {
+                    batch.set(doc(db, 'content_chunks', cid), { 
+                        items: parsedItems,
+                        updatedAt: serverTimestamp()
                     });
-                    
-                    syncedContentToSave[cid] = chunkStr;
-                    
-                    versionsUpdate[cid] = {
-                        updatedAt: utcNow,
-                        count: Object.keys(parsedItems).length
-                    };
-                }
+                });
+                
+                syncedContentToSave[cid] = chunkStr;
+                
+                versionsUpdate[cid] = {
+                    updatedAt: utcNow,
+                    count: Object.keys(parsedItems).length
+                };
             }
         }
 
-        // Handle collection chunks
+        // Handle collection chunks - sync all 100%
         const syncedCollToSave: Record<string, string> = {};
         if (pendingCollChunkIds.length > 0) {
             for (const cid of pendingCollChunkIds) {
-                const chunkStr = safeStorage.getItem('admin_collection_chunk_' + cid);
-                if (chunkStr) {
-                    addBatchOp((batch) => {
-                        batch.set(doc(db, 'collection_chunks', cid), {
-                            items: JSON.parse(chunkStr),
-                            updatedAt: serverTimestamp()
-                        }); // Overwrite document for massive speedups and proper item deletes
+                const chunkStr = safeStorage.getItem('admin_collection_chunk_' + cid) || '{}';
+                const parsedColl = JSON.parse(chunkStr);
+                addBatchOp((batch) => {
+                    batch.set(doc(db, 'collection_chunks', cid), {
+                        items: parsedColl,
+                        updatedAt: serverTimestamp()
                     });
+                });
 
-                    syncedCollToSave[cid] = chunkStr;
-                }
+                syncedCollToSave[cid] = chunkStr;
             }
             
             // Calculate true max index across all local collection chunks to avoid resetting latestChunkId to a lower value and losing collections
@@ -498,7 +501,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     languages: mLanguages,
                     qualities: mQualities,
                     updatedAt: serverTimestamp()
-                }); // Overwrite document
+                });
             });
             
             versionsUpdate.metadata = {
@@ -510,9 +513,11 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             batch.set(doc(db, 'chunk_meta', 'versions'), versionsUpdate, { merge: true });
         });
 
-        await Promise.all(batches.map(b => runWithNetwork(() => b.commit())));
+        for (const b of batches) {
+            await runWithNetwork(() => b.commit());
+        }
 
-        // Only save synced cache references after commits succeed
+        // Only save synced cache references after all commits succeed
         for (const [cid, chunkStr] of Object.entries(syncedContentToSave)) {
             safeStorage.setItem('admin_synced_content_chunk_' + cid, chunkStr);
         }
@@ -533,6 +538,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
         safeStorage.removeItem('admin_pending_chunk_updates');
         safeStorage.removeItem('admin_pending_item_updates');
+        safeStorage.removeItem('admin_pending_created_items');
         safeStorage.removeItem('admin_pending_collection_updates');
         safeStorage.removeItem('admin_pending_metadata_updates');
 
@@ -543,14 +549,15 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         setHasPendingChanges(false);
         refreshContentFromLocal();
         refreshCollectionsFromLocal();
-        console.log(`Sync successful.`);
+        window.dispatchEvent(new CustomEvent('admin_content_synced'));
+        window.dispatchEvent(new CustomEvent('content_updated_locally'));
+        console.log(`Sync successful: All pending changes synced to server.`);
     } catch (e) {
-        console.error("Sync failed", e);
+        console.error("Sync failed - pending changes preserved locally:", e);
+        setHasPendingChanges(true);
         throw e;
     }
   };
-
-
 
   const augmentedContentList = useMemo(() => {
     return contentList.map(c => {

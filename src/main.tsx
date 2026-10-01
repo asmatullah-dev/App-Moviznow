@@ -52,21 +52,30 @@ let initialOpenRetryAttempted = false;
 const handleVersionSuccess = (serverVersion: string) => {
   if (!serverVersion || serverVersion === 'unknown') return;
 
-  // On initial open/launch: record current running server version without reloading
+  const clientBuildId = CURRENT_BUILD_ID || APP_VERSION;
+
+  // On first check or runtime check: compare live server version with client bundle build ID
   if (knownServerVersion === null) {
     knownServerVersion = serverVersion;
-    console.log('[Auto-Update] Server version initialized:', serverVersion);
+    console.log('[Auto-Update] Version initialized - Server:', serverVersion, '| Client Bundle:', clientBuildId);
+
+    // If server version differs from client bundle (stale PWA/cache loaded after new Vercel deployment)
+    if (clientBuildId && serverVersion !== clientBuildId) {
+      console.log('[Auto-Update] Stale client bundle detected on app open! Server:', serverVersion, 'Client:', clientBuildId);
+      triggerAppReload(`New Vercel deployment live (Server: ${serverVersion}, Client: ${clientBuildId})`);
+    }
     return;
   }
 
-  // If server version changes while the app is running in background (new deployment published):
-  if (serverVersion !== knownServerVersion) {
-    console.log('[Auto-Update] Newer version detected during runtime!', {
+  // If server version changes while app stays open (new Vercel deployment published)
+  if (serverVersion !== knownServerVersion || (clientBuildId && serverVersion !== clientBuildId)) {
+    console.log('[Auto-Update] Newer deployment detected during runtime!', {
       previous: knownServerVersion,
+      clientBuild: clientBuildId,
       newServer: serverVersion,
     });
     knownServerVersion = serverVersion;
-    triggerAppReload(`Newer version detected (Server updated to: ${serverVersion})`);
+    triggerAppReload(`New Vercel deployment detected (Server updated to: ${serverVersion})`);
   }
 };
 
@@ -78,17 +87,16 @@ const handleVersionFailure = (trigger: 'open' | 'open_retry' | 'background', err
   }
 
   if (trigger === 'open') {
-    // If the initial check fails on open: retry after 30 seconds
+    // If the initial check fails on open: retry after 15 seconds
     if (!initialOpenRetryAttempted) {
       initialOpenRetryAttempted = true;
-      console.log('[Auto-Update] Open version check failed. Retrying in 30 seconds...');
+      console.log('[Auto-Update] Open version check failed. Retrying in 15 seconds...');
       setTimeout(() => {
         checkDeploymentVersion('open_retry');
-      }, 30000);
+      }, 15000);
     }
   } else if (trigger === 'open_retry') {
-    // If the retry also fails: don't try again until the app is opened again!
-    console.log('[Auto-Update] 30-second retry failed. Will not retry open-check again until app is reopened.');
+    console.log('[Auto-Update] Retry failed. Will check again on 5-min interval or tab resume.');
   }
 };
 
@@ -101,11 +109,15 @@ const checkDeploymentVersion = async (trigger: 'open' | 'open_retry' | 'backgrou
   
   isCheckingDeployment = true;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 4000);
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
 
   try {
     const res = await fetch(`/api/version?_t=${Date.now()}`, { 
       cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      },
       signal: controller.signal
     });
     clearTimeout(timeoutId);
@@ -132,27 +144,32 @@ const checkDeploymentVersion = async (trigger: 'open' | 'open_retry' | 'backgrou
 
 // Check version on launch and periodically / on resume
 if (typeof window !== 'undefined') {
-  // 1. Check API version after initial UI paint finishes (non-blocking for app rendering)
+  // 1. Check version immediately on app open (800ms after load)
   setTimeout(() => {
     checkDeploymentVersion('open');
-  }, 3500);
+  }, 800);
   
-  // 2. Keep checking the version in background every 5 minutes
+  // 2. Keep checking the version in background every 5 minutes while app stays open
   setInterval(() => {
     checkDeploymentVersion('background');
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistration().then((reg) => {
+        if (reg) reg.update().catch(() => {});
+      }).catch(() => {});
+    }
   }, 5 * 60 * 1000);
   
-  // 3. Background check when user resumes the tab
+  // 3. Background check whenever user re-opens / resumes the tab
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
-      checkDeploymentVersion('background');
+      checkDeploymentVersion('open');
     }
   });
 
   // 4. Background check when connection is restored
   window.addEventListener('online', () => {
-    console.log('[Auto-Update] Online event received, checking version in background...');
-    checkDeploymentVersion('background');
+    console.log('[Auto-Update] Online event received, checking version...');
+    checkDeploymentVersion('open');
   });
 }
 

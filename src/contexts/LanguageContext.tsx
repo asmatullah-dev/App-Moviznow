@@ -195,6 +195,10 @@ const translations: Record<string, Record<Language, string>> = {
   'Safe legal alternative hai — full HD Bollywood, Hollywood, Punjabi aur Pakistani movies sirf PKR 50 me, seedha WhatsApp par delivery. Ek biscuit ki price me poori HD movie.': { en: 'Safe legal alternative hai — full HD Bollywood, Hollywood, Punjabi aur Pakistani movies sirf PKR 50 me, seedha WhatsApp par delivery. Ek biscuit ki price me poori HD movie.', 'ur-roman': 'Ye ek mehfooz kanooni mutabadil hai — full HD Bollywood, Hollywood, Punjabi aur Pakistani movies sirf PKR 50 mein, seedha WhatsApp par delivery. Ek biscuit ki qeemat mein poori HD movie.', ur: 'یہ ایک محفوظ قانونی متبادل ہے — فل ایچ ڈی بالی ووڈ، ہالی ووڈ، پنجابی اور پاکستانی موویز صرف 50 روپے میں، سیدھا واٹس ایپ پر ڈیلیوری۔ ایک بسکٹ کی قیمت میں پوری ایچ ڈی مووی۔' },
 
 
+  'Terms of Service': { en: 'Terms of Service', 'ur-roman': 'Khidmat ke Qawaneen', ur: 'شرائط و ضوابط' },
+  'Privacy Policy': { en: 'Privacy Policy', 'ur-roman': 'Privacy Policy', ur: 'رازداری کی پالیسی' },
+  'Legal & Compliance': { en: 'Legal & Compliance', 'ur-roman': 'Qanooni & Compliance', ur: 'قانونی اور تعمیل' },
+  'Your Privacy & Security': { en: 'Your Privacy & Security', 'ur-roman': 'Aapki Privacy & Security', ur: 'آپ کی رازداری اور تحفظ' },
   'Delete Review': { en: 'Delete Review', 'ur-roman': 'Review Delete Karein', ur: 'جائزہ حذف کریں' },
   'No reviews yet. Be the first to review!': { en: 'No reviews yet. Be the first to review!', 'ur-roman': 'Abhi tak koi review nahi. Pehla review ap dein!', ur: 'ابھی تک کوئی جائزہ نہیں۔ پہلا جائزہ آپ دیں!' },
   'Based on %COUNT% reviews': { en: 'Based on %COUNT% reviews', 'ur-roman': '%COUNT% reviews par mabni', ur: '%COUNT% جائزے کی بنیاد پر' },

@@ -101,6 +101,8 @@ export interface UserProfile {
   watched?: string[]; // Array of minimal watched keys (max 50, e.g. id or id:s#e#)
   movieRequests?: any[];
   trialActivated?: boolean;
+  provider?: string;
+  isGoogleUser?: boolean;
   notification?: 'yes' | 'no';
   emailNotificationsEnabled?: boolean;
   emailNotificationsDisabled?: boolean;

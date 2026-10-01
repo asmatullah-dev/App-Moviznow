@@ -44,6 +44,8 @@ import Membership from './pages/user/Membership';
 import Reviews from './pages/user/Reviews';
 import About from './pages/user/About';
 import Contact from './pages/user/Contact';
+import Terms from './pages/user/Terms';
+import PrivacyPolicy from './pages/user/PrivacyPolicy';
 import WatchLater from './pages/user/WatchLater';
 import Favorites from './pages/user/Favorites';
 import Trial from './pages/user/Trial';
@@ -334,6 +336,10 @@ export default function App() {
                         <Route path="/reviews" element={<ProtectedRoute><Reviews /></ProtectedRoute>} />
                         <Route path="/about" element={<ProtectedRoute><About /></ProtectedRoute>} />
                         <Route path="/contact" element={<ProtectedRoute><Contact /></ProtectedRoute>} />
+                        <Route path="/terms" element={<ProtectedRoute><Terms /></ProtectedRoute>} />
+                        <Route path="/terms-of-service" element={<ProtectedRoute><Terms /></ProtectedRoute>} />
+                        <Route path="/privacy" element={<ProtectedRoute><PrivacyPolicy /></ProtectedRoute>} />
+                        <Route path="/privacy-policy" element={<ProtectedRoute><PrivacyPolicy /></ProtectedRoute>} />
                         
                         {/* Admin Routes */}
                         <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminLayout /></ProtectedRoute>}>

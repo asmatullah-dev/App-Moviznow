@@ -8,7 +8,7 @@ import { Helmet } from 'react-helmet-async';
 
 export default function VipTrial() {
   const { t } = useLanguage();
-  const { user, profile, loading, authLoading, updateUserProfileData, refreshProfile } = useAuth();
+  const { user, profile, loading, authLoading, updateUserProfileData, refreshProfile, isPhoneWhitelisted } = useAuth();
   const { settings } = useSettings();
   const navigate = useNavigate();
   const [status, setStatus] = useState<'loading' | 'missing_phone' | 'success' | 'error' | 'disabled'>('loading');
@@ -75,12 +75,42 @@ export default function VipTrial() {
       return;
     }
 
-    activateTrial();
-  }, [user, profile, loading, authLoading, navigate, settings]);
+    const isGoogleUser = user?.providerData?.some(p => p.providerId === 'google.com') || (Boolean(user?.email) && !user?.email?.endsWith('@moviznow.com'));
+
+    // Non-Google (phone-only) users must have a whitelisted WhatsApp number
+    if (!isGoogleUser) {
+      isPhoneWhitelisted(profile.phone).then((whitelisted) => {
+        if (!whitelisted) {
+          setStatus('error');
+          setMessage(t('This WhatsApp number is not authorized / whitelisted for trial access. Please contact admin.'));
+          return;
+        }
+        activateTrial();
+      }).catch(() => {
+        setStatus('error');
+        setMessage(t('Failed to verify authorization. Please try again or contact admin.'));
+      });
+    } else {
+      activateTrial();
+    }
+  }, [user, profile, loading, authLoading, navigate, settings, isPhoneWhitelisted, t]);
 
   const activateTrial = async () => {
     hasActivatedRef.current = true;
     try {
+      // Guard against non-whitelisted trial activation for non-Google users
+      const isGoogleUser = user?.providerData?.some(p => p.providerId === 'google.com') || (Boolean(user?.email) && !user?.email?.endsWith('@moviznow.com'));
+      const phoneToCheck = profile?.phone || phoneNumber;
+      if (!isGoogleUser && phoneToCheck) {
+        const isWhitelisted = await isPhoneWhitelisted(phoneToCheck);
+        if (!isWhitelisted) {
+          hasActivatedRef.current = false;
+          setStatus('error');
+          setMessage(t('This WhatsApp number is not authorized / whitelisted for trial access. Please contact admin.'));
+          return;
+        }
+      }
+
       const now = new Date();
       const expiry = new Date(now);
       
@@ -138,6 +168,15 @@ export default function VipTrial() {
 
     try {
       setIsSubmittingPhone(true);
+      const isGoogleUser = user?.providerData?.some(p => p.providerId === 'google.com') || (Boolean(user?.email) && !user?.email?.endsWith('@moviznow.com'));
+      if (!isGoogleUser) {
+        const isWhitelisted = await isPhoneWhitelisted(standardized);
+        if (!isWhitelisted) {
+          setPhoneError(t('This WhatsApp number is not authorized / whitelisted for trial access. Please contact admin.'));
+          setIsSubmittingPhone(false);
+          return;
+        }
+      }
       await updateUserProfileData({ phone: standardized }, undefined, true);
       await refreshProfile();
       setStatus('loading');

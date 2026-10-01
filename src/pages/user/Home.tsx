@@ -1699,6 +1699,24 @@ export default function Home({
           </div>
         </Link>
 
+        <div className="flex items-center justify-center gap-3 mt-1 text-xs text-zinc-500">
+          <Link to="/about" className="hover:text-emerald-500 transition-colors">
+            {t("About")}
+          </Link>
+          <span>·</span>
+          <Link to="/contact" className="hover:text-emerald-500 transition-colors">
+            {t("Contact")}
+          </Link>
+          <span>·</span>
+          <Link to="/terms" className="hover:text-emerald-500 transition-colors">
+            {t("Terms of Service")}
+          </Link>
+          <span>·</span>
+          <Link to="/privacy" className="hover:text-emerald-500 transition-colors">
+            {t("Privacy Policy")}
+          </Link>
+        </div>
+
         <div className="flex flex-col items-center justify-center gap-1 mt-2">
           <button
             onClick={() => {

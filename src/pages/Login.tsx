@@ -267,8 +267,13 @@ export default function Login() {
           setIdentifier(formatted);
         }
         
-        // Double check: if found user is associated with a phone number, ensure it is whitelisted
-        if (foundUser.phone || foundUser.email?.endsWith('@moviznow.com')) {
+        // Double check: if found user is associated with a phone number, ensure it is whitelisted (ONLY for non-Google accounts)
+        const isGoogleFoundUser = Boolean(
+          foundUser.provider === 'google.com' ||
+          foundUser.isGoogleUser === true ||
+          (foundUser.email && !foundUser.email.endsWith('@moviznow.com') && foundUser.email.includes('@'))
+        );
+        if (!isGoogleFoundUser && (foundUser.phone || foundUser.email?.endsWith('@moviznow.com'))) {
           const userPhone = foundUser.phone || foundUser.email?.split('@')[0] || '';
           if (userPhone) {
             const isWhitelisted = await isPhoneWhitelisted(userPhone);

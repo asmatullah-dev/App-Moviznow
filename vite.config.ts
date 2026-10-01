@@ -7,7 +7,7 @@ import pkg from './package.json' with { type: 'json' };
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
-  const appVersion = pkg.version || '3.2.2';
+  const appVersion = pkg.version || '0.0.0';
   const buildId = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || process.env.npm_package_version || appVersion;
   const buildTime = new Date().toISOString();
 

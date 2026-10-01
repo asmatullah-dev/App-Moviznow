@@ -73,6 +73,8 @@ interface AuthContextType {
     email?: string,
   ) => Promise<void>;
   isPhoneWhitelisted: (phone: string) => Promise<boolean>;
+  whitelistPhoneNumber: (phone: string) => Promise<boolean>;
+  unwhitelistPhoneNumber: (phone: string) => Promise<boolean>;
   findUsersByEmailOrPhone: (identifier: string) => Promise<UserProfile[]>;
   updateUserPassword: (newPassword: string) => Promise<void>;
   updateUserProfileData: (
@@ -92,6 +94,7 @@ interface AuthContextType {
     force?: boolean,
     reason?: "auto" | "manual" | "login" | "logout",
   ) => Promise<boolean>;
+  purgeAllUserDataCache: (uid?: string, email?: string) => void;
   isSyncing: boolean;
 }
 
@@ -177,6 +180,135 @@ const persistProfileCache = (p: UserProfile | null) => {
         window.localStorage.setItem("profile_cache_timestamp", Date.now().toString());
       }
     } catch (e) {}
+  }
+};
+
+export const purgeAllUserDataCache = (uid?: string, email?: string) => {
+  try {
+    const specificKeys = [
+      "profile_cache",
+      "profile_cache_timestamp",
+      "profile_doc_snap",
+      "pending_user_updates",
+      "needs_user_sync",
+      "pending_favorites_array",
+      "pending_watch_later_array",
+      "pending_watched_marks",
+      "pending_content_clicks",
+      "pending_link_clicks",
+      "pending_orders_array",
+      "cached_chunk_users_versions",
+      "pending_signup_profile",
+      "pending_signup_phone",
+      "referral_stats_count",
+      "referral_stats_activated",
+      "referral_users_list",
+      "session_started",
+      "user_favorites",
+      "user_watch_later",
+      "user_watched",
+      "user_history",
+      "click_history",
+      "app_user_data",
+      "sync_user_mtimes",
+      "last_users_sync_timestamp",
+    ];
+
+    if (uid) {
+      specificKeys.push(
+        `profile_version_${uid}`,
+        `last_session_start_${uid}`,
+        `last_user_sync_time_v2_${uid}`,
+        `referral_stats_count_${uid}`,
+        `referral_stats_activated_${uid}`,
+        `referral_users_list_${uid}`,
+        `user_favorites_${uid}`,
+        `user_watch_later_${uid}`,
+        `user_history_${uid}`,
+        `user_watched_${uid}`,
+        `pending_access_${uid}`
+      );
+    }
+
+    if (email) {
+      const emailNorm = email.trim().toLowerCase();
+      specificKeys.push(
+        `welcome_email_sent_${emailNorm}`,
+        `user_email_${emailNorm}`
+      );
+    }
+
+    specificKeys.forEach((key) => {
+      safeStorage.removeItem(key);
+      try {
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem(key);
+          window.sessionStorage.removeItem(key);
+        }
+      } catch (e) {}
+    });
+
+    // Deep clean all matching keys in localStorage and sessionStorage
+    if (typeof window !== "undefined") {
+      try {
+        const lsKeys: string[] = [];
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const k = window.localStorage.key(i);
+          if (k) lsKeys.push(k);
+        }
+        lsKeys.forEach((k) => {
+          if (
+            (uid && k.includes(uid)) ||
+            k.startsWith("profile_version_") ||
+            k.startsWith("last_user_sync_time_") ||
+            k.startsWith("last_session_start_") ||
+            k.startsWith("user_favorites_") ||
+            k.startsWith("user_watch_later_") ||
+            k.startsWith("user_watched_") ||
+            k.startsWith("referral_stats_") ||
+            k.startsWith("pending_user_") ||
+            k.startsWith("pending_access_")
+          ) {
+            window.localStorage.removeItem(k);
+            safeStorage.removeItem(k);
+          }
+        });
+      } catch (e) {}
+
+      try {
+        const ssKeys: string[] = [];
+        for (let i = 0; i < window.sessionStorage.length; i++) {
+          const k = window.sessionStorage.key(i);
+          if (k) ssKeys.push(k);
+        }
+        ssKeys.forEach((k) => {
+          if (
+            (uid && k.includes(uid)) ||
+            k.startsWith("pending_") ||
+            k.startsWith("user_") ||
+            k.startsWith("profile_")
+          ) {
+            window.sessionStorage.removeItem(k);
+          }
+        });
+      } catch (e) {}
+    }
+
+    // Also prune from cached_all_users if UID is known
+    if (uid) {
+      try {
+        const cachedUsersStr = safeStorage.getItem("cached_all_users");
+        if (cachedUsersStr) {
+          const list = JSON.parse(cachedUsersStr);
+          if (Array.isArray(list)) {
+            const filtered = list.filter((u: any) => u.uid !== uid);
+            safeStorage.setItem("cached_all_users", JSON.stringify(filtered));
+          }
+        }
+      } catch (e) {}
+    }
+  } catch (err) {
+    console.warn("Error purging user data cache:", err);
   }
 };
 
@@ -424,6 +556,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoading(false); // Unblock immediately if we have cached data
         }
 
+        const performEnforcedSignout = async (reasonMsg: string) => {
+          const userUid = currentUser?.uid;
+          const userEmail = currentUser?.email || localProfile?.email;
+          try {
+            await signOut(auth);
+          } catch (e) {}
+          setProfile(null);
+          setUser(null);
+          purgeAllUserDataCache(userUid, userEmail);
+          setError(reasonMsg);
+          setLoading(false);
+          setAuthLoading(false);
+          if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+            window.location.replace('/login');
+          }
+        };
+
+        const isGoogleOrGmailUser = Boolean(
+          (currentUser.email && currentUser.email.toLowerCase().endsWith("@gmail.com")) ||
+          currentUser.providerData?.some(p => p.providerId === "google.com") ||
+          (currentUser.email && !currentUser.email.endsWith("@moviznow.com") && currentUser.email.includes("@")) ||
+          (localProfile?.email && localProfile.email.toLowerCase().endsWith("@gmail.com")) ||
+          (localProfile?.email && !localProfile.email.endsWith("@moviznow.com") && localProfile.email.includes("@")) ||
+          localProfile?.provider === "google.com" ||
+          localProfile?.isGoogleUser === true ||
+          currentUser.photoURL?.includes("googleusercontent.com")
+        );
+
         // 1. Firstly read chunk_meta
         let serverVersion: any = localVersion;
         let isVersionMissing = false;
@@ -444,6 +604,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               if (serverVersion === -1 || verObj?.deleted) {
                 isUidInChunkMeta = false;
                 isVersionMissing = true;
+
+                // Explicitly deleted user in chunk_meta - immediately sign out and proceed to login
+                if (!justLoggedInRef.current && !safeStorage.getItem("pending_signup_profile")) {
+                  console.warn(`User UID ${currentUser.uid} marked deleted in chunk_meta. Enforcing signout.`);
+                  await performEnforcedSignout("Your account has been deleted or deactivated. Please log in or contact admin.");
+                  return false;
+                }
               } else {
                 isUidInChunkMeta = true;
               }
@@ -454,6 +621,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           } catch (e) {
             console.error("Failed to fetch chunk_meta for profile:", e);
           }
+        }
+
+        // If UID is missing in chunk_meta:
+        // Check if user is authorized via Google/Gmail or whitelisted WhatsApp number.
+        // If neither Google nor whitelisted, user is a ghost / removed user and must relogin.
+        let isUserPhoneAuthorized = false;
+        if (!isGoogleOrGmailUser && navigator.onLine) {
+          let phoneToCheck = (localProfile?.phone || currentUser.phoneNumber || "").trim();
+          if (!phoneToCheck && (currentUser.email?.endsWith("@moviznow.com") || localProfile?.email?.endsWith("@moviznow.com"))) {
+            phoneToCheck = (currentUser.email || localProfile?.email || "").replace("@moviznow.com", "");
+          }
+          if (phoneToCheck) {
+            const standardized = standardizePhone(phoneToCheck);
+            isUserPhoneAuthorized = await isPhoneWhitelisted(standardized);
+          }
+        }
+
+        const userEmailLowerEarly = (currentUser.email || localProfile?.email || "").toLowerCase();
+        const isOwnerEarly = userEmailLowerEarly === "asmatn628@gmail.com";
+        const isAdminEarly = [
+          "asmatullah9327@gmail.com",
+          "kabirahmaddev@gmail.com",
+          "wamoviesstation@gmail.com",
+        ].includes(userEmailLowerEarly);
+        const hasAdminPrivilegesEarly =
+          isOwnerEarly ||
+          isAdminEarly ||
+          localProfile?.role === "owner" ||
+          localProfile?.role === "admin" ||
+          localProfile?.role === "manager" ||
+          localProfile?.role === "user_manager";
+
+        if (
+          navigator.onLine &&
+          isChunkMetaChecked &&
+          !isUidInChunkMeta &&
+          !hasAdminPrivilegesEarly &&
+          !isGoogleOrGmailUser &&
+          !isUserPhoneAuthorized &&
+          !justLoggedInRef.current &&
+          !safeStorage.getItem("pending_signup_profile")
+        ) {
+          console.warn(`User ${currentUser.uid} has missing UID in chunk_meta and is neither Google/Gmail nor whitelisted. Enforcing signout.`);
+          await performEnforcedSignout("This account is not authorized. Please log in with Google or an authorized WhatsApp number.");
+          return false;
         }
 
         // 2. If version changes found
@@ -471,11 +683,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             docSnap = await runWithNetwork(() => getDoc(userRef));
             if (docSnap.exists()) {
               serverProfile = docSnap.data() as UserProfile;
+              // Only sign out if user account status is explicitly set to "deleted" by admin
+              if (serverProfile.status === "deleted") {
+                console.warn(`User UID ${currentUser.uid} marked status="deleted". Enforcing signout.`);
+                await performEnforcedSignout("Your account has been deleted or deactivated. Please contact admin.");
+                return false;
+              }
+              // If user UID was missing in chunk_meta but document exists in Firestore and user is authorized (Google/Gmail or whitelisted phone):
+              // Self-heal chunk_meta so UID is registered and subsequent checks succeed seamlessly
+              if (!isUidInChunkMeta && (isGoogleOrGmailUser || isUserPhoneAuthorized)) {
+                try {
+                  const { setDoc } = await import("firebase/firestore");
+                  const healVer = getUtcVersion();
+                  await setDoc(doc(db, "chunk_meta", "versions"), {
+                    users: { [currentUser.uid]: healVer }
+                  }, { merge: true });
+                  const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
+                  updateChunkMetaLocalCache({ users: { [currentUser.uid]: healVer } });
+                } catch (metaErr) {}
+              }
               updatedSomething = true;
             } else {
               console.log(
-                `User UID ${currentUser.uid} document not found in Firestore user data.`
+                `User UID ${currentUser.uid} document not found in Firestore server check.`
               );
+              // Missing UID in Firestore from local check to server: removed or deleted user that needs to relogin
+              if (!justLoggedInRef.current && !safeStorage.getItem("pending_signup_profile")) {
+                console.warn(`User UID ${currentUser.uid} is missing from Firestore on server check. Enforcing signout to relogin.`);
+                await performEnforcedSignout("Your account was not found on the server or has been removed. Please log in again.");
+                return false;
+              }
             }
           } catch (e) {
             console.error(
@@ -893,24 +1130,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          // Whitelist check for non-admin accounts with phone numbers (skip if already approved/active, or if logged in via Google)
-          const isGoogleUser = currentUser.providerData?.some(p => p.providerId === "google.com") || currentUser.email?.endsWith("@gmail.com");
-          if (!hasAdminPrivileges && data.status !== "active" && !isGoogleUser) {
-            let phoneToCheck = data.phone || currentUser.phoneNumber || "";
-            if (!phoneToCheck && currentUser.email?.endsWith("@moviznow.com")) {
-              phoneToCheck = currentUser.email.replace("@moviznow.com", "");
+          // Whitelist & Google check while refresh:
+          // If Gmail is not linked or missing or not logged in with google and phone number is also not in white list while refresh then immediately sign out and proceed to login page for login
+          // But be careful don't sign out for users who has correct Gmail or logged in with google and also don't sign out if user phone number has whitelisted
+          const hasValidGmail = Boolean(
+            (currentUser.email && currentUser.email.toLowerCase().endsWith("@gmail.com")) ||
+            currentUser.providerData?.some(p => p.providerId === "google.com") ||
+            (currentUser.email && !currentUser.email.endsWith("@moviznow.com") && currentUser.email.includes("@")) ||
+            (data?.email && data.email.toLowerCase().endsWith("@gmail.com")) ||
+            (data?.email && !data.email.endsWith("@moviznow.com") && data.email.includes("@")) ||
+            data?.provider === "google.com" ||
+            data?.isGoogleUser === true ||
+            currentUser.photoURL?.includes("googleusercontent.com")
+          );
+
+          if (!hasAdminPrivileges && navigator.onLine) {
+            let phoneToCheck = (data.phone || currentUser.phoneNumber || "").trim();
+            if (!phoneToCheck && (currentUser.email?.endsWith("@moviznow.com") || data.email?.endsWith("@moviznow.com"))) {
+              phoneToCheck = (currentUser.email || data.email || "").replace("@moviznow.com", "");
             }
+
+            let isWhitelisted = false;
             if (phoneToCheck) {
               const standardized = standardizePhone(phoneToCheck);
-              const isWhitelisted = await isPhoneWhitelisted(standardized);
-              if (!isWhitelisted) {
-                console.warn(`User phone ${standardized} is not whitelisted. Enforcing signout.`);
-                await signOut(auth);
-                setProfile(null);
-                safeStorage.removeItem("profile_cache");
-                safeStorage.removeItem("profile_cache_timestamp");
-                setError("This WhatsApp number is not authorized. Please contact admin.");
-                setLoading(false);
+              isWhitelisted = await isPhoneWhitelisted(standardized);
+            }
+
+            // Not logged in by Google / missing gmail AND phone number is not whitelisted
+            if (!hasValidGmail && !isWhitelisted) {
+              if (!justLoggedInRef.current && !safeStorage.getItem("pending_signup_profile")) {
+                console.warn(`User ${currentUser.uid} has no valid Gmail and WhatsApp number is not whitelisted. Enforcing signout.`);
+                // If trial was active on non-whitelisted number, reset trial status in Firestore so admin database stays clean
+                if (data.role === "trial" || data.trialActivated) {
+                  try {
+                    const { updateDoc } = await import("firebase/firestore");
+                    await updateDoc(userRef, {
+                      status: "pending",
+                      role: "user",
+                      trialActivated: false,
+                      expiryDate: null,
+                    });
+                  } catch (e) {}
+                }
+                await performEnforcedSignout("This account is not authorized. Please log in with Google or an authorized WhatsApp number.");
                 return false;
               }
             }
@@ -1073,14 +1335,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
              return false;
           }
 
-          // Whitelist check for new accounts with phone (if not owner/admin)
-          if (!isOwner && !isAdmin && standardizedUserPhone) {
+          const isGoogleUserAccount = currentUser.providerData?.some(p => p.providerId === "google.com") || (Boolean(currentUser.email) && !currentUser.email?.endsWith("@moviznow.com"));
+
+          // Whitelist check for new non-Google accounts with phone (if not owner/admin)
+          if (!isOwner && !isAdmin && !isGoogleUserAccount && standardizedUserPhone) {
             const isWhitelisted = await isPhoneWhitelisted(standardizedUserPhone);
             if (!isWhitelisted) {
               await signOut(auth);
               setProfile(null);
-              safeStorage.removeItem("profile_cache");
-              safeStorage.removeItem("profile_cache_timestamp");
+              purgeAllUserDataCache(currentUser.uid, currentUser.email || undefined);
               setError("This WhatsApp number is not authorized for new account creation. Please contact admin.");
               setLoading(false);
               return false;
@@ -1743,7 +2006,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       // Before getting the new uid doc, check if email already exists for merging
       let oldDocData = null;
-      let shouldSignOutDeleted = false;
       if (result.user.email) {
         try {
           const { collection, query, where, getDocs, limit } = await import("firebase/firestore");
@@ -1751,13 +2013,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const q = query(usersRef, where("email", "==", result.user.email), limit(10));
           const qs = await getDocs(q);
           
-          // Find existing doc with different UID
+          // Find existing doc with different UID for data merging
           const existingDoc = qs.docs.find(d => d.id !== result.user.uid);
           if (existingDoc) {
             oldDocData = existingDoc.data();
-            if (oldDocData.status === "deleted") {
-              shouldSignOutDeleted = true;
-            }
           }
         } catch (queryErr) {
           // Fallback to locally cached users list if Firestore query is restricted or offline
@@ -1772,20 +2031,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 );
                 if (existing) {
                   oldDocData = existing;
-                  if (oldDocData.status === "deleted") {
-                    shouldSignOutDeleted = true;
-                  }
                 }
               }
             }
           } catch (e) {}
         }
-      }
-
-      if (shouldSignOutDeleted) {
-        justLoggedInRef.current = false;
-        await signOut(auth);
-        throw new Error("Your account has been deleted or blocked.");
       }
 
       let snap: any = null;
@@ -1857,8 +2107,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const applyUpdates = async () => {
         if (Object.keys(updates).length > 0) {
           try {
-            const { setDoc} = await import("firebase/firestore");
+            const { setDoc } = await import("firebase/firestore");
             await setDoc(userRef, updates, { merge: true });
+            const googleUtcVer = getUtcVersion();
+            await setDoc(doc(db, "chunk_meta", "versions"), {
+              users: { [result.user.uid]: googleUtcVer }
+            }, { merge: true });
+            try {
+              const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
+              updateChunkMetaLocalCache({ users: { [result.user.uid]: googleUtcVer } });
+            } catch (e) {}
             setProfile((prev: any) => {
               if (!prev) return prev;
               const newProfile = { ...prev, ...updates };
@@ -2263,6 +2521,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return false;
     } catch (err) {
       console.error("Error checking whitelisted phone:", err);
+      return false;
+    }
+  };
+
+  const whitelistPhoneNumber = async (phone: string): Promise<boolean> => {
+    const standardized = standardizePhone(phone);
+    if (!standardized) return false;
+    try {
+      const docRef = doc(db, "settings", "whitelisted_phones");
+      const snap = await getDoc(docRef);
+      let list: string[] = [];
+      if (snap.exists()) {
+        const data = snap.data();
+        list = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
+      }
+      if (!list.includes(standardized)) {
+        list = [...list, standardized];
+        await setDoc(docRef, { numbers: list, updatedAt: new Date().toISOString() }, { merge: true });
+      }
+      return true;
+    } catch (err) {
+      console.error("Error adding whitelisted phone:", err);
+      return false;
+    }
+  };
+
+  const unwhitelistPhoneNumber = async (phone: string): Promise<boolean> => {
+    const standardized = standardizePhone(phone);
+    if (!standardized) return false;
+    try {
+      const docRef = doc(db, "settings", "whitelisted_phones");
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        const list: string[] = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
+        const filtered = list.filter((n) => standardizePhone(n) !== standardized);
+        await setDoc(docRef, { numbers: filtered, updatedAt: new Date().toISOString() }, { merge: true });
+      }
+      return true;
+    } catch (err) {
+      console.error("Error removing whitelisted phone:", err);
       return false;
     }
   };
@@ -2675,16 +2974,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     // Explicitly clear cache on intentional logout to ensure user is logged out
     persistProfileCache(null);
-    safeStorage.removeItem("cached_chunk_users_versions");
-    safeStorage.removeItem("referral_stats_count");
-    safeStorage.removeItem("referral_stats_activated");
-    safeStorage.removeItem("referral_users_list");
-    if (auth.currentUser) {
-      localStorage.removeItem(`last_user_sync_time_v2_${auth.currentUser.uid}`);
-      safeStorage.removeItem(`referral_stats_count_${auth.currentUser.uid}`);
-      safeStorage.removeItem(`referral_stats_activated_${auth.currentUser.uid}`);
-      safeStorage.removeItem(`referral_users_list_${auth.currentUser.uid}`);
-    }
+    purgeAllUserDataCache(auth.currentUser?.uid, profile?.email);
     setProfile(null);
     setUser(null);
 
@@ -2800,6 +3090,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signUpWithEmail,
         signUpWithPhoneAndPassword,
         isPhoneWhitelisted,
+        whitelistPhoneNumber,
+        unwhitelistPhoneNumber,
         findUsersByEmailOrPhone,
         updateUserPassword,
         updateUserProfileData,
@@ -2812,6 +3104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         watchedList,
         markMultipleWatched,
         refreshProfile,
+        purgeAllUserDataCache,
         isSyncing,
       }}
     >
