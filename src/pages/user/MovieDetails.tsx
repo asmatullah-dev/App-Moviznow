@@ -1774,7 +1774,7 @@ export default function MovieDetails() {
     if (!id || isOffline) return;
     const timer = setTimeout(() => {
       fetchMissingData();
-    }, 300);
+    }, 100);
     return () => clearTimeout(timer);
   }, [id, isOffline]);
 
