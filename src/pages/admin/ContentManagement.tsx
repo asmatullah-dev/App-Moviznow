@@ -1064,7 +1064,7 @@ export default function ContentManagement() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearchTerm(searchTerm);
-    }, 300);
+    }, 100);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 

@@ -115,6 +115,9 @@ export default defineConfig(({mode}) => {
             if (id.includes('node_modules/firebase/')) {
               return 'vendor-firebase';
             }
+            if (id.includes('node_modules/framer-motion/')) {
+              return 'vendor-framer';
+            }
             if (id.includes('node_modules/lucide-react/')) {
               return 'vendor-lucide';
             }

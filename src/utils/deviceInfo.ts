@@ -87,3 +87,25 @@ export async function getDeviceDetails() {
     type: result.device.type || 'desktop'
   };
 }
+
+/**
+ * Detects if the current device has low resources (<=3GB RAM, <=4 cores, or Data Saver enabled)
+ */
+export function isLowEndDevice(): boolean {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  
+  const nav = navigator as any;
+  if (nav.deviceMemory && nav.deviceMemory <= 3) {
+    return true;
+  }
+  
+  if (nav.hardwareConcurrency && nav.hardwareConcurrency <= 4) {
+    return true;
+  }
+  
+  if (nav.connection?.saveData || (nav.connection?.effectiveType && ['slow-2g', '2g', '3g'].includes(nav.connection.effectiveType))) {
+    return true;
+  }
+  
+  return false;
+}

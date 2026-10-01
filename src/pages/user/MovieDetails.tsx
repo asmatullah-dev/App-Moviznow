@@ -11,6 +11,8 @@ import { Helmet } from "react-helmet-async";
 
 import { AdBanner } from "../../components/AdBanner";
 import { isUserExemptFromAds, registerAppWhitelistedUrl } from "../../utils/adUtils";
+import { canManageContent, canUserStreamContent } from "../../utils/roleUtils";
+import { normalizeContentUrl, getCachedLinkExtraction, saveCachedLinkExtraction } from "../../utils/linkUtils";
 import { GuestAccessBanner } from "../../components/GuestAccessBanner";
 import { Content, QualityLinks, Season, Trailer } from "../../types";
 import { Translate } from "../../components/Translate";
@@ -136,6 +138,79 @@ import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
 import { VideoAdInterstitial } from "../../components/VideoAdInterstitial";
 
+function MovieDetailsSkeleton({ onBack }: { onBack?: () => void }) {
+  return (
+    <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white pb-20 overflow-x-hidden animate-pulse">
+      {/* Skeleton Hero Banner */}
+      <div className="relative min-h-[65vh] md:min-h-[75vh] w-full flex flex-col justify-end bg-zinc-200 dark:bg-zinc-900">
+        <div className="absolute top-0 left-0 w-full p-4 md:p-6 z-20 flex justify-between items-center">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-2 text-white bg-black/60 px-5 py-2.5 rounded-full border border-white/20 shadow-xl"
+          >
+            <ArrowLeft className="w-5 h-5" /> <span className="font-semibold text-sm">Back</span>
+          </button>
+          <div className="w-24 h-10 bg-black/60 rounded-full border border-white/20" />
+        </div>
+
+        <div className="relative z-10 flex items-end justify-center p-4 sm:p-8 pt-28 sm:pt-36 pb-6 w-full">
+          <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center md:items-end gap-6 sm:gap-10 w-full">
+            {/* Poster Skeleton */}
+            <div className="shrink-0 flex flex-col items-center gap-2.5">
+              <div className="w-44 sm:w-56 md:w-64 aspect-[2/3] rounded-2xl bg-zinc-300 dark:bg-zinc-800 shadow-2xl border border-white/10" />
+              <div className="w-40 h-8 rounded-xl bg-zinc-300 dark:bg-zinc-800" />
+            </div>
+
+            {/* Info Skeleton */}
+            <div className="flex-1 space-y-4 w-full flex flex-col items-center md:items-start">
+              <div className="flex gap-2">
+                <div className="w-16 h-6 rounded-full bg-zinc-300 dark:bg-zinc-800" />
+                <div className="w-14 h-6 rounded-full bg-zinc-300 dark:bg-zinc-800" />
+                <div className="w-20 h-6 rounded-full bg-zinc-300 dark:bg-zinc-800" />
+              </div>
+              <div className="w-3/4 max-w-md h-10 sm:h-14 rounded-2xl bg-zinc-300 dark:bg-zinc-800" />
+              <div className="w-1/2 max-w-xs h-6 rounded-xl bg-zinc-300 dark:bg-zinc-800" />
+              
+              <div className="flex flex-wrap gap-3 pt-3">
+                <div className="w-36 h-12 rounded-2xl bg-emerald-500/20" />
+                <div className="w-36 h-12 rounded-2xl bg-red-500/20" />
+                <div className="w-28 h-12 rounded-2xl bg-zinc-300 dark:bg-zinc-800" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Details Container Skeleton */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-8">
+        <div className="bg-zinc-100 dark:bg-zinc-900/60 rounded-3xl p-6 sm:p-8 border border-zinc-200 dark:border-zinc-800/80 space-y-5">
+          <div className="w-48 h-7 rounded-xl bg-zinc-300 dark:bg-zinc-800" />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div className="h-16 rounded-2xl bg-zinc-200 dark:bg-zinc-800/60" />
+            <div className="h-16 rounded-2xl bg-zinc-200 dark:bg-zinc-800/60" />
+            <div className="h-16 rounded-2xl bg-zinc-200 dark:bg-zinc-800/60" />
+          </div>
+          <div className="space-y-2 pt-2">
+            <div className="w-full h-4 rounded bg-zinc-200 dark:bg-zinc-800/60" />
+            <div className="w-5/6 h-4 rounded bg-zinc-200 dark:bg-zinc-800/60" />
+            <div className="w-4/6 h-4 rounded bg-zinc-200 dark:bg-zinc-800/60" />
+          </div>
+        </div>
+
+        {/* Links / Seasons placeholder */}
+        <div className="bg-zinc-100 dark:bg-zinc-900/40 rounded-3xl p-6 border border-zinc-200 dark:border-zinc-800/60 space-y-4">
+          <div className="w-40 h-6 rounded-lg bg-zinc-300 dark:bg-zinc-800" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="h-28 rounded-2xl bg-zinc-200 dark:bg-zinc-800/60" />
+            <div className="h-28 rounded-2xl bg-zinc-200 dark:bg-zinc-800/60" />
+            <div className="h-28 rounded-2xl bg-zinc-200 dark:bg-zinc-800/60" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function MovieDetails() {
   const { id } = useParams<{ id: string }>();
 
@@ -190,8 +265,8 @@ export default function MovieDetails() {
   const { contentList: adminContentList, getContent: getAdminContent } = adminContentContext;
 
   const isAdminOrEditor = useMemo(() => {
-    return profile?.role === 'owner' || profile?.role === 'manager' || profile?.role === 'content_manager';
-  }, [profile?.role]);
+    return canManageContent(profile, user);
+  }, [profile, user]);
 
   const { cart, addToCart } = useCart();
   const { settings, refreshSettings } = useSettings();
@@ -340,7 +415,8 @@ export default function MovieDetails() {
   }, [profile, updateUserProfileData, vibrate, t]);
 
   useEffect(() => {
-    if (contentList && contentList.length > 0) {
+    if (!contentList || contentList.length === 0) return;
+    const timer = setTimeout(() => {
       checkUpcomingSubscriptionsAndNotify(
         contentList,
         profile,
@@ -353,7 +429,8 @@ export default function MovieDetails() {
           });
         }
       );
-    }
+    }, 1500);
+    return () => clearTimeout(timer);
   }, [contentList, profile, updateUserProfileData]);
 
   const [isReporting, setIsReporting] = useState(false);
@@ -1016,55 +1093,52 @@ export default function MovieDetails() {
     if (!mergedContent || contentList.length === 0) return [];
 
     const currentId = mergedContent.id;
-    const currentGenres = mergedContent.genreIds || [];
-    const currentLangs = mergedContent.languageIds || [];
+    const currentGenres = new Set(mergedContent.genreIds || []);
+    const currentLangs = new Set(mergedContent.languageIds || []);
+    const limit = settings?.recommendedLimit || 10;
 
-    const scored = contentList
-      .filter((c) => c.id !== currentId && c.status === "published")
-      .map((c) => {
-        let score = 0;
+    // Collect all genre IDs from recently viewed for quick lookup
+    const recentGenres = new Set<string>();
+    recentlyViewed.forEach((rv) => {
+      if (rv.id !== currentId && rv.genreIds) {
+        rv.genreIds.forEach((g) => recentGenres.add(g));
+      }
+    });
 
-        if (c.genreIds) {
-          const commonGenres = c.genreIds.filter((g) =>
-            currentGenres.includes(g),
-          );
-          score += commonGenres.length * 2;
+    const scored: { content: Content; score: number }[] = [];
+    const count = contentList.length;
+
+    for (let i = 0; i < count; i++) {
+      const c = contentList[i];
+      if (c.id === currentId || c.status !== "published") continue;
+
+      let score = 0;
+      if (c.genreIds) {
+        for (let j = 0; j < c.genreIds.length; j++) {
+          const gId = c.genreIds[j];
+          if (currentGenres.has(gId)) score += 2;
+          if (recentGenres.has(gId)) score += 0.5;
         }
+      }
 
-        if (c.languageIds) {
-          const commonLangs = c.languageIds.filter((l) =>
-            currentLangs.includes(l),
-          );
-          score += commonLangs.length * 1;
+      if (c.languageIds) {
+        for (let j = 0; j < c.languageIds.length; j++) {
+          if (currentLangs.has(c.languageIds[j])) score += 1;
         }
+      }
 
-        recentlyViewed.forEach((rv) => {
-          if (rv.id !== c.id) {
-            if (c.genreIds && rv.genreIds) {
-              const common = c.genreIds.filter((g) => rv.genreIds?.includes(g));
-              score += common.length * 0.5;
-            }
-          }
-        });
-
-        return { content: c, score };
-      });
+      scored.push({ content: c, score });
+    }
 
     scored.sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
-      const aTime = a.content.createdAt
-        ? new Date(a.content.createdAt).getTime()
-        : 0;
-      const bTime = b.content.createdAt
-        ? new Date(b.content.createdAt).getTime()
-        : 0;
+      const aTime = a.content.createdAt ? new Date(a.content.createdAt).getTime() : 0;
+      const bTime = b.content.createdAt ? new Date(b.content.createdAt).getTime() : 0;
       return bTime - aTime;
     });
 
-    return scored
-      .slice(0, settings?.recommendedLimit || 10)
-      .map((s) => s.content);
-  }, [mergedContent, contentList, recentlyViewed, settings?.recommendedLimit]);
+    return scored.slice(0, limit).map((s) => s.content);
+  }, [mergedContent?.id, mergedContent?.genreIds, mergedContent?.languageIds, contentList, recentlyViewed, settings?.recommendedLimit]);
 
   useEffect(() => {
     if (!contentLoading) {
@@ -1084,57 +1158,56 @@ export default function MovieDetails() {
 
       if (mergedContent && !hasLoggedView.current && profile?.uid) {
         hasLoggedView.current = true;
-        logEvent("content_click", profile.uid, {
-          contentId: mergedContent.id,
-          contentTitle: mergedContent.title,
-        });
-
-        // Add to recently viewed
-        try {
-          const recentStr = safeStorage.getItem("recently_viewed");
-          let recent: Content[] = recentStr ? JSON.parse(recentStr) : [];
-          // Remove if already exists
-          recent = recent.filter((c) => c.id !== mergedContent.id);
-
-          // Save full content to local storage for offline access
-          touchMetadataUsage(mergedContent.id);
-          safeStorage.setItem(
-            `movie_details_${mergedContent.id}`,
-            JSON.stringify(mergedContent),
-          );
-
-          // Minimize data to prevent QuotaExceededError
-          const minimizedContent = {
-            id: mergedContent.id,
-            title: mergedContent.title,
-            posterUrl: mergedContent.posterUrl,
-            type: mergedContent.type,
-            quality: (mergedContent as any).quality || mergedContent.qualityId,
-            printQuality: (mergedContent as any).printQuality,
-            audio: (mergedContent as any).audio,
-            year: mergedContent.year,
-            imdbRating: mergedContent.imdbRating,
-            ageRating: (mergedContent as any).ageRating,
-            duration: (mergedContent as any).duration,
-            status: mergedContent.status,
-          };
-
-          // Add to front
-          recent.unshift(minimizedContent as any);
-          // Keep max 25
-          if (recent.length > 25) recent = recent.slice(0, 25);
-          safeStorage.setItem("recently_viewed", JSON.stringify(recent));
-
-          // Cleanup old movie_details is now mostly handled automatically by IndexedDB size, but we can do a best effort using localstorage fallback keys if any
+        const currentUid = profile.uid;
+        const currentContent = mergedContent;
+        setTimeout(() => {
           try {
+            logEvent("content_click", currentUid, {
+              contentId: currentContent.id,
+              contentTitle: currentContent.title,
+            });
+
+            // Add to recently viewed
+            const recentStr = safeStorage.getItem("recently_viewed");
+            let recent: Content[] = recentStr ? JSON.parse(recentStr) : [];
+            // Remove if already exists
+            recent = recent.filter((c) => c.id !== currentContent.id);
+
+            // Save full content to local storage for offline access
+            touchMetadataUsage(currentContent.id);
+            safeStorage.setItem(
+              `movie_details_${currentContent.id}`,
+              JSON.stringify(currentContent),
+            );
+
+            // Minimize data to prevent QuotaExceededError
+            const minimizedContent = {
+              id: currentContent.id,
+              title: currentContent.title,
+              posterUrl: currentContent.posterUrl,
+              type: currentContent.type,
+              quality: (currentContent as any).quality || currentContent.qualityId,
+              printQuality: (currentContent as any).printQuality,
+              audio: (currentContent as any).audio,
+              year: currentContent.year,
+              imdbRating: currentContent.imdbRating,
+              ageRating: (currentContent as any).ageRating,
+              duration: (currentContent as any).duration,
+              status: currentContent.status,
+            };
+
+            // Add to front
+            recent.unshift(minimizedContent as any);
+            // Keep max 25
+            if (recent.length > 25) recent = recent.slice(0, 25);
+            safeStorage.setItem("recently_viewed", JSON.stringify(recent));
+
+            // Async cleanup old details keys
             const recentIds = recent.map((r) => `movie_details_${r.id}`);
-            const keysToRemove = [];
+            const keysToRemove: string[] = [];
             for (let i = 0; i < localStorage.length; i++) {
               const key = localStorage.key(i);
-              if (
-                key?.startsWith("movie_details_") &&
-                !recentIds.includes(key)
-              ) {
+              if (key?.startsWith("movie_details_") && !recentIds.includes(key)) {
                 keysToRemove.push(key);
               }
             }
@@ -1142,10 +1215,10 @@ export default function MovieDetails() {
               localStorage.removeItem(k);
               safeStorage.removeItemAsync(k);
             });
-          } catch (e) {}
-        } catch (e) {
-          console.error("Failed to update recently viewed", e);
-        }
+          } catch (e) {
+            console.error("Failed to update recently viewed async", e);
+          }
+        }, 150);
       }
     }
   }, [
@@ -1698,8 +1771,12 @@ export default function MovieDetails() {
   };
 
   useEffect(() => {
-    fetchMissingData();
-  }, [mergedContent, id, genres, isOffline]);
+    if (!id || isOffline) return;
+    const timer = setTimeout(() => {
+      fetchMissingData();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [id, isOffline]);
 
   const getYouTubeEmbedUrl = (url?: string) => {
     if (!url) return null;
@@ -1751,16 +1828,12 @@ export default function MovieDetails() {
   ]);
 
   const isAuthorized = mergedContent
-    ? profile?.role === "admin" ||
-      profile?.role === "owner" ||
-      profile?.role === "content_manager" ||
-      profile?.role === "manager" ||
-      mergedContent.status !== "draft"
+    ? canManageContent(profile, user) || mergedContent.status !== "draft"
     : false;
 
   if (!mergedContent || !isAuthorized) {
     if (contentLoading || loading || profileLoading || isManualRefreshing) {
-      return null;
+      return <MovieDetailsSkeleton onBack={handleGoBack} />;
     }
     return (
       <div className="min-h-screen bg-white dark:bg-zinc-950 flex flex-col items-center justify-center text-zinc-900 dark:text-white p-4">
@@ -1825,24 +1898,13 @@ export default function MovieDetails() {
   const isAssigned = profile?.assignedContent?.some(
     (id) => id === mergedContent.id || id.startsWith(`${mergedContent.id}:`),
   );
-  const canPlay =
-    profile?.role === "admin" ||
-    profile?.role === "owner" ||
-    profile?.role === "content_manager" ||
-    profile?.role === "manager" ||
-    isAssigned ||
-    (profile?.role !== "user" && profile?.status === "active" &&
-      !(isSelectedContent || mergedContent.status === "selected_content"));
+  const canPlay = canUserStreamContent(profile, mergedContent);
 
   const allowedSeasons =
     profile?.assignedContent
       ?.filter((id) => id.startsWith(`${mergedContent.id}:`))
       .map((id) => id.split(":")[1]) || [];
-  const hasFullAccess =
-    profile?.role === "admin" ||
-    profile?.role === "owner" ||
-    profile?.role === "content_manager" ||
-    profile?.role === "manager" ||
+  const hasFullAccess = canManageContent(profile, user) ||
     profile?.assignedContent?.includes(mergedContent.id) ||
     (profile?.role !== "user" &&
       profile?.status === "active" &&
@@ -2012,18 +2074,7 @@ export default function MovieDetails() {
 
     if (!checkEligibility()) return;
 
-    let targetUrl = url;
-    try {
-      const u = new URL(targetUrl);
-      const host = u.hostname.toLowerCase();
-      if (host.includes('hubcould') || host.includes('hubcloud')) {
-        u.hostname = 'hubcloud.ist';
-        targetUrl = u.toString();
-      } else if (host.includes('hubdrive')) {
-        u.hostname = 'hubdrive.space';
-        targetUrl = u.toString();
-      }
-    } catch (e) {}
+    const targetUrl = normalizeContentUrl(url);
 
     if (isOffline) {
       setAlertConfig({
@@ -2075,34 +2126,7 @@ export default function MovieDetails() {
         let shouldExtract = true;
         const now = Date.now();
 
-        let cachedLocal: any = null;
-        try {
-          const cacheStr = localStorage.getItem("hubcloud_extraction_cache");
-          if (cacheStr) {
-            const cacheObj = JSON.parse(cacheStr);
-            const prunedObj: Record<string, any> = {};
-            let changed = false;
-            for (const key in cacheObj) {
-              if (now - cacheObj[key].timestamp < 600000) {
-                prunedObj[key] = cacheObj[key];
-              } else {
-                changed = true;
-              }
-            }
-            if (changed) {
-              localStorage.setItem(
-                "hubcloud_extraction_cache",
-                JSON.stringify(prunedObj),
-              );
-            }
-
-            if (prunedObj[url] || prunedObj[targetUrl]) {
-              cachedLocal = prunedObj[url] || prunedObj[targetUrl];
-            }
-          }
-        } catch (e) {}
-
-        const cached = hubcloudCacheRef.current[targetUrl] || hubcloudCacheRef.current[url] || cachedLocal;
+        const cached = hubcloudCacheRef.current[targetUrl] || hubcloudCacheRef.current[url] || getCachedLinkExtraction(targetUrl) || getCachedLinkExtraction(url);
 
         // If we have a valid cached link within 10 minutes (600,000 ms), use it directly
         if (cached && now - cached.timestamp < 600000 && cached.url && !isHubcloudRawLink(cached.url)) {
@@ -2169,17 +2193,12 @@ export default function MovieDetails() {
                     timestamp: Date.now(),
                   };
                   hubcloudCacheRef.current[targetUrl] = cacheEntry;
-                  try {
-                    const cacheStr = localStorage.getItem(
-                      "hubcloud_extraction_cache",
-                    );
-                    const cacheObj = cacheStr ? JSON.parse(cacheStr) : {};
-                    cacheObj[targetUrl] = cacheEntry;
-                    localStorage.setItem(
-                      "hubcloud_extraction_cache",
-                      JSON.stringify(cacheObj),
-                    );
-                  } catch (e) {}
+                  saveCachedLinkExtraction(targetUrl, {
+                    finalUrl,
+                    finalCandidates,
+                    finalSize,
+                    isCloudflare: Boolean(data.isCloudflare),
+                  });
 
                   successExtraction = true;
                   break;
@@ -2686,21 +2705,7 @@ export default function MovieDetails() {
             return `${mergedContent?.title || ""} - ${link.name}`;
           };
           const formattedTitle = getFormattedTitle(link);
-
-          const normalizedTargetUrl = (() => {
-            try {
-              const u = new URL(link.url);
-              const host = u.hostname.toLowerCase();
-              if (host.includes('hubcould') || host.includes('hubcloud')) {
-                u.hostname = 'hubcloud.ist';
-                return u.toString();
-              } else if (host.includes('hubdrive')) {
-                u.hostname = 'hubdrive.space';
-                return u.toString();
-              }
-            } catch (e) {}
-            return link.url;
-          })();
+          const normalizedTargetUrl = normalizeContentUrl(link.url);
           const isExtracting = extractingLinkId === link.url || extractingLinkId === normalizedTargetUrl;
 
           return (
@@ -2815,20 +2820,7 @@ export default function MovieDetails() {
                           );
                           return;
                         }
-                        const targetUrl = (() => {
-                          try {
-                            const u = new URL(link.url);
-                            const host = u.hostname.toLowerCase();
-                            if (host.includes('hubcould') || host.includes('hubcloud')) {
-                              u.hostname = 'hubcloud.ist';
-                              return u.toString();
-                            } else if (host.includes('hubdrive')) {
-                              u.hostname = 'hubdrive.space';
-                              return u.toString();
-                            }
-                          } catch (e) {}
-                          return link.url;
-                        })();
+                        const targetUrl = normalizeContentUrl(link.url);
 
                         setTelegramConfirmModal({
                           isOpen: true,
@@ -3440,7 +3432,7 @@ export default function MovieDetails() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          <div className="lg:col-span-2 space-y-8">
+          <div className="lg:col-span-2 space-y-8 [content-visibility:auto] [contain-intrinsic-size:600px]">
             <section>
               {displayData ? (
                 <div className="bg-gradient-to-br from-white/95 via-zinc-50/90 to-cyan-500/10 dark:from-zinc-900/95 dark:via-zinc-950 dark:to-cyan-950/40 border border-cyan-500/30 dark:border-cyan-500/20 rounded-3xl p-6 md:p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden group">

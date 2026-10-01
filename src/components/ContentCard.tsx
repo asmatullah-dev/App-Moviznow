@@ -4,6 +4,7 @@ import { Link, useNavigate } from 'react-router-dom';
 
 import { Heart, Clock, ShoppingCart, Play, X, Lock, Star, Loader2, Check } from 'lucide-react';
 import { Content, Quality, Language, Genre } from '../types';
+import { canUserStreamContent, canViewDrafts } from '../utils/roleUtils';
 import { formatContentTitle, getContrastColor, getOttBadgeConfig } from '../utils/contentUtils';
 import { OttBadge } from './OttBadge';
 import { getOptimizedImageUrl, getImageSrcSet } from '../utils/imageUtils';
@@ -18,6 +19,7 @@ import { useImdbRating } from '../hooks/useImdbRating';
 import { globalScrollState } from '../hooks/useScrollRestoration';
 import { Translate } from './Translate';
 import { recordNavigationToContent, isContentPath } from '../utils/navigation';
+import { safeStorage } from '../utils/safeStorage';
 import {
   modalBackdropAnimation,
   modalContainerAnimation,
@@ -113,21 +115,9 @@ const ContentCard = React.memo(({
     return list;
   }, [content]);
 
-  const getCanPlay = (c: any) => {
-    const isContentAssigned = profile?.assignedContent?.some((id: string) => id === c.id || id.startsWith(`${c.id}:`));
-    return profile?.role !== 'user' && (
-      profile?.role === 'admin' ||
-      profile?.role === 'owner' ||
-      profile?.role === 'manager' ||
-      profile?.role === 'content_manager' ||
-      isContentAssigned ||
-      (profile?.status === 'active' &&
-        !(profile?.role === "selected_content" || c.status === "selected_content"))
-    );
-  };
-
+  const canPlay = canUserStreamContent(profile, content);
   const isAssigned = profile?.role === 'selected_content' && profile.assignedContent?.some((id: string) => id === content.id || id.startsWith(`${content.id}:`));
-  const isLocked = !getCanPlay(content);
+  const isLocked = !canPlay;
   const isPending = profile?.status === 'pending';
   
   const qualityObj = React.useMemo(() => qualities.find(q => q.id === content.qualityId), [qualities, content.qualityId]);
@@ -141,7 +131,7 @@ const ContentCard = React.memo(({
     profile?.watched?.some((w: string) => w.startsWith(`${content.id},`))
   );
 
-  const canSeeDraft = ['owner', 'admin', 'manager', 'content_manager'].includes(profile?.role);
+  const canSeeDraft = canViewDrafts(profile);
   
   const matchingSeason = React.useMemo(() => {
     if (!selectedYear || content.type !== 'series' || !content.seasons) return null;
@@ -219,10 +209,22 @@ const ContentCard = React.memo(({
   const rawPoster = content.posterUrl?.trim() || defaultFallbackImage;
   const optimizedPoster = getOptimizedImageUrl(rawPoster, isSmall ? 185 : 342) || rawPoster;
 
+  const handlePrefetch = React.useCallback(() => {
+    if (!content?.id) return;
+    try {
+      const cacheKey = `movie_details_${content.id}`;
+      if (!safeStorage.getItem(cacheKey)) {
+        safeStorage.setItem(cacheKey, JSON.stringify(content));
+      }
+    } catch (e) {}
+  }, [content]);
+
   return (
     <div 
       className="group relative flex flex-col transition-all duration-200 hover:-translate-y-1.5 active:scale-[0.98] cursor-pointer will-change-transform"
       onClick={handleCardClick}
+      onMouseEnter={handlePrefetch}
+      onTouchStart={handlePrefetch}
     >
       {/* Modern Sleek Card Container */}
       <div className="relative flex flex-col bg-white dark:bg-zinc-900/90 rounded-2xl overflow-hidden border border-zinc-200/80 dark:border-zinc-800/80 hover:border-emerald-500/50 dark:hover:border-emerald-500/50 shadow-md hover:shadow-xl hover:shadow-emerald-500/15 transition-all duration-200 transform-gpu backface-hidden">

@@ -8,6 +8,7 @@ import { VideoAdInterstitial } from "./VideoAdInterstitial";
 import { useAuth } from "../contexts/AuthContext";
 import { useSettings } from "../contexts/SettingsContext";
 import { isUserExemptFromAds, registerAppWhitelistedUrl } from "../utils/adUtils";
+import { normalizeContentUrl } from "../utils/linkUtils";
 import { openInNewTab } from "../utils/playerUtils";
 import {
   modalBackdropAnimation,
@@ -40,7 +41,8 @@ export function TelegramDownloadModal({
     setResolvingId(id);
     setErrorId(null);
     try {
-      const res = await fetch(`/api/resolve-tg?url=${encodeURIComponent(url)}`);
+      const normalizedUrl = normalizeContentUrl(url);
+      const res = await fetch(`/api/resolve-tg?url=${encodeURIComponent(normalizedUrl)}`);
       const data = await res.json();
       if (res.ok && data.url) {
         registerAppWhitelistedUrl(data.url);

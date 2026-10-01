@@ -17,6 +17,7 @@ import { formatDateToMonthDDYYYY } from '../../utils/contentUtils';
 import { useAuth, standardizePhone } from '../../contexts/AuthContext';
 import { getUserDisplayName } from '../../utils/userUtils';
 import { smartSearch } from '../../utils/searchUtils';
+import { useDebounce } from '../../hooks/useDebounce';
 import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useSettings } from '../../contexts/SettingsContext';
 import { useAdminContent } from '../../contexts/AdminContentContext';
@@ -78,6 +79,7 @@ export default function UserManagement() {
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; message: string }>({ isOpen: false, title: '', message: '' });
   
   const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem('user_mgmt_search') || '');
+  const debouncedSearchTerm = useDebounce(searchTerm, 100);
   const [sortField, setSortField] = useState<SortField>(() => (sessionStorage.getItem('user_mgmt_sort_field') as any) || 'createdAt');
   const [sortOrder, setSortOrder] = useState<SortOrder>(() => (sessionStorage.getItem('user_mgmt_sort_order') as any) || 'desc');
   const [filterRole, setFilterRole] = useState<Role | 'all'>(() => (sessionStorage.getItem('user_mgmt_role') as any) || 'all');
@@ -1882,8 +1884,8 @@ export default function UserManagement() {
       });
     }
     
-    if (searchTerm) {
-      result = smartSearch(result, searchTerm, ['displayName', 'email', 'phone', 'uid', 'city', 'preferredLanguage', 'device.os', 'device.model', 'device.type'] as any);
+    if (debouncedSearchTerm) {
+      result = smartSearch(result, debouncedSearchTerm, ['displayName', 'email', 'phone', 'uid', 'city', 'preferredLanguage', 'device.os', 'device.model', 'device.type'] as any);
     }
     if (filterRole !== 'all') {
       result = result.filter(u => u.role === filterRole);
@@ -2008,7 +2010,7 @@ export default function UserManagement() {
     });
 
     return result;
-  }, [users, searchTerm, filterRole, filterStatus, filterLanguage, filterWhitelist, sortField, sortOrder, allUsers, hideAnonymousAndInvalid, isUserPhoneWhitelisted]);
+  }, [users, debouncedSearchTerm, filterRole, filterStatus, filterLanguage, filterWhitelist, sortField, sortOrder, allUsers, hideAnonymousAndInvalid, isUserPhoneWhitelisted]);
 
   const handleAddUser = async () => {
     if (!foundUser && !newUserForm.phone && !newUserForm.email) {

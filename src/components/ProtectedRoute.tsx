@@ -6,6 +6,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { auth } from '../firebase';
 import { Loader2, AlertCircle, MessageCircle } from 'lucide-react';
 import { safeStorage } from '../utils/safeStorage';
+import { isStaffMember } from '../utils/roleUtils';
 import {
   modalBackdropAnimation,
   modalContainerAnimation,
@@ -234,7 +235,7 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
     );
   }
 
-  const isStaff = ['owner', 'admin', 'content_manager', 'user_manager', 'manager'].includes(profile?.role || '');
+  const isStaff = isStaffMember(profile, user);
   const isActiveMember = ['user', 'vip', 'basic', 'selected_content'].includes(profile?.role || '') && profile?.status === 'active';
   const isAllowedInMaintenance = isStaff || isActiveMember;
 
@@ -259,7 +260,7 @@ export function ProtectedRoute({ children, requireAdmin = false, requireAuth = f
         </div>
       );
     }
-    if (!profile || (profile.role !== 'admin' && profile.role !== 'content_manager' && profile.role !== 'user_manager' && profile.role !== 'manager' && profile.role !== 'owner')) {
+    if (!profile || !isStaffMember(profile, user)) {
       console.log('ProtectedRoute: Admin required but user is not admin/manager/owner, redirecting to home');
       return <Navigate to="/" replace />;
     }

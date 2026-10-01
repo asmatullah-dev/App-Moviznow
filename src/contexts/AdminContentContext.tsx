@@ -17,6 +17,7 @@ import { expandContent, CONTENT_CHUNK_MOVIE_SIZE, CONTENT_CHUNK_SERIES_SIZE } fr
 import { getUtcVersion, parseVersionTime } from '../utils/chunkMeta';
 import { useAuth } from './AuthContext';
 import { useUsers, ADMIN_EMAILS } from './UsersContext';
+import { canManageContent } from '../utils/roleUtils';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
 import { handleFirestoreError, OperationType } from '../utils/firestoreErrorHandler';
 import { resetCollectionsFromStaticJson, getStaticExportCollections } from '../utils/staticContentLoader';
@@ -358,8 +359,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   };
 
   const finalizeChanges = async () => {
-    const isAuthorized = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '') ||
-      (user?.email && ADMIN_EMAILS.includes(user.email.toLowerCase()));
+    const isAuthorized = canManageContent(profile, user);
     if (!isAuthorized) {
       throw new Error("Unauthorized: Only admins and content managers can sync content to the server.");
     }

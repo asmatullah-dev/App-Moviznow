@@ -34,22 +34,28 @@ export const AdSenseScriptManager: React.FC = () => {
       return;
     }
 
-    // Otherwise for non-exempt users on normal pages, load AdSense script
-    if (provider === 'google_adsense' || provider === 'both') {
-      try {
-        if ((window as any).adsbygoogle) {
-          (window as any).adsbygoogle.pauseAdRequests = 0;
-        }
-      } catch (e) {}
+    // Defer script injection slightly on startup so initial main-thread paint finishes smoothly
+    const timer = setTimeout(() => {
+      // Otherwise for non-exempt users on normal pages, load AdSense script
+      if (provider === 'google_adsense' || provider === 'both') {
+        try {
+          if ((window as any).adsbygoogle) {
+            (window as any).adsbygoogle.pauseAdRequests = 0;
+          }
+        } catch (e) {}
 
-      if (!existingScript) {
-        const script = document.createElement('script');
-        script.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${client}`;
-        script.async = true;
-        script.crossOrigin = 'anonymous';
-        document.head.appendChild(script);
+        const currentScript = document.querySelector<HTMLScriptElement>(scriptSelector);
+        if (!currentScript) {
+          const script = document.createElement('script');
+          script.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${client}`;
+          script.async = true;
+          script.crossOrigin = 'anonymous';
+          document.head.appendChild(script);
+        }
       }
-    }
+    }, 1200);
+
+    return () => clearTimeout(timer);
   }, [location.pathname, profile, settings?.adProvider, settings?.adSenseClientId]);
 
   return null;

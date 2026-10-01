@@ -34,27 +34,29 @@ import { CpmScriptManager } from './components/CpmScriptManager';
 import { AdBlockDetector } from './components/AdBlockDetector';
 import { NotificationPermissionPrompt } from './components/NotificationPermissionPrompt';
 
-// Eager Loaded User Pages for Instant Client-Side Navigation
+// Eager Loaded Core User Pages for Instant Client-Side Navigation
 import Home from './pages/user/Home';
 import Login from './pages/Login';
 import MovieDetails from './pages/user/MovieDetails';
 import MaintenancePage from './pages/MaintenancePage';
-import FreeMovies from './pages/user/FreeMovies';
-import Membership from './pages/user/Membership';
-import Reviews from './pages/user/Reviews';
-import About from './pages/user/About';
-import Contact from './pages/user/Contact';
-import Terms from './pages/user/Terms';
-import PrivacyPolicy from './pages/user/PrivacyPolicy';
-import WatchLater from './pages/user/WatchLater';
-import Favorites from './pages/user/Favorites';
-import Trial from './pages/user/Trial';
-import VipTrial from './pages/user/VipTrial';
-import TopUp from './pages/user/TopUp';
-import Cart from './pages/user/Cart';
-import Settings from './pages/user/Settings';
-import InstallApp from './pages/InstallApp';
-import Unsubscribe from './pages/Unsubscribe';
+
+// Lazy Loaded Secondary User Pages (Loaded on demand to shrink initial startup load)
+const FreeMovies = lazy(() => import('./pages/user/FreeMovies'));
+const Membership = lazy(() => import('./pages/user/Membership'));
+const Reviews = lazy(() => import('./pages/user/Reviews'));
+const About = lazy(() => import('./pages/user/About'));
+const Contact = lazy(() => import('./pages/user/Contact'));
+const Terms = lazy(() => import('./pages/user/Terms'));
+const PrivacyPolicy = lazy(() => import('./pages/user/PrivacyPolicy'));
+const WatchLater = lazy(() => import('./pages/user/WatchLater'));
+const Favorites = lazy(() => import('./pages/user/Favorites'));
+const Trial = lazy(() => import('./pages/user/Trial'));
+const VipTrial = lazy(() => import('./pages/user/VipTrial'));
+const TopUp = lazy(() => import('./pages/user/TopUp'));
+const Cart = lazy(() => import('./pages/user/Cart'));
+const Settings = lazy(() => import('./pages/user/Settings'));
+const InstallApp = lazy(() => import('./pages/InstallApp'));
+const Unsubscribe = lazy(() => import('./pages/Unsubscribe'));
 
 // Lazy Loaded Admin Pages (Not loaded for standard users)
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout'));

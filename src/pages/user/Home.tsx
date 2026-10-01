@@ -139,7 +139,7 @@ export default function Home({
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(search);
-    }, 250);
+    }, 100);
     return () => clearTimeout(timer);
   }, [search]);
 

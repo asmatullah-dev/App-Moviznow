@@ -1,3 +1,5 @@
+import { compressString, decompressString, isCompressedString } from './compressionUtils';
+
 /**
  * A lightning-fast, high-capacity, safe storage manager for the application.
  * - Guarantees zero main-thread freezing and eliminates QuotaExceededErrors.
@@ -5,7 +7,7 @@
  * - Distributes persistence intelligently:
  *     * Small metadata / settings (<25KB) -> stored in localStorage for instant reload.
  *     * Large datasets (content catalogs, chunks, user lists, poster caches >25KB) -> stored
- *       asynchronously in IndexedDB without blocking the UI thread or device.
+ *       asynchronously in IndexedDB with transparent GZIP compression without blocking the UI thread.
  * - Purely isolates admin cache from static JSON.
  */
 
@@ -122,20 +124,31 @@ class SafeStorage {
           const tx = db.transaction('cache', 'readonly');
           const store = tx.objectStore('cache');
           const req = store.openCursor();
+          const pendingDecompressions: Promise<void>[] = [];
+
           req.onsuccess = (e: any) => {
             const cursor = e.target.result;
             if (cursor) {
               const k = String(cursor.key);
-              const v = typeof cursor.value === 'string' ? cursor.value : JSON.stringify(cursor.value);
-              if (!this.memoryStorage.has(k)) {
-                this.memoryStorage.set(k, v);
+              const rawVal = typeof cursor.value === 'string' ? cursor.value : JSON.stringify(cursor.value);
+              
+              if (isCompressedString(rawVal)) {
+                pendingDecompressions.push(
+                  decompressString(rawVal).then((decompressed) => {
+                    if (!this.memoryStorage.has(k)) {
+                      this.memoryStorage.set(k, decompressed);
+                    }
+                  })
+                );
+              } else if (!this.memoryStorage.has(k)) {
+                this.memoryStorage.set(k, rawVal);
               }
               cursor.continue();
             } else {
               if (!cursorDone) {
                 cursorDone = true;
                 clearTimeout(cursorTimer);
-                resolve();
+                Promise.all(pendingDecompressions).then(() => resolve()).catch(() => resolve());
               }
             }
           };
@@ -296,13 +309,24 @@ class SafeStorage {
 
     try {
       const db = await this.initDB();
-      const entries = Array.from(this.writeQueue.entries());
+      const rawEntries = Array.from(this.writeQueue.entries());
       this.writeQueue.clear();
+
+      // Compress large payloads asynchronously before writing to IndexedDB
+      const processedEntries: [string, string][] = await Promise.all(
+        rawEntries.map(async ([k, v]) => {
+          if (v && v.length > 1500 && this.isLargeKey(k)) {
+            const compressed = await compressString(v);
+            return [k, compressed];
+          }
+          return [k, v];
+        })
+      );
 
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction('cache', 'readwrite');
         const store = tx.objectStore('cache');
-        for (const [k, v] of entries) {
+        for (const [k, v] of processedEntries) {
           store.put(v, k);
         }
         tx.oncomplete = () => resolve();
@@ -329,9 +353,10 @@ class SafeStorage {
         const tx = db.transaction('cache', 'readonly');
         const store = tx.objectStore('cache');
         const req = store.get(key);
-        req.onsuccess = () => {
+        req.onsuccess = async () => {
           if (req.result !== undefined) {
-            const val = typeof req.result === 'string' ? req.result : JSON.stringify(req.result);
+            const rawVal = typeof req.result === 'string' ? req.result : JSON.stringify(req.result);
+            const val = isCompressedString(rawVal) ? await decompressString(rawVal) : rawVal;
             this.memoryStorage.set(key, val);
             resolve(val);
           } else {
