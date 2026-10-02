@@ -94,17 +94,12 @@ async function exportCatalog() {
     const exportFileName = 'moviznow_catalog_export.json';
     const jsonString = JSON.stringify(exportData);
 
-    const publicDir = path.join(__dirname, '..', 'public');
-    if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
-
     const srcDataDir = path.join(__dirname, '..', 'src', 'data');
     if (!fs.existsSync(srcDataDir)) fs.mkdirSync(srcDataDir, { recursive: true });
 
-    fs.writeFileSync(path.join(__dirname, '..', exportFileName), jsonString);
-    fs.writeFileSync(path.join(publicDir, exportFileName), jsonString);
     fs.writeFileSync(path.join(srcDataDir, exportFileName), jsonString);
 
-    console.log('Successfully saved unified content export file to root, public/, and src/data/');
+    console.log('Successfully saved unified content export file to src/data/');
 
     // 5. Export reviews from Firestore
     console.log('Starting reviews export from Firestore...');
@@ -123,11 +118,9 @@ async function exportCatalog() {
     const reviewsFileName = 'moviznow_reviews_export.json';
     const reviewsJsonString = JSON.stringify(allReviews);
 
-    fs.writeFileSync(path.join(__dirname, '..', reviewsFileName), reviewsJsonString);
-    fs.writeFileSync(path.join(publicDir, reviewsFileName), reviewsJsonString);
     fs.writeFileSync(path.join(srcDataDir, reviewsFileName), reviewsJsonString);
 
-    console.log(`Successfully saved ${allReviews.length} reviews to root, public/, and src/data/`);
+    console.log(`Successfully saved ${allReviews.length} reviews to src/data/`);
     process.exit(0);
   } catch (error) {
     console.error('Error during catalog export:', error);
