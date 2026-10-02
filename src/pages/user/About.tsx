@@ -22,7 +22,6 @@ import { motion } from 'motion/react';
 import { Header } from "../../components/Header";
 import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
-import { AdBanner } from "../../components/AdBanner";
 
 export default function About() {
   const { settings } = useSettings();
@@ -66,11 +65,6 @@ export default function About() {
               {t("Your premium destination for HD movies and web series in Pakistan.")}
             </p>
           </motion.div>
-
-          {/* Ad Banner below Hero */}
-          <div className="w-full my-4">
-            <AdBanner />
-          </div>
 
           {/* 3 Value Pillars */}
           <div className="grid md:grid-cols-3 gap-6">
@@ -132,7 +126,7 @@ export default function About() {
 
             <div className="space-y-4 text-zinc-300 text-xs sm:text-base leading-relaxed">
               <p>
-                {t('At %APP_NAME%, we believe entertainment should be accessible, affordable, and safe. For too long, finding a good movie online meant navigating through a maze of popup ads, malware, and broken links.').replace('%APP_NAME%', appName)}
+                {t('At %APP_NAME%, we believe entertainment should be accessible, affordable, and safe. For too long, finding a good movie online meant navigating through confusing redirects, malware, and broken links.').replace('%APP_NAME%', appName)}
               </p>
               <p>
                 {t("We're changing that by offering a clean, straightforward service. Whether you want to buy a single movie for just PKR 50 or join our membership for daily content, we ensure you get exactly what you pay for — high-quality entertainment without the hassle.")}
@@ -143,7 +137,7 @@ export default function About() {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pt-4 border-t border-zinc-800/80">
               <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-2xl p-4 text-center">
                 <div className="text-xl sm:text-2xl font-black text-emerald-400 font-mono">100%</div>
-                <div className="text-[11px] font-bold text-zinc-400 mt-0.5">{t("Ad-Free & Virus-Free")}</div>
+                <div className="text-[11px] font-bold text-zinc-400 mt-0.5">{t("Fast & Virus-Free")}</div>
               </div>
 
               <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-2xl p-4 text-center">
@@ -157,11 +151,6 @@ export default function About() {
               </div>
             </div>
           </motion.div>
-
-          {/* Ad Banner between Mission and Why Choose Us */}
-          <div className="w-full my-6">
-            <AdBanner />
-          </div>
 
           {/* Why Choose Us Highlight Grid */}
           <div className="space-y-6">
@@ -207,11 +196,6 @@ export default function About() {
                 </div>
               </div>
             </div>
-          </div>
-
-          {/* Ad Banner above support */}
-          <div className="w-full my-6">
-            <AdBanner />
           </div>
 
           {/* Support Section */}

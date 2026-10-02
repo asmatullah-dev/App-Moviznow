@@ -35,7 +35,6 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   accountTitle: 'Asmat Ullah',
   accountNumber: '03416286423',
   isTrialEnabled: true,
-  isVipTrialEnabled: true,
   isPhoneLoginEnabled: true,
   isAdminContactEnabled: true,
   isPaymentEnabled: true,
@@ -50,20 +49,6 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     'UserManagers', 'SelectedContent', 
     'Income', 'ErrorLinks', 'ReportedLinks', 'Notifications', 'Requests'
   ],
-  adProvider: 'commercialhalftime',
-  adSenseClientId: 'ca-pub-3128773545517669',
-  adSenseSlotId: '1035133642',
-  bannerAdKey: '37fefa62ab23d5571ac1b29359968b26',
-  bannerAdScriptUrl: 'https://commercialhalftime.com/37fefa62ab23d5571ac1b29359968b26/invoke.js',
-  bannerAdWidth: 300,
-  bannerAdHeight: 250,
-  adBannerTitle: 'MovizNow Sponsor',
-  adBannerDescription: 'Enjoy streaming on Basic Plan. Upgrade to VIP to remove all ads!',
-  adBannerCtaText: 'Remove Ads (Go VIP)',
-  adBannerLink: '/plans',
-  adSkipTimer: 5,
-  adVideoUrl: '',
-  adRedirectUrl: '',
   whatsappChannelLink: 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n',
   whatsappClipsLink: 'https://chat.whatsapp.com/DJvn1Vssg8pCC6JTosnOQQ',
 };
@@ -74,38 +59,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       const cached = localStorage.getItem('cached_app_settings');
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (parsed) {
-          if (parsed.supportNumber === '3363284466' || parsed.supportNumber === '03363284466') {
-            parsed.supportNumber = '3416286423';
-          }
-          if (!parsed.whatsappChannelLink) {
-            parsed.whatsappChannelLink = 'https://whatsapp.com/channel/0029Vb7PxRC9MF96ZZVGdx2n';
-          }
-          if (!parsed.whatsappClipsLink) {
-            parsed.whatsappClipsLink = 'https://chat.whatsapp.com/DJvn1Vssg8pCC6JTosnOQQ';
-          }
-          if (!parsed.adBannerLink || parsed.adBannerLink === '/top-up') {
-            parsed.adBannerLink = '/plans';
-          }
-          if (!parsed.bannerAdKey) {
-            parsed.bannerAdKey = '37fefa62ab23d5571ac1b29359968b26';
-          }
-          if (!parsed.bannerAdScriptUrl) {
-            parsed.bannerAdScriptUrl = 'https://commercialhalftime.com/37fefa62ab23d5571ac1b29359968b26/invoke.js';
-          }
-          if (!parsed.bannerAdWidth) {
-            parsed.bannerAdWidth = 300;
-          }
-          if (!parsed.bannerAdHeight) {
-            parsed.bannerAdHeight = 250;
-          }
-          if (parsed.adProvider === 'both' || parsed.adProvider === 'interstitial_only') {
-            parsed.adProvider = 'commercialhalftime';
-          }
-          parsed.adVideoUrl = '';
-          localStorage.setItem('cached_app_settings', JSON.stringify(parsed));
-        }
-        return parsed || DEFAULT_APP_SETTINGS;
+        return parsed ? { ...DEFAULT_APP_SETTINGS, ...parsed } : DEFAULT_APP_SETTINGS;
       }
       return DEFAULT_APP_SETTINGS;
     } catch {

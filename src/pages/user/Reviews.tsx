@@ -26,7 +26,6 @@ import ConfirmModal from '../../components/ConfirmModal';
 import { Header } from "../../components/Header";
 import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
-import { AdBanner } from "../../components/AdBanner";
 import confetti from 'canvas-confetti';
 
 interface Review {
@@ -303,11 +302,6 @@ export default function Reviews() {
             </div>
           </div>
 
-          {/* Ad Banner below Rating Summary */}
-          <div className="w-full my-4">
-            <AdBanner />
-          </div>
-
           {/* Not Logged In Banner */}
           {!isLoggedIn && !authLoading && !authProfileLoading && (
             <div className="bg-gradient-to-r from-rose-950/60 via-purple-950/50 to-amber-950/60 border border-rose-500/30 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
@@ -569,11 +563,6 @@ export default function Reviews() {
                           "{review.text}"
                         </p>
                       </motion.div>
-                      {i === 4 && filteredReviews.length > 5 && (
-                        <div key="reviews-mid-ad" className="w-full my-4">
-                          <AdBanner />
-                        </div>
-                      )}
                     </React.Fragment>
                   );
                 })}
@@ -589,11 +578,6 @@ export default function Reviews() {
               )}
             </div>
           )}
-
-          {/* Ad Banner above support */}
-          <div className="w-full my-6">
-            <AdBanner />
-          </div>
 
           {/* Support Section */}
           <div className="mt-12 border-t border-zinc-800/80 pt-8">

@@ -4,10 +4,6 @@ import { X, ExternalLink, Loader2, Download } from "lucide-react";
 import { Content } from "../types";
 import { useModalBehavior } from "../hooks/useModalBehavior";
 import { useLanguage } from "../contexts/LanguageContext";
-import { VideoAdInterstitial } from "./VideoAdInterstitial";
-import { useAuth } from "../contexts/AuthContext";
-import { useSettings } from "../contexts/SettingsContext";
-import { isUserExemptFromAds, registerAppWhitelistedUrl } from "../utils/adUtils";
 import { normalizeContentUrl } from "../utils/linkUtils";
 import { openInNewTab } from "../utils/playerUtils";
 import {
@@ -29,11 +25,8 @@ export function TelegramDownloadModal({
 }: TelegramDownloadModalProps) {
   useModalBehavior(isOpen, onClose);
   const { t } = useLanguage();
-  const { profile } = useAuth();
-  const { settings } = useSettings();
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [errorId, setErrorId] = useState<string | null>(null);
-  const [adPendingLink, setAdPendingLink] = useState<{ id: string, url: string } | null>(null);
 
   if (!isOpen || !content) return null;
 
@@ -45,7 +38,6 @@ export function TelegramDownloadModal({
       const res = await fetch(`/api/resolve-tg?url=${encodeURIComponent(normalizedUrl)}`);
       const data = await res.json();
       if (res.ok && data.url) {
-        registerAppWhitelistedUrl(data.url);
         if (data.url.startsWith("tg://")) {
           window.location.href = data.url;
         } else {
@@ -65,15 +57,7 @@ export function TelegramDownloadModal({
   };
 
   const handleResolve = (id: string, url: string) => {
-    const isExempt = isUserExemptFromAds(profile, content);
-    const provider = settings?.adProvider || 'google_adsense';
-    const isInterstitialActive = provider === 'both' || provider === 'interstitial_only';
-    
-    if (!isExempt && isInterstitialActive && settings?.adVideoUrl) {
-      setAdPendingLink({ id, url });
-    } else {
-      executeResolve(id, url);
-    }
+    executeResolve(id, url);
   };
 
   const isHubcloudLink = (url: string) => {
@@ -131,20 +115,8 @@ export function TelegramDownloadModal({
   const seasons = getSeasons();
 
   return (
-    <>
-      <VideoAdInterstitial
-        isOpen={!!adPendingLink}
-        onClose={() => setAdPendingLink(null)}
-        adUrl={settings?.adVideoUrl || ""}
-        onAdComplete={() => {
-          if (adPendingLink) {
-            executeResolve(adPendingLink.id, adPendingLink.url);
-            setAdPendingLink(null);
-          }
-        }}
-      />
-      <AnimatePresence mode="wait">
-        {isOpen && (
+    <AnimatePresence mode="wait">
+      {isOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
             <motion.div
               {...modalBackdropAnimation}
@@ -245,6 +217,5 @@ export function TelegramDownloadModal({
           </div>
         )}
       </AnimatePresence>
-    </>
   );
 }

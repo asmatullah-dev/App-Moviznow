@@ -34,7 +34,6 @@ import { motion } from 'motion/react';
 import { Header } from "../../components/Header";
 import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
-import { AdBanner } from "../../components/AdBanner";
 
 const VIP_PLANS = [
   { id: '1m', name: '1 Month VIP', months: 1, price: 300, perMonth: 300, planRole: 'vip' as Role, headerBadge: '', saveBadge: '', popular: false, icon: Zap },
@@ -142,11 +141,6 @@ export default function Membership() {
               </span>
             </div>
           </motion.div>
-
-          {/* Ad Banner below Hero */}
-          <div className="w-full my-4">
-            <AdBanner />
-          </div>
 
           {/* STARTING MEMBERSHIP PLANS SELECTOR & CLEAR DIFFERENCE TABLES */}
           <div className="space-y-8">
@@ -335,17 +329,6 @@ export default function Membership() {
                     </thead>
                     <tbody className="divide-y divide-zinc-800/60 font-medium">
                       <tr className="hover:bg-zinc-800/30 transition-colors">
-                        <td className="p-3 sm:p-3.5 text-zinc-300 font-bold">{t('Ads')}</td>
-                        <td className="p-3 sm:p-3.5 text-center text-sky-300 bg-sky-950/15 font-bold">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-sky-500/20 text-sky-300 text-[11px] font-bold border border-sky-500/30">
-                            {t('Has some banners')}
-                          </span>
-                        </td>
-                        <td className="p-3 sm:p-3.5 text-center bg-amber-950/15 font-black">
-                          <X className="w-4 h-4 text-emerald-400 mx-auto" />
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-zinc-800/30 transition-colors">
                         <td className="p-3 sm:p-3.5 text-zinc-300">{t('All Movies & Series')}</td>
                         <td className="p-3 sm:p-3.5 text-center text-emerald-400 bg-sky-950/15">
                           <CheckCircle2 className="w-4 h-4 text-emerald-400 mx-auto" />
@@ -408,7 +391,7 @@ export default function Membership() {
                   <Sparkles className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
                   <p className="text-xs text-zinc-300 leading-relaxed font-medium">
                     <span className="font-bold text-white">{t('Pro-Tip:')}</span> {t('Choose ')}
-                    <span className="text-amber-400 font-bold">{t('VIP')}</span> {t('for ad-free watching and free demanding, or select ')}
+                    <span className="text-amber-400 font-bold">{t('VIP')}</span> {t('for unlimited HD streaming and free demanding, or select ')}
                     <span className="text-sky-400 font-bold">{t('Basic')}</span> {t('for budget streaming.')}
                   </p>
                 </div>
@@ -676,31 +659,26 @@ export default function Membership() {
             </div>
           </div>
 
-          {/* Ad Banner between basic and VIP */}
-          <div className="w-full my-6">
-            <AdBanner />
-          </div>
-
-          {/* Membership Group VIP Plans (100% Ad-Free) */}
+          {/* Membership Group VIP Plans */}
           <div className="space-y-6 pt-4">
             <div className="text-center space-y-2">
               <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider bg-rose-500/10 border border-rose-500/30 text-rose-400 shadow-sm">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>{t("100% Ad-Free • Save up to 44% with VIP Passes")}</span>
+                <span>{t("Save up to 44% with VIP Passes")}</span>
               </div>
               <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tight flex items-center justify-center gap-2">
-                <span>{t("VIP Membership (Without Ads)")}</span>
+                <span>{t("VIP Membership Plans")}</span>
                 <Crown className="w-7 h-7 text-amber-400 fill-amber-400/20 shrink-0" />
               </h2>
               <p className="text-xs sm:text-sm text-zinc-300 max-w-xl mx-auto">
-                {t("Enjoy 100% ad-free streaming plus daily 6–7 HD movies & web series delivered inside the WhatsApp group. Longer plans unlock bigger discounts.")}
+                {t("Enjoy unlimited premium HD streaming plus daily 6–7 HD movies & web series delivered inside the WhatsApp group. Longer plans unlock bigger discounts.")}
               </p>
 
-              {/* Explicit VIP Without Ads Guarantee Callout */}
+              {/* Explicit VIP Guarantee Callout */}
               <div className="bg-gradient-to-r from-emerald-500/10 via-amber-500/15 to-emerald-500/10 border border-emerald-500/40 rounded-2xl p-4 text-center max-w-2xl mx-auto shadow-lg backdrop-blur-md">
                 <p className="text-xs sm:text-sm font-extrabold text-emerald-300 flex items-center justify-center gap-2">
                   <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
-                  <span>{t("VIP Guarantee: 100% Ad-Free Streaming (No Ads, No Interstitials, No Banners)")}</span>
+                  <span>{t("VIP Guarantee: Unlimited High-Speed HD Streaming & Direct Downloads")}</span>
                 </p>
               </div>
             </div>
@@ -715,7 +693,7 @@ export default function Membership() {
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-xl font-extrabold text-white">{t("1 Month VIP")}</h3>
                     <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      {t("Without Ads")}
+                      {t("VIP Pass")}
                     </span>
                   </div>
                   <div className="text-3xl font-black text-emerald-400 mb-1">{t("PKR 300")}</div>
@@ -723,7 +701,7 @@ export default function Membership() {
                   <p className="text-xs font-bold text-zinc-400 mb-5 min-h-[32px]">{t("Base monthly VIP rate")}</p>
                   
                   <ul className="space-y-3 mb-6 text-xs text-zinc-300">
-                    <li className="flex items-center gap-2.5 font-bold text-emerald-400"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("100% Ad-Free (Without Ads)")}</span></li>
+                    <li className="flex items-center gap-2.5 font-bold text-emerald-400"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Unlimited HD Streaming & Downloads")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Daily 6–7 HD movies")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Latest web series")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Priority WhatsApp support")}</span></li>
@@ -753,7 +731,7 @@ export default function Membership() {
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-xl font-extrabold text-white">{t("3 Months VIP")}</h3>
                     <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      {t("Without Ads")}
+                      {t("VIP Pass")}
                     </span>
                   </div>
                   <div className="text-3xl font-black text-emerald-400 mb-1">{t("PKR 750")}</div>
@@ -763,7 +741,7 @@ export default function Membership() {
                   </p>
                   
                   <ul className="space-y-3 mb-6 text-xs text-zinc-300">
-                    <li className="flex items-center gap-2.5 font-bold text-emerald-400"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("100% Ad-Free (Without Ads)")}</span></li>
+                    <li className="flex items-center gap-2.5 font-bold text-emerald-400"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Unlimited HD Streaming & Downloads")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Daily 6–7 HD movies")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Latest web series")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Priority WhatsApp support")}</span></li>
@@ -794,7 +772,7 @@ export default function Membership() {
                   <div className="flex items-center justify-between mb-2 mt-4">
                     <h3 className="text-xl font-black text-white">{t("6 Months VIP")}</h3>
                     <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      {t("Without Ads")}
+                      {t("VIP Pass")}
                     </span>
                   </div>
                   <div className="text-3xl font-black text-emerald-400 mb-1">{t("PKR 1,400")}</div>
@@ -804,7 +782,7 @@ export default function Membership() {
                   </p>
                   
                   <ul className="space-y-3 mb-6 text-xs text-zinc-100 font-medium">
-                    <li className="flex items-center gap-2.5 font-bold text-emerald-400"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("100% Ad-Free (Without Ads)")}</span></li>
+                    <li className="flex items-center gap-2.5 font-bold text-emerald-400"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Unlimited HD Streaming & Downloads")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Daily 6–7 HD movies")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Latest web series")}</span></li>
                     <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Priority WhatsApp support")}</span></li>
@@ -837,7 +815,7 @@ export default function Membership() {
                       <Crown className="w-5 h-5 text-amber-400 fill-amber-400/20" />
                     </h3>
                     <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      {t("Without Ads")}
+                      {t("VIP Pass")}
                     </span>
                   </div>
                   <div className="text-3xl font-black text-amber-400 mb-1">{t("PKR 2,600")}</div>
@@ -848,10 +826,10 @@ export default function Membership() {
                   </p>
                   
                   <ul className="space-y-3 mb-6 text-xs text-zinc-300">
-                    <li className="flex items-center gap-2.5 font-bold text-amber-400"><CheckCircle className="w-4 h-4 text-amber-400 shrink-0" /> <span>{t("100% Ad-Free (Without Ads)")}</span></li>
-                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-amber-400 shrink-0" /> <span>{t("Daily 6–7 HD movies")}</span></li>
-                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-amber-400 shrink-0" /> <span>{t("Latest web series")}</span></li>
-                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-amber-400 shrink-0" /> <span>{t("Priority WhatsApp support")}</span></li>
+                    <li className="flex items-center gap-2.5 font-bold text-amber-400"><CheckCircle className="w-4 h-4 text-amber-400 shrink-0" /> <span>{t("Unlimited HD Streaming & Downloads")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Daily 6–7 HD movies")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Latest web series")}</span></li>
+                    <li className="flex items-center gap-2.5"><CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>{t("Priority WhatsApp support")}</span></li>
                   </ul>
                 </div>
 
@@ -880,7 +858,7 @@ export default function Membership() {
                 <div className="space-y-2 text-center md:text-left">
                   <div className="flex items-center justify-center md:justify-start gap-2">
                     <span className="text-[10px] font-black uppercase px-3 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
-                      ✨ {t("100% Ad-Free (Without Ads)")}
+                      ✨ {t("Unlimited HD Streaming & Downloads")}
                     </span>
                   </div>
                   <h3 className="text-2xl sm:text-3xl font-black text-white flex items-center justify-center md:justify-start gap-2">
@@ -967,11 +945,6 @@ export default function Membership() {
               </div>
             </div>
           )}
-
-          {/* Ad Banner above support */}
-          <div className="w-full my-6">
-            <AdBanner />
-          </div>
 
           {/* Support Section */}
           <div className="mt-12 border-t border-zinc-800/80 pt-8">

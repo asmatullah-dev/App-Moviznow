@@ -373,7 +373,6 @@ export interface AppSettings {
   adminTabsOrder: string[];
   hiddenAdminTabs?: string[];
   isTrialEnabled?: boolean;
-  isVipTrialEnabled?: boolean;
   isPhoneLoginEnabled?: boolean;
   isAdminContactEnabled?: boolean;
   isPaymentEnabled?: boolean;
@@ -393,20 +392,6 @@ export interface AppSettings {
       databaseId: string;
     }[];
   };
-  adProvider?: 'disabled' | 'google_adsense' | 'interstitial_only' | 'both' | 'commercialhalftime' | 'custom_banner';
-  adSenseClientId?: string;
-  adSenseSlotId?: string;
-  bannerAdKey?: string;
-  bannerAdScriptUrl?: string;
-  bannerAdWidth?: number;
-  bannerAdHeight?: number;
-  adBannerTitle?: string;
-  adBannerDescription?: string;
-  adBannerCtaText?: string;
-  adBannerLink?: string;
-  adSkipTimer?: number;
-  adVideoUrl?: string;
-  adRedirectUrl?: string;
 }
 
 export interface ErrorLinkInfo {

@@ -25,7 +25,6 @@ import {
   Info,
 } from "lucide-react";
 
-import { AdBanner } from "../../components/AdBanner";
 import { GuestAccessBanner } from "../../components/GuestAccessBanner";
 import { Content, Collection as AppCollection } from "../../types";
 import { isUserExpired } from "../../contexts/UsersContext";
@@ -139,7 +138,7 @@ export default function Home({
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearch(search);
-    }, 100);
+    }, 300);
     return () => clearTimeout(timer);
   }, [search]);
 
@@ -1265,7 +1264,6 @@ export default function Home({
                 toggleWatchLater={handleToggleWatchLater}
                 onRequireLogin={requireLogin}
               />
-              <AdBanner className="my-6" />
             </div>
           )}
 
@@ -1298,9 +1296,6 @@ export default function Home({
               onRequireLogin={requireLogin}
             />
           </div>
-
-          {/* Ad Banner for Basic Users */}
-          <AdBanner className="mb-6" />
 
           {/* Grid Title */}
           <div id="explore-catalog" className="flex items-center justify-between mb-6 pb-2 border-b border-zinc-200/80 dark:border-zinc-800/80 mt-10 scroll-mt-24">
@@ -1478,11 +1473,6 @@ export default function Home({
                       selectedYear={selectedYear}
                       skipLiveRatingFetch={true}
                     />
-                    {index === 9 && paginatedContent.length > 10 && (
-                      <div className="col-span-full my-3">
-                        <AdBanner />
-                      </div>
-                    )}
                   </React.Fragment>
                 ))}
               </motion.div>
@@ -1605,9 +1595,6 @@ export default function Home({
                   </div>
                 </div>
               )}
-
-              {/* Ad Banner under page selection */}
-              <AdBanner className="mt-8 mb-4" />
             </>
           )}
         </main>

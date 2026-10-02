@@ -252,6 +252,21 @@ export default function UserManagement() {
     });
   }, [whitelistedPhones]);
 
+  const isUserGoogleOrGmail = useCallback((u: any, formEmail?: string): boolean => {
+    if (!u && !formEmail) return false;
+    const email = (formEmail || u?.email || '').trim().toLowerCase();
+    const rawEmail = (u?.email || '').trim().toLowerCase();
+    
+    if (email.endsWith('@gmail.com') || rawEmail.endsWith('@gmail.com')) return true;
+    if (email.includes('@') && !email.endsWith('@moviznow.com')) return true;
+    if (rawEmail.includes('@') && !rawEmail.endsWith('@moviznow.com')) return true;
+    if (u?.provider === 'google.com' || u?.providerId === 'google.com') return true;
+    if (u?.isGoogleUser === true) return true;
+    if (u?.photoURL && typeof u.photoURL === 'string' && u.photoURL.includes('googleusercontent.com')) return true;
+    if (Array.isArray(u?.providerData) && u.providerData.some((p: any) => p?.providerId === 'google.com')) return true;
+    return false;
+  }, []);
+
   const handleToggleWhitelist = useCallback(async (phone: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     const std = standardizePhone(phone);
@@ -825,10 +840,6 @@ export default function UserManagement() {
           } else {
             console.log("[UserManagement] Auto expiry check bypassed on tab open. (Only runs once daily between 5:00 AM and 9:00 AM; avoiding connecting to Firestore).");
           }
-        }
-
-        if (mounted && res?.updatedSomething) {
-          window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', message: 'Users refreshed successfully' } }));
         }
       } catch (err) {
         console.error("Refresh users failed on tab open:", err);
@@ -1904,7 +1915,7 @@ export default function UserManagement() {
       if (filterWhitelist === 'whitelisted') {
         result = result.filter(u => u.phone && isUserPhoneWhitelisted(u.phone));
       } else if (filterWhitelist === 'not_whitelisted') {
-        result = result.filter(u => u.phone && !isUserPhoneWhitelisted(u.phone) && (!u.email || u.email.endsWith('@moviznow.com')));
+        result = result.filter(u => u.phone && !isUserPhoneWhitelisted(u.phone) && !isUserGoogleOrGmail(u));
       }
     }
 
@@ -2185,7 +2196,7 @@ export default function UserManagement() {
               onClick={() => {
                 if (isManualRefreshing) return;
                 setIsManualRefreshing(true);
-                window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', isManual: true, message: 'Refreshing users...' } }));
+                window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', isManual: true, scope: 'user_management', message: 'Refreshing users...' } }));
                 
                 const doSync = async () => {
                    // 1. Finalize any pending user edits first
@@ -2207,13 +2218,13 @@ export default function UserManagement() {
                 
                 doSync().then((res) => {
                   if (res?.updatedSomething) {
-                    window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', isManual: true, message: 'Users refreshed successfully' } }));
+                    window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', isManual: true, scope: 'user_management', message: 'Users refreshed successfully' } }));
                   } else {
-                    window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'up-to-date', isManual: true, message: 'Users are up to date' } }));
+                    window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'up-to-date', isManual: true, scope: 'user_management', message: 'Users are up to date' } }));
                   }
                 }).catch((err) => {
                   console.error("Manual refresh failed:", err);
-                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', isManual: true, message: 'Failed to refresh users' } }));
+                  window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', isManual: true, scope: 'user_management', message: 'Failed to refresh users' } }));
                 }).finally(() => {
                   setIsManualRefreshing(false);
                 });
@@ -2634,24 +2645,35 @@ export default function UserManagement() {
                           <span>{user.phone || 'No phone'}</span>
                           {user.phone && (
                             (() => {
-                              const isGoogleAccount = Boolean(
-                                (user.email && !user.email.endsWith('@moviznow.com') && user.email.includes('@')) ||
-                                user.provider === 'google.com' ||
-                                user.isGoogleUser === true
-                              );
-
-                              // No need to show allowed or whitelist status for Google users
-                              if (isGoogleAccount) {
-                                return null;
-                              }
-
+                              const isGoogleAccount = isUserGoogleOrGmail(user);
                               const isWhitelisted = isUserPhoneWhitelisted(user.phone);
+
+                              if (isGoogleAccount) {
+                                if (!isWhitelisted) return null;
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleToggleWhitelist(user.phone!, e)}
+                                    disabled={processing[`whitelist_${standardizePhone(user.phone)}`]}
+                                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 transition-colors cursor-pointer"
+                                    title="Whitelisted WhatsApp Number. Click to revoke."
+                                  >
+                                    <ShieldCheck className="w-2.5 h-2.5" /> Whitelisted
+                                  </button>
+                                );
+                              }
 
                               if (isWhitelisted) {
                                 return (
-                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20" title="Whitelisted WhatsApp Number">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => handleToggleWhitelist(user.phone!, e)}
+                                    disabled={processing[`whitelist_${standardizePhone(user.phone)}`]}
+                                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 transition-colors cursor-pointer"
+                                    title="Whitelisted WhatsApp Number. Click to revoke."
+                                  >
                                     <ShieldCheck className="w-2.5 h-2.5" /> Whitelisted
-                                  </span>
+                                  </button>
                                 );
                               }
 
@@ -2946,30 +2968,39 @@ export default function UserManagement() {
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400">WhatsApp Number</label>
-                      {editForm.phone && (
-                        <button
-                          type="button"
-                          onClick={() => handleToggleWhitelist(editForm.phone!)}
-                          disabled={processing[`whitelist_${standardizePhone(editForm.phone)}`]}
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold border transition-all cursor-pointer ${
-                            isUserPhoneWhitelisted(editForm.phone)
-                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
-                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
-                          }`}
-                        >
-                          {isUserPhoneWhitelisted(editForm.phone) ? (
-                            <>
-                              <ShieldCheck className="w-3.5 h-3.5" />
-                              <span>Phone Whitelisted (Revoke)</span>
-                            </>
-                          ) : (
-                            <>
-                              <AlertTriangle className="w-3.5 h-3.5" />
-                              <span>{Boolean(editForm.email && !editForm.email.endsWith('@moviznow.com')) ? 'Phone Not Whitelisted (Optional Authorize)' : 'Phone Not Whitelisted (Authorize)'}</span>
-                            </>
-                          )}
-                        </button>
-                      )}
+                      {editForm.phone && (() => {
+                        const isGoogleUserEdit = isUserGoogleOrGmail(selectedUser, editForm.email);
+                        const isWhitelisted = isUserPhoneWhitelisted(editForm.phone);
+
+                        if (isGoogleUserEdit && !isWhitelisted) {
+                          return null;
+                        }
+
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleWhitelist(editForm.phone!)}
+                            disabled={processing[`whitelist_${standardizePhone(editForm.phone)}`]}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold border transition-all cursor-pointer ${
+                              isWhitelisted
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                                : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
+                            }`}
+                          >
+                            {isWhitelisted ? (
+                              <>
+                                <ShieldCheck className="w-3.5 h-3.5" />
+                                <span>Phone Whitelisted (Revoke)</span>
+                              </>
+                            ) : (
+                              <>
+                                <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                                <span>Phone Not Whitelisted (Authorize)</span>
+                              </>
+                            )}
+                          </button>
+                        );
+                      })()}
                     </div>
                     <input
                       type="text"
@@ -3074,32 +3105,41 @@ export default function UserManagement() {
                       <p className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.email?.endsWith('@moviznow.com') ? 'No Email' : selectedUser.email}</p>
                       <div className="flex items-center gap-2 flex-wrap mt-0.5">
                         <span className="text-zinc-500 dark:text-zinc-400 text-sm">{selectedUser.phone || 'No WhatsApp Number'}</span>
-                        {selectedUser.phone && (
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <button
-                              type="button"
-                              onClick={(e) => handleToggleWhitelist(selectedUser.phone!, e)}
-                              disabled={processing[`whitelist_${standardizePhone(selectedUser.phone)}`]}
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold border transition-all cursor-pointer ${
-                                isUserPhoneWhitelisted(selectedUser.phone)
-                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
-                                  : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
-                              }`}
-                            >
-                              {isUserPhoneWhitelisted(selectedUser.phone) ? (
-                                <>
-                                  <ShieldCheck className="w-3.5 h-3.5" />
-                                  <span>Phone Whitelisted (Revoke)</span>
-                                </>
-                              ) : (
-                                <>
-                                  <AlertTriangle className="w-3.5 h-3.5" />
-                                  <span>Phone Not Whitelisted (Authorize)</span>
-                                </>
-                              )}
-                            </button>
-                          </div>
-                        )}
+                        {selectedUser.phone && (() => {
+                          const isGoogleUserView = isUserGoogleOrGmail(selectedUser);
+                          const isWhitelisted = isUserPhoneWhitelisted(selectedUser.phone);
+
+                          if (isGoogleUserView && !isWhitelisted) {
+                            return null;
+                          }
+
+                          return (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <button
+                                type="button"
+                                onClick={(e) => handleToggleWhitelist(selectedUser.phone!, e)}
+                                disabled={processing[`whitelist_${standardizePhone(selectedUser.phone)}`]}
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold border transition-all cursor-pointer ${
+                                  isWhitelisted
+                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20'
+                                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20 hover:bg-amber-500/20'
+                                }`}
+                              >
+                                {isWhitelisted ? (
+                                  <>
+                                    <ShieldCheck className="w-3.5 h-3.5" />
+                                    <span>Phone Whitelisted (Revoke)</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                                    <span>Phone Not Whitelisted (Authorize)</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div className="mt-1 flex items-center gap-1.5 flex-wrap">
                         <span className="text-zinc-500 dark:text-zinc-400 font-mono text-[10px] break-all border border-zinc-200 dark:border-zinc-800 rounded px-1.5 py-0.5 inline-flex items-center gap-1 bg-zinc-50 dark:bg-zinc-900">

@@ -3,8 +3,6 @@
  * Handles iOS (iPhone/iPad), Android, and Desktop deep-linking for VLC, MX Player, and system video players.
  */
 
-import { registerAppWhitelistedUrl } from './adUtils';
-
 export interface PlayerLaunchOptions {
   player: 'vlc' | 'mx' | 'generic' | 'browser' | 'download';
   url: string;
@@ -98,9 +96,7 @@ export function normalizeBrowserViewUrl(rawUrl: string): string {
  * Opens the video URL in the selected external media player based on user OS/platform.
  */
 export function playInExternalPlayer({ player, url, title }: PlayerLaunchOptions): { success: boolean; schemeUrl?: string } {
-  registerAppWhitelistedUrl(url);
   const directVideoUrl = normalizeDirectStreamUrl(url);
-  registerAppWhitelistedUrl(directVideoUrl);
   const encodedTitle = encodeURIComponent(title || 'Video Stream');
   const onIOS = isIOS();
   const onAndroid = isAndroid();
@@ -241,7 +237,6 @@ function tryOpenUriWithFallback(primaryUri: string, fallbackUri?: string) {
  */
 export function openInNewTab(url: string) {
   if (!url) return;
-  registerAppWhitelistedUrl(url);
 
   let newWindow: Window | null = null;
   try {

@@ -22,7 +22,6 @@ import { motion } from 'motion/react';
 import { Header } from "../../components/Header";
 import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
-import { AdBanner } from "../../components/AdBanner";
 
 export default function Contact() {
   const { settings } = useSettings();
@@ -78,11 +77,6 @@ export default function Contact() {
               {t("Get in touch with the %APP_NAME% team.").replace("%APP_NAME%", appName)}
             </p>
           </motion.div>
-
-          {/* Ad Banner below Hero */}
-          <div className="w-full my-4">
-            <AdBanner />
-          </div>
 
           {/* Contact Methods Cards */}
           <div className="grid sm:grid-cols-2 gap-6">
@@ -222,15 +216,10 @@ export default function Contact() {
                   <span>{t("Is it safe & virus-free?")}</span>
                 </h4>
                 <p className="text-xs text-zinc-300 leading-relaxed">
-                  {t("Yes! All files are tested and verified in high-definition HD quality with zero popups, viruses, or dangerous ads.")}
+                  {t("Yes! All files are tested and verified in high-definition HD quality with zero popups, viruses, or broken links.")}
                 </p>
               </div>
             </div>
-          </div>
-
-          {/* Ad Banner above support */}
-          <div className="w-full my-6">
-            <AdBanner />
           </div>
 
           {/* Support Section */}

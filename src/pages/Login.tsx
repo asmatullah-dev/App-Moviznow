@@ -8,7 +8,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 
 import { UserProfile } from '../types';
 import { getUserDisplayName } from '../utils/userUtils';
-import { purgeAllAdElements } from '../utils/adUtils';
 import { safeStorage } from '../utils/safeStorage';
 
 type LoginStep = 'social' | 'identifier' | 'password' | 'reset-password' | 'create_password';
@@ -45,13 +44,6 @@ export default function Login() {
   const [registeredUser, setRegisteredUser] = useState<UserProfile | null>(null);
   const [wrongPasswordCount, setWrongPasswordCount] = useState(0);
 
-  // Guarantee that no ad network, script, or popunder element runs or displays on the login page
-  useEffect(() => {
-    purgeAllAdElements(true);
-    const interval = setInterval(() => purgeAllAdElements(true), 1000);
-    return () => clearInterval(interval);
-  }, []);
-
   useEffect(() => {
     if (location.state?.suspended) {
       setCustomError("Your account has been suspended. Please contact admin.");
@@ -83,8 +75,6 @@ export default function Login() {
   useEffect(() => {
     // Only redirect if auth check has completed, there is a valid authenticated Firebase user, and their profile is successfully loaded
     if (!authLoading && user && profile && !location.state?.switch) {
-      // Instantly purge all ad scripts and social ads upon login
-      purgeAllAdElements(true);
       try {
         window.dispatchEvent(new Event('moviz_auth_state_changed'));
       } catch (e) {}

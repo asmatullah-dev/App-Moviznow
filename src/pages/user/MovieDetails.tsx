@@ -9,8 +9,6 @@ import {
 } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 
-import { AdBanner } from "../../components/AdBanner";
-import { isUserExemptFromAds, registerAppWhitelistedUrl } from "../../utils/adUtils";
 import { canManageContent, canUserStreamContent } from "../../utils/roleUtils";
 import { normalizeContentUrl, getCachedLinkExtraction, saveCachedLinkExtraction } from "../../utils/linkUtils";
 import { GuestAccessBanner } from "../../components/GuestAccessBanner";
@@ -136,7 +134,6 @@ import { useSettings } from "../../contexts/SettingsContext";
 
 import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
-import { VideoAdInterstitial } from "../../components/VideoAdInterstitial";
 
 function MovieDetailsSkeleton({ onBack }: { onBack?: () => void }) {
   return (
@@ -437,8 +434,6 @@ export default function MovieDetails() {
   const [liveRating, setLiveRating] = useState<string | null>(null);
   const [fetchingImdb, setFetchingImdb] = useState(false);
   const [extractingLinkId, setExtractingLinkId] = useState<string | null>(null);
-  const [isVideoAdOpen, setIsVideoAdOpen] = useState(false);
-  const videoAdResolveRef = useRef<((completed: boolean) => void) | null>(null);
 
   // Removed duplicate useModalBehavior(showLoginPrompt) as ConfirmModal handles its own modal stack
   useModalBehavior(isTrailerPopupOpen, () => {
@@ -450,13 +445,6 @@ export default function MovieDetails() {
   );
   useModalBehavior(linkPopup?.isOpen || false, () => setLinkPopup(null));
   useModalBehavior(isPosterExpanded, () => setIsPosterExpanded(false));
-  useModalBehavior(isVideoAdOpen, () => {
-    setIsVideoAdOpen(false);
-    if (videoAdResolveRef.current) {
-      videoAdResolveRef.current(false);
-      videoAdResolveRef.current = null;
-    }
-  });
 
   const hasLoggedView = useRef(false);
   const navigate = useNavigate();
@@ -1964,7 +1952,6 @@ export default function MovieDetails() {
       const res = await fetch(`/api/resolve-tg?url=${encodeURIComponent(targetUrl)}`);
       const data = await res.json();
       if (res.ok && data.url) {
-        registerAppWhitelistedUrl(data.url);
         if (data.url.startsWith("tg://")) {
           window.location.href = data.url;
         } else {
@@ -2084,10 +2071,6 @@ export default function MovieDetails() {
       });
       return;
     }
-
-    const isExempt = isUserExemptFromAds(profile, mergedContent);
-    const provider = settings?.adProvider || 'both';
-    const isAdsActive = settings && provider !== "disabled" && provider !== "google_adsense";
 
     // Set extracting button animation
     setExtractingLinkId(targetUrl);
@@ -2245,20 +2228,6 @@ export default function MovieDetails() {
     // Kick off extraction immediately in background
     const extractionPromise = performExtraction();
 
-    // If not exempt, show the Video Ad immediately
-    if (!isExempt && isAdsActive) {
-      setIsVideoAdOpen(true);
-      const adPromise = new Promise<boolean>((resolve) => {
-        videoAdResolveRef.current = resolve;
-      });
-
-      const adCompleted = await adPromise;
-      if (!adCompleted) {
-        setExtractingLinkId(null);
-        return;
-      }
-    }
-
     // Await background extraction completion
     const extractionResult = await extractionPromise;
     setExtractingLinkId(null);
@@ -2360,8 +2329,6 @@ export default function MovieDetails() {
     if (!copyUrl.startsWith("http")) {
       copyUrl = "https://" + copyUrl;
     }
-
-    registerAppWhitelistedUrl(copyUrl);
 
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -2885,24 +2852,6 @@ export default function MovieDetails() {
 
   return (
     <>
-      <VideoAdInterstitial
-        isOpen={isVideoAdOpen}
-        onClose={() => {
-          setIsVideoAdOpen(false);
-          if (videoAdResolveRef.current) {
-            videoAdResolveRef.current(false);
-            videoAdResolveRef.current = null;
-          }
-        }}
-        onAdComplete={() => {
-          setIsVideoAdOpen(false);
-          if (videoAdResolveRef.current) {
-            videoAdResolveRef.current(true);
-            videoAdResolveRef.current = null;
-          }
-        }}
-        adUrl={settings?.adVideoUrl || ""}
-      />
       <PageTransition className="w-full">
       <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white pb-20 transition-colors duration-300">
       <Helmet>
@@ -3827,9 +3776,6 @@ export default function MovieDetails() {
             {/* Guest / Pending Access Banner */}
             <GuestAccessBanner className="my-6" />
 
-            {/* Ad Banner for Basic Users */}
-            <AdBanner className="my-6" content={mergedContent} />
-
             {/* Links Section */}
             <section className="space-y-6">
               <div className="flex items-center gap-3">
@@ -4353,13 +4299,6 @@ export default function MovieDetails() {
                                                       </div>
                                                     )}
                                                   </div>
-
-                                                  {/* Ad Banner after 10 episodes */}
-                                                  {(eIdx + 1) % 10 === 0 && eIdx + 1 < epArr.length && (
-                                                    <div className="w-full my-4">
-                                                      <AdBanner content={mergedContent} />
-                                                    </div>
-                                                  )}
                                                 </React.Fragment>
                                               );
                                             })}
@@ -4417,11 +4356,6 @@ export default function MovieDetails() {
                                 );
                               })()}
                             </div>
-                          </div>
-
-                          {/* Ad Banner after each season */}
-                          <div className="w-full my-6">
-                            <AdBanner content={mergedContent} />
                           </div>
                         </React.Fragment>
                       );

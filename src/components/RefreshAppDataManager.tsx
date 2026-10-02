@@ -60,6 +60,7 @@ export function RefreshAppDataManager() {
           status: 'syncing',
           isInitialLoad: false,
           isManual: true,
+          scope: 'app',
           message: 'Refreshing...'
         }
       }));
@@ -157,28 +158,9 @@ export function RefreshAppDataManager() {
             status: 'success',
             isInitialLoad: false,
             isManual: true,
+            scope: 'app',
             updatedCount: 0,
             message: 'Refresh successfully'
-          }
-        }));
-      } else if (otherUpdated) {
-        window.dispatchEvent(new CustomEvent('sync_status', {
-          detail: {
-            status: 'success',
-            isInitialLoad: false,
-            isManual: false,
-            updatedCount: 0,
-            message: 'Data updated successfully'
-          }
-        }));
-      } else {
-        window.dispatchEvent(new CustomEvent('sync_status', {
-          detail: {
-            status: 'up-to-date',
-            isInitialLoad: false,
-            isManual: false,
-            updatedCount: 0,
-            message: 'Data is up to date'
           }
         }));
       }
@@ -191,6 +173,7 @@ export function RefreshAppDataManager() {
             status: 'error',
             isInitialLoad: false,
             isManual: true,
+            scope: 'app',
             message: 'Sync failed'
           }
         }));

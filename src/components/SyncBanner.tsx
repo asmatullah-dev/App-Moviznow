@@ -8,7 +8,7 @@ export function SyncBanner() {
   const [updatedCount, setUpdatedCount] = useState<number | undefined>(undefined);
   const [customMessage, setCustomMessage] = useState<string | undefined>(undefined);
   const [isInitialLoad, setIsInitialLoad] = useState<boolean>(false);
-  const isManualActiveRef = useRef<boolean>(false);
+  const activeManualScopeRef = useRef<string | null>(null);
 
   useEffect(() => {
     let timeoutId: NodeJS.Timeout | null = null;
@@ -24,6 +24,7 @@ export function SyncBanner() {
       let msg: string | undefined = undefined;
       let initialLoad: boolean = false;
       let isManual: boolean = false;
+      let scope: string = 'app';
 
       if (typeof detail === 'string') {
         status = detail as any;
@@ -32,6 +33,7 @@ export function SyncBanner() {
         count = detail.updatedContentCount !== undefined ? detail.updatedContentCount : detail.updatedCount;
         msg = detail.message;
         initialLoad = Boolean(detail.isInitialLoad);
+        scope = detail.scope || 'app';
         isManual = Boolean(
           detail.isManual || 
           detail.manual || 
@@ -44,29 +46,25 @@ export function SyncBanner() {
         );
       }
 
-      // Hide toast banner completely for all automatic background syncs (app open, 10-hour sync, periodic sync)
-      // Only display toasts when the user manually triggers a refresh
+      // STRICT RULE: Completely ignore all automatic/background sync events.
+      // Only display banners when an action is explicitly manually triggered by the user.
+      if (!isManual && !activeManualScopeRef.current) {
+        return;
+      }
+
+      // If a manual operation is in progress for a specific scope (e.g. 'user_management'),
+      // ignore non-matching background completions from other scopes.
+      if (activeManualScopeRef.current && scope !== activeManualScopeRef.current && !isManual) {
+        return;
+      }
+
       if (status === 'syncing') {
-        if (!isManual) {
-          isManualActiveRef.current = false;
-          setSyncStatus(null);
-          return;
-        }
-        isManualActiveRef.current = true;
-      } else {
-        // For completion status (success / up-to-date / error):
-        // Only show toast if this sync was manually triggered!
-        if (!isManual && !isManualActiveRef.current) {
-          setSyncStatus(null);
-          return;
-        }
+        if (!isManual) return;
+        activeManualScopeRef.current = scope;
       }
 
       const now = Date.now();
-      if (status === 'up-to-date' && lastEventKey.startsWith('up-to-date') && (now - lastEventTime < 5000)) {
-        return; // Prevent duplicate or chained up-to-date banners across components
-      }
-      const currentKey = `${status}|${msg || ''}|${count || 0}|${isManual}`;
+      const currentKey = `${scope}|${status}|${msg || ''}|${count || 0}`;
       if (currentKey === lastEventKey && (now - lastEventTime < 3000)) {
         return; // Ignore rapid duplicate identical event
       }
@@ -83,20 +81,20 @@ export function SyncBanner() {
 
       if (status === 'syncing') {
         syncingSafetyTimeout = setTimeout(() => {
-          isManualActiveRef.current = false;
+          activeManualScopeRef.current = null;
           setSyncStatus(null);
           setUpdatedCount(undefined);
           setCustomMessage(undefined);
           setIsInitialLoad(false);
-        }, 20000);
+        }, 15000);
       } else if (status === 'success' || status === 'up-to-date' || status === 'error') {
+        activeManualScopeRef.current = null;
         timeoutId = setTimeout(() => {
-          isManualActiveRef.current = false;
           setSyncStatus(null);
           setUpdatedCount(undefined);
           setCustomMessage(undefined);
           setIsInitialLoad(false);
-        }, 3500);
+        }, 3000);
       }
     };
 
@@ -129,7 +127,7 @@ export function SyncBanner() {
     }
     if (syncStatus === 'error') {
       if (customMessage) return t(customMessage);
-      return t('Sync failed. Will retry automatically.');
+      return t('Sync failed. Please retry.');
     }
     if (syncStatus === 'success') {
       if (isInitialLoad || customMessage === 'Loaded All Contents Successfully') {
@@ -158,8 +156,6 @@ export function SyncBanner() {
         <RefreshCw className="w-4 h-4 animate-spin text-blue-200" />
       ) : syncStatus === 'error' ? (
         <AlertCircle className="w-4 h-4 text-rose-200" />
-      ) : isInitialLoad ? (
-        <CheckCircle2 className="w-4 h-4 text-emerald-200" />
       ) : (
         <CheckCircle2 className="w-4 h-4 text-emerald-200" />
       )}

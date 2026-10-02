@@ -1011,17 +1011,6 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         return { updated: false, updatedContentCount: 0, isInitialLoad: false };
     }
     
-    // Proceed with sync
-    (window as any).__isAppDataSyncing = true;
-    window.dispatchEvent(new CustomEvent('sync_status', {
-      detail: {
-        status: 'syncing',
-        isManual: force,
-        isInitialLoad: noLocalData || isLibraryEmpty,
-        message: (noLocalData || isLibraryEmpty) ? 'Loading Data...' : (force ? 'Refreshing...' : 'Updating data...')
-      }
-    }));
-
     let updatedSomething = false;
     let serverUpdatedCount = 0;
     let isInitialLoadDone = false;
@@ -1039,11 +1028,6 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
           })
       );
     }
-    
-    // Refresh users list if admin and push pending user changes
-    if (isAdmin) {
-      finalizeUserChanges(force).catch(console.error);
-    }
 
     const syncResults = await Promise.all(tasks);
     if (syncResults.some(Boolean)) {
@@ -1054,39 +1038,6 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     safeStorage.setItem('admin_last_meta_check_period', checkPeriod);
     safeStorage.setItem('admin_last_successful_meta_check', Date.now().toString());
     safeStorage.setItem('admin_has_completed_initial_sync', 'true');
-    (window as any).__isAppDataSyncing = false;
-
-    if (isInitialLoadDone || (isLibraryEmpty && updatedSomething)) {
-        window.dispatchEvent(new CustomEvent('sync_status', {
-          detail: {
-            status: 'success',
-            isManual: force,
-            isInitialLoad: true,
-            updatedContentCount: 0,
-            message: 'Loaded All Contents Successfully'
-          }
-        }));
-    } else if (serverUpdatedCount > 0) {
-        window.dispatchEvent(new CustomEvent('sync_status', {
-          detail: {
-            status: 'success',
-            isManual: force,
-            isInitialLoad: false,
-            updatedContentCount: serverUpdatedCount,
-            message: `${serverUpdatedCount} content updated`
-          }
-        }));
-    } else {
-        window.dispatchEvent(new CustomEvent('sync_status', {
-          detail: {
-            status: updatedSomething ? 'success' : 'up-to-date',
-            isManual: force,
-            isInitialLoad: false,
-            updatedContentCount: 0,
-            message: updatedSomething ? 'Data updated successfully' : 'Data is up to date'
-          }
-        }));
-    }
 
     return { 
       updated: updatedSomething, 
@@ -1159,6 +1110,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         detail: {
           status: 'syncing',
           isManual: manual,
+          scope: 'catalog',
           isInitialLoad: isLibraryEmpty,
           message: isLibraryEmpty ? 'Loading Data...' : (manual ? 'Refreshing...' : 'Updating data...')
         }
@@ -1378,6 +1330,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
           detail: {
             status: 'success',
             isManual: manual,
+            scope: 'catalog',
             isInitialLoad: true,
             updatedContentCount: 0,
             message: 'Loaded All Contents Successfully'
@@ -1388,6 +1341,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
           detail: {
             status: 'success',
             isManual: manual,
+            scope: 'catalog',
             isInitialLoad: false,
             updatedContentCount: totalUpdatedContentCount,
             message: `${totalUpdatedContentCount} content updated`
@@ -1398,6 +1352,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
           detail: {
             status: 'up-to-date',
             isManual: true,
+            scope: 'catalog',
             isInitialLoad: false,
             updatedContentCount: 0,
             message: 'Data is up to date'
@@ -1424,6 +1379,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
           detail: {
             status: 'up-to-date',
             isManual: true,
+            scope: 'catalog',
             isInitialLoad: false,
             updatedContentCount: 0,
             message: 'Data is up to date'

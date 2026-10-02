@@ -29,7 +29,6 @@ import { motion } from 'motion/react';
 import { Header } from "../../components/Header";
 import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
-import { AdBanner } from "../../components/AdBanner";
 
 export default function FreeMovies() {
   const { settings } = useSettings();
@@ -152,11 +151,6 @@ export default function FreeMovies() {
             </div>
           </motion.div>
 
-          {/* Ad Banner below Hero */}
-          <div className="w-full my-4">
-            <AdBanner />
-          </div>
-
           {/* How It Works (Visual Timeline) */}
           <div className="space-y-6">
             <div className="text-center space-y-2">
@@ -227,7 +221,7 @@ export default function FreeMovies() {
                   </li>
                   <li className="flex items-start gap-3">
                     <XCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-                    <span>{t('Fake "download" buttons, ads everywhere')}</span>
+                    <span>{t('Fake "download" buttons & redirects')}</span>
                   </li>
                   <li className="flex items-start gap-3">
                     <XCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
@@ -258,7 +252,7 @@ export default function FreeMovies() {
                 <ul className="space-y-3.5 text-xs sm:text-sm text-zinc-100 font-medium">
                   <li className="flex items-start gap-3">
                     <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                    <span>{t("Safe, legal, ad-free")}</span>
+                    <span>{t("Safe, legal, fast & secure")}</span>
                   </li>
                   <li className="flex items-start gap-3">
                     <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
@@ -279,11 +273,6 @@ export default function FreeMovies() {
                 </ul>
               </div>
             </div>
-          </div>
-
-          {/* Ad Banner between comparison and trending */}
-          <div className="w-full my-6">
-            <AdBanner />
           </div>
 
           {/* Trending Movies Grid */}
@@ -338,11 +327,6 @@ export default function FreeMovies() {
               <MessageCircle className="w-5 h-5 fill-current" />
               <span>{t("Order Now - PKR 50")}</span>
             </motion.button>
-          </div>
-
-          {/* Ad Banner above support */}
-          <div className="w-full my-6">
-            <AdBanner />
           </div>
 
           {/* Support Section */}

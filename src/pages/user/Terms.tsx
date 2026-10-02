@@ -23,7 +23,6 @@ import { Link } from 'react-router-dom';
 import { Header } from "../../components/Header";
 import { ContactSupportButtons } from "../../components/ContactSupportButtons";
 import { PageTransition } from "../../components/PageTransition";
-import { AdBanner } from "../../components/AdBanner";
 
 export default function Terms() {
   const { settings } = useSettings();
@@ -186,11 +185,6 @@ export default function Terms() {
               Last Updated: September 2026
             </div>
           </motion.div>
-
-          {/* Ad Banner */}
-          <div className="w-full my-4">
-            <AdBanner />
-          </div>
 
           {/* Sections List */}
           <div className="space-y-6">

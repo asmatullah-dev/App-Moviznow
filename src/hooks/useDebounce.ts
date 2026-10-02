@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 
 /**
- * Hook to debounce a rapidly changing value by specified milliseconds (default: 100ms)
+ * Hook to debounce a rapidly changing value by specified milliseconds (default: 300ms)
  */
-export function useDebounce<T>(value: T, delay: number = 100): T {
+export function useDebounce<T>(value: T, delay: number = 300): T {
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
 
   useEffect(() => {

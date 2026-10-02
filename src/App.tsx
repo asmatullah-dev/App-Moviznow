@@ -29,9 +29,6 @@ import { SyncBanner } from './components/SyncBanner';
 import { SyncUserDataManager } from './components/SyncUserDataManager';
 import { RefreshAppDataManager } from './components/RefreshAppDataManager';
 import { AnalyticsTracker } from './components/AnalyticsTracker';
-import { AdSenseScriptManager } from './components/AdSenseScriptManager';
-import { CpmScriptManager } from './components/CpmScriptManager';
-import { AdBlockDetector } from './components/AdBlockDetector';
 import { NotificationPermissionPrompt } from './components/NotificationPermissionPrompt';
 
 // Eager Loaded Core User Pages for Instant Client-Side Navigation
@@ -51,7 +48,6 @@ const PrivacyPolicy = lazy(() => import('./pages/user/PrivacyPolicy'));
 const WatchLater = lazy(() => import('./pages/user/WatchLater'));
 const Favorites = lazy(() => import('./pages/user/Favorites'));
 const Trial = lazy(() => import('./pages/user/Trial'));
-const VipTrial = lazy(() => import('./pages/user/VipTrial'));
 const TopUp = lazy(() => import('./pages/user/TopUp'));
 const Cart = lazy(() => import('./pages/user/Cart'));
 const Settings = lazy(() => import('./pages/user/Settings'));
@@ -308,9 +304,6 @@ export default function App() {
                     <GlobalNavigationLoader />
                     <ScrollToTopOrRestore />
                     <AnalyticsTracker />
-                    <AdSenseScriptManager />
-                    <CpmScriptManager />
-                    <AdBlockDetector />
                     <MediaModalController isOpen={isMediaModalOpen} onClose={() => setIsMediaModalOpen(false)} />
                     <Suspense fallback={<LoadingFallback />}>
                       <Routes>
@@ -328,7 +321,7 @@ export default function App() {
                         <Route path="/watch-later" element={<ProtectedRoute requireAuth><WatchLater /></ProtectedRoute>} />
                         <Route path="/favorites" element={<ProtectedRoute requireAuth><Favorites /></ProtectedRoute>} />
                         <Route path="/trial" element={<ProtectedRoute><Trial /></ProtectedRoute>} />
-                        <Route path="/vip-trial" element={<ProtectedRoute><VipTrial /></ProtectedRoute>} />
+                        <Route path="/vip-trial" element={<Navigate to="/trial" replace />} />
                         <Route path="/top-up" element={<ProtectedRoute requireAuth><TopUp /></ProtectedRoute>} />
                         <Route path="/cart" element={<ProtectedRoute requireAuth><Cart /></ProtectedRoute>} />
                         <Route path="/settings" element={<ProtectedRoute requireAuth><Settings /></ProtectedRoute>} />
