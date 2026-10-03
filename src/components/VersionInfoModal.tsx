@@ -62,7 +62,7 @@ export default function VersionInfoModal({ isOpen, onClose }: VersionInfoModalPr
                   </div>
                   <div>
                     <h2 className="text-xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
-                      <span>{t("Version Information")}</span>
+                      <span>{t("Version Info")}</span>
                       <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-mono font-bold">
                         v{APP_VERSION}
                       </span>
@@ -82,23 +82,19 @@ export default function VersionInfoModal({ isOpen, onClose }: VersionInfoModalPr
                 </button>
               </div>
 
-              {/* Last Updated Banner */}
-              <div className="bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/25 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
-                    <Clock className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="text-[10px] uppercase font-extrabold text-zinc-500 dark:text-zinc-400 block leading-tight">
-                      {t("Last Updated")} ({t("Pakistan Standard Time")})
-                    </span>
-                    <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300 text-xs sm:text-sm">
-                      {VERSION_UPDATED_AT}
-                    </span>
-                  </div>
+              {/* Single Line Last Updated Badge */}
+              <div className="bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/25 rounded-xl px-3.5 py-2 flex items-center justify-between gap-2.5 text-xs">
+                <div className="flex items-center gap-2 min-w-0 truncate">
+                  <Clock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span className="text-zinc-500 dark:text-zinc-400 font-medium text-[11px] shrink-0">
+                    {t("Last Updated")}:
+                  </span>
+                  <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300 text-xs truncate">
+                    {VERSION_UPDATED_AT}
+                  </span>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-mono shrink-0">
-                  PKT (UTC+5)
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-mono shrink-0">
+                  PKT
                 </span>
               </div>
 

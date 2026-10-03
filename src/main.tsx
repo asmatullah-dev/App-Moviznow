@@ -173,19 +173,75 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// Service Worker registration (silent background updates without forced page reload on open)
+// Service Worker registration & Catalog Export Prefetching
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
-      .then((registration) => {
-        // Check for updates periodically in background
+      .then(async (registration) => {
+        // 1. Check for service worker updates periodically in background
         setInterval(() => {
           registration.update().catch(() => {});
         }, 30 * 60 * 1000);
+
+        // 2. Register Periodic Background Sync for automatic catalog prefetching (Chromium PWA)
+        if ('periodicSync' in registration) {
+          try {
+            const status = await (navigator.permissions as any)?.query({ name: 'periodic-background-sync' });
+            if (!status || status.state === 'granted') {
+              await (registration as any).periodicSync.register('catalog-export-sync', {
+                minInterval: 12 * 60 * 60 * 1000 // Every 12 hours in background
+              });
+              console.log('[SW] Periodic background sync for catalog export registered');
+            }
+          } catch (e) {
+            // Periodic sync not permitted or supported on platform - non-fatal
+          }
+        }
+
+        // 3. Trigger proactive catalog export prefetch after initial render when main thread is idle
+        const triggerPrefetch = () => {
+          if (navigator.serviceWorker.controller) {
+            try {
+              // Extract top 15 poster URLs from cached catalog if available to pre-warm image cache
+              const cachedStr = localStorage.getItem('moviznow_content_cache') || localStorage.getItem('content_cache');
+              let posterUrls: string[] = [];
+              if (cachedStr) {
+                try {
+                  const items = JSON.parse(cachedStr);
+                  if (Array.isArray(items)) {
+                    posterUrls = items
+                      .slice(0, 15)
+                      .map((item: any) => item?.posterUrl || item?.pos)
+                      .filter((url: any) => typeof url === 'string' && url.startsWith('http'));
+                  }
+                } catch (e) {}
+              }
+
+              navigator.serviceWorker.controller.postMessage({
+                type: 'PREFETCH_CATALOG_EXPORT',
+                urls: posterUrls
+              });
+            } catch (e) {}
+          }
+        };
+
+        if ('requestIdleCallback' in window) {
+          (window as any).requestIdleCallback(triggerPrefetch, { timeout: 3000 });
+        } else {
+          setTimeout(triggerPrefetch, 2000);
+        }
       })
       .catch((err) => {
         console.error('Service Worker registration failed:', err);
       });
+
+    // Listen for catalog prefetch updates from Service Worker
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data?.type === 'CATALOG_EXPORT_PREFETCHED') {
+        console.log(`[SW] Catalog export prefetching completed (${event.data.count || 0} assets cached)`);
+        window.dispatchEvent(new CustomEvent('catalog_prefetch_completed', { detail: event.data }));
+      }
+    });
   });
 }
 

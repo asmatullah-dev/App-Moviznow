@@ -861,6 +861,7 @@ const translations: Record<string, Record<Language, string>> = {
   'Enable in Browser': { en: 'Enable in Browser', 'ur-roman': 'Browser Mein On Karein', ur: 'براؤزر میں آن کریں' },
   'Notifications are blocked in your browser settings.': { en: 'Notifications are blocked in your browser settings.', 'ur-roman': 'Aap ke browser ki settings mein notifications blocked hain.', ur: 'آپ کے براؤزر کی سیٹنگز میں اطلاعات مسدود ہیں۔' },
   'Version Information': { en: 'Version Information', 'ur-roman': 'Version ki Maloomat', ur: 'ورژن کی معلومات' },
+  'Version Info': { en: 'Version Info', 'ur-roman': 'Version ki Maloomat', ur: 'ورژن کی معلومات' },
   'For major changes in the app (core architecture, major UI overhauls, new features, breaking features).': {
     en: 'For major changes in the app (core architecture, major UI overhauls, new features, breaking features).',
     'ur-roman': 'App mein baray tabdeeliyaan ke liye (core architecture, baray UI overhauls, nayi features, breaking features).',
