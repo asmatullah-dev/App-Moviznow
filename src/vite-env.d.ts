@@ -2,3 +2,4 @@
 declare const __APP_VERSION__: string;
 declare const __BUILD_ID__: string;
 declare const __BUILD_TIME__: string;
+declare const __VERSION_UPDATED_AT__: string;

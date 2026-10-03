@@ -4025,37 +4025,24 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         if (!token) return res.status(400).json({ error: "Token required" });
 
         const isUserLoggedIn = !!userId && userId !== 'guest' && userId !== 'anonymous';
+        const effectiveGuestId = guestId || 'guest_device';
 
-        try {
-          if (admin.apps.length === 0) {
-            throw new Error("Firebase Admin not initialized");
-          }
+        // 1. GUARANTEED STORAGE: Always save the token in Firestore fcm_tokens collection first
+        if (db) {
+          try {
+            const tokenDocId = token.replace(/[\/\s]/g, '_');
+            const tokenPayload: any = {
+              token,
+              userId: isUserLoggedIn ? userId : 'guest',
+              isGuest: !isUserLoggedIn,
+              guestId: !isUserLoggedIn ? effectiveGuestId : null,
+              updatedAt: new Date().toISOString()
+            };
 
-          if (isUserLoggedIn) {
-            // Unsubscribe from guest topic if it was previously a guest device
-            try { await admin.messaging().unsubscribeFromTopic(token, "guest_users"); } catch (e) {}
+            await db.collection("fcm_tokens").doc(tokenDocId).set(tokenPayload, { merge: true });
 
-            // Cleanup previous tokens for this user
-            if (db) {
+            if (isUserLoggedIn) {
               await cleanupOldUserFcmTokens(db, userId, token);
-            }
-
-            await admin.messaging().subscribeToTopic(token, "all_users");
-            await admin.messaging().subscribeToTopic(token, "registered_users");
-            await admin.messaging().subscribeToTopic(token, `user_${userId}`);
-
-            // Update token document in Firestore
-            if (db) {
-              const tokenDocId = token.substring(0, 100).replace(/[/#$\[\]]/g, '_');
-              await db.collection("fcm_tokens").doc(tokenDocId).set(
-                {
-                  token,
-                  userId: userId,
-                  isGuest: false,
-                  updatedAt: new Date().toISOString()
-                },
-                { merge: true }
-              ).catch(() => {});
 
               // Safe merge: if previous guest ID existed, update any matching docs
               if (previousGuestId) {
@@ -4065,6 +4052,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                     {
                       userId: userId,
                       isGuest: false,
+                      guestId: null,
                       updatedAt: new Date().toISOString()
                     },
                     { merge: true }
@@ -4072,40 +4060,42 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                 }
               }
             }
-          } else {
-            // Guest FCM token registration
-            await admin.messaging().subscribeToTopic(token, "all_users");
-            await admin.messaging().subscribeToTopic(token, "guest_users");
-
-            if (db) {
-              const tokenDocId = token.substring(0, 100).replace(/[/#$\[\]]/g, '_');
-              await db.collection("fcm_tokens").doc(tokenDocId).set(
-                {
-                  token,
-                  userId: 'guest',
-                  isGuest: true,
-                  guestId: guestId || 'guest_device',
-                  updatedAt: new Date().toISOString()
-                },
-                { merge: true }
-              ).catch(() => {});
-            }
+          } catch (storageErr) {
+            console.warn("[FCM Token Storage Warning]:", storageErr);
           }
-          
-          res.json({ success: true, isGuest: !isUserLoggedIn });
-        } catch (fcmError: any) {
-          const isAuthError =
-            fcmError.message.includes("401") ||
-            fcmError.message.includes("authentication");
-          console.warn(
-            `FCM Subscription failed: ${fcmError.message}${isAuthError ? " (This usually means a Service Account Key is missing or invalid in the environment)" : ""}`,
-          );
-          res.json({
-            success: true,
-            warning: "FCM not fully configured",
-            details: fcmError.message,
-          });
         }
+
+        // 2. TOPIC SUBSCRIPTION: Subscribe to relevant FCM topics if Firebase Admin is available
+        let fcmWarning: string | null = null;
+        if (admin.apps.length > 0) {
+          try {
+            if (isUserLoggedIn) {
+              // Unsubscribe from guest topic if it was previously a guest device
+              try { await admin.messaging().unsubscribeFromTopic(token, "guest_users"); } catch (e) {}
+              try { await admin.messaging().subscribeToTopic(token, "all_users"); } catch (e) {}
+              try { await admin.messaging().subscribeToTopic(token, "registered_users"); } catch (e) {}
+              try { await admin.messaging().subscribeToTopic(token, `user_${userId}`); } catch (e) {}
+            } else {
+              // Guest FCM token registration - subscribe to all_users and guest_users topics
+              try { await admin.messaging().subscribeToTopic(token, "all_users"); } catch (e) {}
+              try { await admin.messaging().subscribeToTopic(token, "guest_users"); } catch (e) {}
+            }
+          } catch (fcmTopicError: any) {
+            const isAuthError =
+              fcmTopicError.message?.includes("401") ||
+              fcmTopicError.message?.includes("authentication");
+            fcmWarning = `FCM Topic Subscription notice: ${fcmTopicError.message}${isAuthError ? " (Service Account Key check recommended)" : ""}`;
+            console.warn(`[FCM Topic Warning]:`, fcmWarning);
+          }
+        } else {
+          fcmWarning = "Firebase Admin not initialized, but token saved to Firestore for direct push.";
+        }
+
+        res.json({ 
+          success: true, 
+          isGuest: !isUserLoggedIn,
+          ...(fcmWarning ? { warning: fcmWarning } : {})
+        });
       } catch (error) {
         console.error("Error in subscribe endpoint:", error);
         res.status(500).json({ error: "Internal Server Error" });
@@ -4168,13 +4158,30 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               matchedDocs = matchedDocs.filter(d => targetUserIds && targetUserIds.includes(d.data().userId));
             }
 
-            const activeTokens = Array.from(
-              new Set(
-                matchedDocs
-                  .map(d => d.data().token)
-                  .filter((t): t is string => typeof t === "string" && t.length > 0)
-              )
-            );
+            const activeTokensList: string[] = matchedDocs
+              .map(d => d.data().token)
+              .filter((t): t is string => typeof t === "string" && t.length > 0);
+
+            // Also include valid user fcmTokens for all or registered audience
+            if (targetAudience === 'all' || targetAudience === 'registered' || !targetAudience) {
+              try {
+                const usersSnap = await db.collection("users").where("fcmToken", "!=", null).limit(1000).get();
+                for (const uDoc of usersSnap.docs) {
+                  const uData = uDoc.data();
+                  if (uData.fcmToken && typeof uData.fcmToken === 'string') {
+                    const isFcmAllowed =
+                      uData.notificationPreferences?.fcm?.enabled !== false &&
+                      uData.notification !== "no" &&
+                      !uData.isFcmDisabled;
+                    if (isFcmAllowed) {
+                      activeTokensList.push(uData.fcmToken);
+                    }
+                  }
+                }
+              } catch (e) {}
+            }
+
+            const activeTokens = Array.from(new Set(activeTokensList));
 
             if (activeTokens.length > 0) {
               console.log(`[FCM Multicast] Dispatching to ${activeTokens.length} tokens (Audience: ${targetAudience || 'all'})...`);
@@ -4353,8 +4360,21 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               topic: targetTopic,
             };
 
-            const response = await admin.messaging().send(message);
-            if (response) totalSuccess += 1;
+            const topicsToBroadcast = (targetAudience === 'all' || !targetAudience)
+              ? ["all_users", "guest_users"]
+              : [targetTopic];
+
+            for (const currentTopic of topicsToBroadcast) {
+              try {
+                const response = await admin.messaging().send({
+                  ...message,
+                  topic: currentTopic,
+                });
+                if (response) totalSuccess += 1;
+              } catch (tErr: any) {
+                console.warn(`[FCM Topic ${currentTopic} Send Warning]:`, tErr?.message || tErr);
+              }
+            }
           }
         } catch (topicErr: any) {
           console.warn("[FCM Topic Send Warning]:", topicErr?.message || topicErr);

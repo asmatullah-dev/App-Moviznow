@@ -59,7 +59,14 @@ if (typeof window !== 'undefined') {
     });
 }
 export const storage = getStorage(app);
-export const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;
+export let messaging: any = null;
+if (typeof window !== 'undefined') {
+  try {
+    messaging = getMessaging(app);
+  } catch (e) {
+    console.warn('Firebase Messaging is not supported in this browser/environment:', e);
+  }
+}
 
 export const analyticsPromise = typeof window !== 'undefined' 
   ? isSupported()
@@ -123,27 +130,33 @@ export const syncGuestFcmToUser = async (userId: string, userEmail?: string) => 
     const guestId = safeStorage.getItem('guest_device_id');
     
     if (activeToken) {
-      const tokenDocRef = doc(db, 'fcm_tokens', activeToken.substring(0, 100).replace(/[/#$\[\]]/g, '_'));
-      await runWithNetwork(() => setDoc(tokenDocRef, {
-        token: activeToken,
-        userId: userId,
-        isGuest: false,
-        guestId: null,
-        userEmail: userEmail || null,
-        updatedAt: new Date().toISOString()
-      }, { merge: true }));
+      const tokenDocRef = doc(db, 'fcm_tokens', activeToken.replace(/[\/\s]/g, '_'));
+      
+      // 1. Notify backend to transition FCM topic subscriptions
+      try {
+        await fetch('/api/notifications/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            token: activeToken,
+            userId: userId,
+            isGuest: false,
+            previousGuestId: guestId || undefined
+          })
+        });
+      } catch (e) {}
 
-      // Notify backend to transition FCM topic subscriptions
-      await fetch('/api/notifications/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // 2. Direct Firestore update
+      try {
+        await runWithNetwork(() => setDoc(tokenDocRef, {
           token: activeToken,
           userId: userId,
           isGuest: false,
-          previousGuestId: guestId || undefined
-        })
-      }).catch(() => {});
+          guestId: null,
+          userEmail: userEmail || null,
+          updatedAt: new Date().toISOString()
+        }, { merge: true }));
+      } catch (e) {}
 
       // Clear guest-specific flags
       safeStorage.removeItem('guest_fcm_token');
@@ -158,7 +171,16 @@ export const syncGuestFcmToUser = async (userId: string, userEmail?: string) => 
 
 // Function to request notification permission and get token for guest or logged in user
 export const requestNotificationPermission = async (force: boolean = false) => {
-  if (!messaging || typeof window === 'undefined') return null;
+  if (typeof window === 'undefined' || !('Notification' in window)) return null;
+  
+  if (!messaging) {
+    try {
+      messaging = getMessaging(app);
+    } catch (e) {
+      console.warn("Firebase Messaging not supported:", e);
+      return null;
+    }
+  }
   
   try {
     const permission = await Notification.requestPermission();
@@ -175,37 +197,47 @@ export const requestNotificationPermission = async (force: boolean = false) => {
         if (lastUpdate) parsedCache = JSON.parse(lastUpdate);
       } catch(e) {}
 
-      // Register service worker
+      // Register and await active service worker
       let registration: ServiceWorkerRegistration | undefined;
       if ('serviceWorker' in navigator) {
-        if (force) {
-          try {
-            const registrations = await navigator.serviceWorker.getRegistrations();
-            for (let reg of registrations) {
-              await reg.unregister();
-            }
-          } catch(e) {}
-        }
         const configParams = new URLSearchParams(firebaseConfig as any).toString();
-        registration = await navigator.serviceWorker.register(`/sw.js?${configParams}`);
-      }
-
-      if (force) {
         try {
-          const { deleteToken } = await import('firebase/messaging');
-          await deleteToken(messaging);
-        } catch (e) {}
+          registration = await navigator.serviceWorker.register(`/sw.js?${configParams}`);
+        } catch (swErr) {
+          console.warn("Registering /sw.js failed, trying /firebase-messaging-sw.js:", swErr);
+          registration = await navigator.serviceWorker.register(`/firebase-messaging-sw.js?${configParams}`);
+        }
+
+        // CRITICAL: Await active and ready service worker state before calling getToken!
+        if (navigator.serviceWorker.ready) {
+          try {
+            registration = await navigator.serviceWorker.ready;
+          } catch (readyErr) {
+            console.warn("Waiting for serviceWorker.ready warning:", readyErr);
+          }
+        }
       }
 
       const vapidKey = import.meta.env.VITE_FCM_VAPID_KEY;
-      const tokenOptions: any = {
-        serviceWorkerRegistration: registration
-      };
+      const tokenOptions: any = {};
+      if (registration) {
+        tokenOptions.serviceWorkerRegistration = registration;
+      }
       if (vapidKey) {
         tokenOptions.vapidKey = vapidKey;
       }
 
-      const token = await getToken(messaging, tokenOptions);
+      let token: string | null = null;
+      try {
+        token = await getToken(messaging, tokenOptions);
+      } catch (getTokenErr) {
+        console.warn("FCM getToken failed with custom registration, trying fallback:", getTokenErr);
+        try {
+          token = await getToken(messaging, vapidKey ? { vapidKey } : undefined);
+        } catch (fallbackErr) {
+          console.warn("FCM getToken fallback error:", fallbackErr);
+        }
+      }
       
       if (token) {
         // Cache active FCM token locally
@@ -226,8 +258,25 @@ export const requestNotificationPermission = async (force: boolean = false) => {
           return token;
         }
 
+        // 1. Guaranteed server registration via API (persists to Firestore fcm_tokens & subscribes to topics)
         try {
-          const tokenDocRef = doc(db, 'fcm_tokens', token.substring(0, 100).replace(/[/#$\[\]]/g, '_'));
+          await fetch('/api/notifications/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              token, 
+              userId: isUser ? auth.currentUser!.uid : undefined,
+              isGuest: !isUser,
+              guestId: !isUser ? guestId : undefined
+            })
+          });
+        } catch (fetchErr) {
+          console.warn("Could not register FCM token via API:", fetchErr);
+        }
+
+        // 2. Direct client-side Firestore write for offline resilience
+        try {
+          const tokenDocRef = doc(db, 'fcm_tokens', token.replace(/[\/\s]/g, '_'));
           const tokenData: any = {
             token,
             updatedAt: new Date().toISOString(),
@@ -240,42 +289,31 @@ export const requestNotificationPermission = async (force: boolean = false) => {
             tokenData.userEmail = auth.currentUser.email;
           }
           await runWithNetwork(() => setDoc(tokenDocRef, tokenData, { merge: true }));
-
-          if (auth.currentUser) {
-            try {
-               const cachedStr = safeStorage.getItem('profile_cache');
-               if (cachedStr) {
-                 const profileCache = JSON.parse(cachedStr);
-                 profileCache.notification = 'yes';
-                 const json = JSON.stringify(profileCache);
-                 safeStorage.setItem('profile_cache', json);
-                 safeStorage.setItem('profile_cache_timestamp', Date.now().toString());
-                 try {
-                   window.localStorage.setItem('profile_cache', json);
-                   window.localStorage.setItem('profile_cache_timestamp', Date.now().toString());
-                 } catch (e) {}
-                 window.dispatchEvent(new Event('profile_cache_updated'));
-               }
-            } catch (e) {
-               console.log("Failed to update user profile cache with notification status");
-            }
-          }
-
-          safeStorage.setItem(CACHE_KEY, JSON.stringify({ token, timestamp: now, userId: currentUserId, isGuest: !isUser }));
-          
-          await fetch('/api/notifications/subscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              token, 
-              userId: isUser ? auth.currentUser!.uid : undefined,
-              isGuest: !isUser,
-              guestId: !isUser ? guestId : undefined
-            })
-          }).catch(() => {});
-        } catch (e) {
-          console.warn("Could not sync FCM token to server:", e);
+        } catch (docErr) {
+          console.warn("Could not write FCM token directly to Firestore:", docErr);
         }
+
+        if (auth.currentUser) {
+          try {
+             const cachedStr = safeStorage.getItem('profile_cache');
+             if (cachedStr) {
+               const profileCache = JSON.parse(cachedStr);
+               profileCache.notification = 'yes';
+               const json = JSON.stringify(profileCache);
+               safeStorage.setItem('profile_cache', json);
+               safeStorage.setItem('profile_cache_timestamp', Date.now().toString());
+               try {
+                 window.localStorage.setItem('profile_cache', json);
+                 window.localStorage.setItem('profile_cache_timestamp', Date.now().toString());
+               } catch (e) {}
+               window.dispatchEvent(new Event('profile_cache_updated'));
+             }
+          } catch (e) {
+             console.log("Failed to update user profile cache with notification status");
+          }
+        }
+
+        safeStorage.setItem(CACHE_KEY, JSON.stringify({ token, timestamp: now, userId: currentUserId, isGuest: !isUser }));
         return token;
       }
     }

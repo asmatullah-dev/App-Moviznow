@@ -16,9 +16,25 @@ try {
       const newPatchStr = patchNum < 10 ? `0${patchNum}` : `${patchNum}`;
       const newVersion = `${parts[0]}.${parts[1]}.${newPatchStr}`;
 
+      // Calculate Pakistan Standard Time (PKT, UTC+5)
+      const now = new Date();
+      const pktFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Karachi',
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+      const pktFormatted = `${pktFormatter.format(now)} (PKT)`;
+
       pkg.version = newVersion;
+      pkg.versionUpdatedAt = pktFormatted;
+      pkg.versionTimestamp = now.getTime();
+
       fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
-      console.log(`Bumped version from ${currentVersion} to ${newVersion} in package.json`);
+      console.log(`Bumped version from ${currentVersion} to ${newVersion} (Updated at: ${pktFormatted}) in package.json`);
 
       if (fs.existsSync(pkgLockPath)) {
         try {

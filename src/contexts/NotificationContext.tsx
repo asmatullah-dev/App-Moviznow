@@ -50,22 +50,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const now = Date.now();
       const cachedData = safeStorage.getItem('cached_notifications_data');
 
-      // For guest mode (unauthenticated users), do not fetch notification chunks from Firestore
-      if (!profile?.uid && !user?.uid) {
-        if (cachedData) {
-          try {
-            const parsed = JSON.parse(cachedData);
-            if (Array.isArray(parsed)) {
-              setNotifications(parsed.filter(n => !n.targetUserId && (!n.targetUserIds || n.targetUserIds.length === 0)));
-            }
-          } catch(e) {}
-        } else {
-          setNotifications([]);
-        }
-        setLoading(false);
-        return;
-      }
-
       // If cached data exists and 24 hours haven't elapsed, use local storage
       if (!force && cachedData && (now - lastFetchTime < NOTIFICATION_FETCH_INTERVAL)) {
         try {

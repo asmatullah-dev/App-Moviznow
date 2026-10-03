@@ -59,7 +59,7 @@ import { HomeCategoryChips } from "../../components/home/HomeCategoryChips";
 import { CollectionModal } from "../../components/home/CollectionModal";
 import { CollectionsGridModal } from "../../components/home/CollectionsGridModal";
 import { fetchReviewsFromChunks } from "../../utils/chunkUtils";
-import { APP_VERSION } from "../../version";
+import { APP_VERSION, VERSION_UPDATED_AT } from "../../version";
 
 export default function Home({
   onOpenMediaModal,
@@ -1704,7 +1704,7 @@ export default function Home({
           </Link>
         </div>
 
-        <div className="flex flex-col items-center justify-center gap-1 mt-2">
+        <div className="flex flex-col items-center justify-center gap-1.5 mt-2">
           <button
             onClick={() => {
               if (vibrate) vibrate(20);
@@ -1717,6 +1717,10 @@ export default function Home({
             <Info className="w-3.5 h-3.5 text-zinc-400 group-hover:text-emerald-500 transition-colors shrink-0" />
             <span>v{APP_VERSION}</span>
           </button>
+          <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 dark:text-zinc-500 font-mono">
+            <Clock className="w-3 h-3 text-emerald-500 shrink-0" />
+            <span>{t("Last Updated")}: {VERSION_UPDATED_AT}</span>
+          </div>
         </div>
       </footer>
 

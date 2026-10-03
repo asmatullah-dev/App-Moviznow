@@ -2868,6 +2868,7 @@ export default function ContentManagement() {
     try {
       const content = notificationModal.content;
       const { title, body } = getNotificationPreview(content);
+      const targetUrl = `/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`;
 
       const notification = {
         title,
@@ -2875,6 +2876,9 @@ export default function ContentManagement() {
         contentId: content.id,
         posterUrl: content.posterUrl,
         type: content.type,
+        targetAudience: "all",
+        buttonLabel: "Watch Now",
+        buttonUrl: targetUrl,
         createdBy: "admin",
         sendFcm: true,
       } as any;
@@ -2882,7 +2886,7 @@ export default function ContentManagement() {
       // Add to Firestore for in-app history using chunks
       await sendNotification(notification);
 
-      // Send push notification via backend
+      // Send push notification via backend to all registered users AND guests
       try {
         await fetch("/api/notifications/send", {
           method: "POST",
@@ -2893,7 +2897,11 @@ export default function ContentManagement() {
             title,
             body,
             imageUrl: content.posterUrl,
-            url: `/${content.type === 'series' ? 'series' : 'movie'}/${content.id}`,
+            url: targetUrl,
+            buttonUrl: targetUrl,
+            buttonLabel: "Watch Now",
+            contentId: content.id,
+            targetAudience: "all",
             sendFcm: true,
           }),
         });
@@ -7663,7 +7671,7 @@ export default function ContentManagement() {
 
               {notificationModal.status === "idle" && (
                 <p className="text-zinc-500 dark:text-zinc-400 mb-6">
-                  This will send a push notification to all users about this new
+                  This will send a push notification to all users and guests about this new
                   content. Do you want to proceed?
                 </p>
               )}

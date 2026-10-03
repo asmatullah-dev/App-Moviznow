@@ -82,9 +82,22 @@ async function exportCatalog() {
     }
 
     // 4. Save output JSON files
-    const nowIso = new Date().toISOString();
+    const now = new Date();
+    const pktFormatter = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Karachi',
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+    const pktFormatted = `${pktFormatter.format(now)} (PKT)`;
+    const nowIso = now.toISOString();
+
     const exportData = {
       exportedAt: nowIso,
+      exportedAtPkt: pktFormatted,
       version: nowIso,
       content: allContentItems,
       metadata: metadataObj,

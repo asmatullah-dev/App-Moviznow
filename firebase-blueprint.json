@@ -138,11 +138,15 @@
     },
     "FCMToken": {
       "title": "FCMToken",
-      "description": "A Firebase Cloud Messaging token for a user.",
+      "description": "A Firebase Cloud Messaging token for a user or guest.",
       "type": "object",
       "properties": {
         "token": { "type": "string" },
         "userId": { "type": "string" },
+        "isGuest": { "type": "boolean" },
+        "guestId": { "type": "string" },
+        "platform": { "type": "string" },
+        "userEmail": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["token", "userId", "updatedAt"]

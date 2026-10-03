@@ -1,10 +1,10 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Info, Sparkles, Layers, Database } from 'lucide-react';
+import { X, Info, Sparkles, Layers, Database, Clock } from 'lucide-react';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useHaptics } from '../hooks/useHaptics';
-import { APP_VERSION } from '../version';
+import { APP_VERSION, VERSION_UPDATED_AT } from '../version';
 import {
   modalBackdropAnimation,
   modalContainerAnimation,
@@ -82,6 +82,26 @@ export default function VersionInfoModal({ isOpen, onClose }: VersionInfoModalPr
                 </button>
               </div>
 
+              {/* Last Updated Banner */}
+              <div className="bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/25 rounded-2xl p-3.5 flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shrink-0">
+                    <Clock className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-extrabold text-zinc-500 dark:text-zinc-400 block leading-tight">
+                      {t("Last Updated")} ({t("Pakistan Standard Time")})
+                    </span>
+                    <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300 text-xs sm:text-sm">
+                      {VERSION_UPDATED_AT}
+                    </span>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-mono shrink-0">
+                  PKT (UTC+5)
+                </span>
+              </div>
+
               {/* Format Breakdown Banner */}
               <div className="bg-zinc-100/90 dark:bg-zinc-900/90 border border-zinc-200 dark:border-zinc-800/90 rounded-2xl p-4 flex items-center justify-around text-center shadow-inner">
                 <div className="flex flex-col items-center">
@@ -143,11 +163,16 @@ export default function VersionInfoModal({ isOpen, onClose }: VersionInfoModalPr
                   <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0 mt-0.5">
                     <Database className="w-4 h-4" />
                   </div>
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-black text-amber-600 dark:text-amber-300">{t("Content")}</span>
-                      <span className="text-[11px] font-mono font-bold text-zinc-600 dark:text-zinc-400 bg-zinc-200/70 dark:bg-zinc-800 px-2 py-0.5 rounded border border-zinc-300/60 dark:border-zinc-700/60">
-                        {contentVersion}
+                  <div className="space-y-1.5 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-black text-amber-600 dark:text-amber-300">{t("Content")}</span>
+                        <span className="text-[11px] font-mono font-bold text-zinc-600 dark:text-zinc-400 bg-zinc-200/70 dark:bg-zinc-800 px-2 py-0.5 rounded border border-zinc-300/60 dark:border-zinc-700/60">
+                          {contentVersion}
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                        {t("Catalog Export")}
                       </span>
                     </div>
                     <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">

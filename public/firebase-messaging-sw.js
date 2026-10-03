@@ -2,9 +2,29 @@ if (typeof importScripts === 'function') {
   importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js');
   importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js');
 
-  // Parse config from URL parameters
-  const urlParams = new URL(location.href).searchParams;
-  const firebaseConfig = Object.fromEntries(urlParams.entries());
+  const DEFAULT_FIREBASE_CONFIG = {
+    projectId: "app-moviznow",
+    firestoreDatabaseId: "moviznow-app",
+    appId: "1:460140141169:web:c906282a0ae274657799d0",
+    apiKey: "AIzaSyBogF7pfzJOkkIKu0190KurpQKIgDJ0CAg",
+    authDomain: "app-moviznow.firebaseapp.com",
+    storageBucket: "app-moviznow.firebasestorage.app",
+    messagingSenderId: "460140141169",
+    measurementId: "G-JFWSRZ18PK",
+    oAuthClientId: "460140141169-nlm0no0uhcaaaot9037sp4g31r36i808.apps.googleusercontent.com"
+  };
+
+  // Parse config from URL parameters with robust fallback
+  let urlConfig = {};
+  try {
+    const urlParams = new URL(location.href).searchParams;
+    urlConfig = Object.fromEntries(urlParams.entries());
+  } catch (e) {}
+
+  const firebaseConfig = {
+    ...DEFAULT_FIREBASE_CONFIG,
+    ...urlConfig
+  };
 
   if (firebaseConfig.apiKey && firebaseConfig.projectId) {
     // Initialize Firebase

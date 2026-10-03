@@ -10,6 +10,15 @@ export default defineConfig(({mode}) => {
   const appVersion = pkg.version || '0.0.0';
   const buildId = process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || process.env.npm_package_version || appVersion;
   const buildTime = new Date().toISOString();
+  const versionUpdatedAt = (pkg as any).versionUpdatedAt || (new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Karachi',
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true
+  }).format(new Date()) + ' (PKT)');
 
   return {
     plugins: [
@@ -92,6 +101,7 @@ export default defineConfig(({mode}) => {
       '__APP_VERSION__': JSON.stringify(appVersion),
       '__BUILD_ID__': JSON.stringify(buildId),
       '__BUILD_TIME__': JSON.stringify(buildTime),
+      '__VERSION_UPDATED_AT__': JSON.stringify(versionUpdatedAt),
     },
     resolve: {
       alias: {

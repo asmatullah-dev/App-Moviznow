@@ -45,13 +45,25 @@ export const NotificationPermissionPrompt: React.FC = () => {
   const handleAllow = async () => {
     setLoading(true);
     try {
-      const token = await requestNotificationPermission(true);
-      if (token || Notification.permission === 'granted') {
+      const token = await requestNotificationPermission(false);
+      if (token) {
         setIsGranted(true);
         safeStorage.setItem(`fcm_auto_registered_${user?.uid || 'guest'}`, 'true');
         setTimeout(() => {
           setIsVisible(false);
         }, 3000);
+      } else if (Notification.permission === 'granted') {
+        // Try fallback attempt
+        const retryToken = await requestNotificationPermission(true);
+        if (retryToken) {
+          setIsGranted(true);
+          safeStorage.setItem(`fcm_auto_registered_${user?.uid || 'guest'}`, 'true');
+          setTimeout(() => {
+            setIsVisible(false);
+          }, 3000);
+        } else {
+          setIsVisible(false);
+        }
       } else {
         setIsVisible(false);
       }
