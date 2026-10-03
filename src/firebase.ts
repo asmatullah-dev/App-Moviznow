@@ -132,9 +132,10 @@ export const syncGuestFcmToUser = async (userId: string, userEmail?: string) => 
     if (activeToken) {
       const tokenDocRef = doc(db, 'fcm_tokens', activeToken.replace(/[\/\s]/g, '_'));
       
-      // 1. Notify backend to transition FCM topic subscriptions
+      // 1. Notify backend to transition FCM topic subscriptions and persist to Firestore
+      let apiSuccess = false;
       try {
-        await fetch('/api/notifications/subscribe', {
+        const res = await fetch('/api/notifications/subscribe', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -144,19 +145,22 @@ export const syncGuestFcmToUser = async (userId: string, userEmail?: string) => 
             previousGuestId: guestId || undefined
           })
         });
+        if (res.ok) apiSuccess = true;
       } catch (e) {}
 
-      // 2. Direct Firestore update
-      try {
-        await runWithNetwork(() => setDoc(tokenDocRef, {
-          token: activeToken,
-          userId: userId,
-          isGuest: false,
-          guestId: null,
-          userEmail: userEmail || null,
-          updatedAt: new Date().toISOString()
-        }, { merge: true }));
-      } catch (e) {}
+      // 2. Direct Firestore update only as fallback if backend API was unreachable
+      if (!apiSuccess) {
+        try {
+          await runWithNetwork(() => setDoc(tokenDocRef, {
+            token: activeToken,
+            userId: userId,
+            isGuest: false,
+            guestId: null,
+            userEmail: userEmail || null,
+            updatedAt: new Date().toISOString()
+          }, { merge: true }));
+        } catch (e) {}
+      }
 
       // Clear guest-specific flags
       safeStorage.removeItem('guest_fcm_token');
@@ -259,8 +263,9 @@ export const requestNotificationPermission = async (force: boolean = false) => {
         }
 
         // 1. Guaranteed server registration via API (persists to Firestore fcm_tokens & subscribes to topics)
+        let apiSubscribed = false;
         try {
-          await fetch('/api/notifications/subscribe', {
+          const res = await fetch('/api/notifications/subscribe', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
@@ -270,27 +275,30 @@ export const requestNotificationPermission = async (force: boolean = false) => {
               guestId: !isUser ? guestId : undefined
             })
           });
+          if (res.ok) apiSubscribed = true;
         } catch (fetchErr) {
           console.warn("Could not register FCM token via API:", fetchErr);
         }
 
-        // 2. Direct client-side Firestore write for offline resilience
-        try {
-          const tokenDocRef = doc(db, 'fcm_tokens', token.replace(/[\/\s]/g, '_'));
-          const tokenData: any = {
-            token,
-            updatedAt: new Date().toISOString(),
-            userId: isUser ? auth.currentUser!.uid : 'guest',
-            isGuest: !isUser,
-            guestId: !isUser ? guestId : null,
-            platform: typeof navigator !== 'undefined' ? navigator.userAgent : 'web'
-          };
-          if (isUser && auth.currentUser?.email) {
-            tokenData.userEmail = auth.currentUser.email;
+        // 2. Direct client-side Firestore write only as fallback if backend was unreachable
+        if (!apiSubscribed) {
+          try {
+            const tokenDocRef = doc(db, 'fcm_tokens', token.replace(/[\/\s]/g, '_'));
+            const tokenData: any = {
+              token,
+              updatedAt: new Date().toISOString(),
+              userId: isUser ? auth.currentUser!.uid : 'guest',
+              isGuest: !isUser,
+              guestId: !isUser ? guestId : null,
+              platform: typeof navigator !== 'undefined' ? navigator.userAgent : 'web'
+            };
+            if (isUser && auth.currentUser?.email) {
+              tokenData.userEmail = auth.currentUser.email;
+            }
+            await runWithNetwork(() => setDoc(tokenDocRef, tokenData, { merge: true }));
+          } catch (docErr) {
+            console.warn("Could not write FCM token directly to Firestore:", docErr);
           }
-          await runWithNetwork(() => setDoc(tokenDocRef, tokenData, { merge: true }));
-        } catch (docErr) {
-          console.warn("Could not write FCM token directly to Firestore:", docErr);
         }
 
         if (auth.currentUser) {

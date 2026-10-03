@@ -25,6 +25,13 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   const nowUtc = getUtcVersion();
   const userRef = doc(db, 'users', currentUserUid);
 
+  // Ensure user profile exists in cache and is not marked deleted
+  const profileCacheStr = safeStorage.getItem('profile_cache');
+  if (!currentProfile && !profileCacheStr) {
+    console.warn(`[executeSyncUserData] No local profile found for ${currentUserUid}, skipping sync write.`);
+    return false;
+  }
+
   // 1. Flush accumulated time & sessions
   const timeCacheKey = `accumulated_time_seconds_${currentUserUid}`;
   const accSecs = parseInt(safeStorage.getItem(timeCacheKey) || '0', 10);

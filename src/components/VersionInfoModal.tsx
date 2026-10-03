@@ -27,6 +27,9 @@ export default function VersionInfoModal({ isOpen, onClose }: VersionInfoModalPr
   const minorVersion = parts[1] || '1';
   const contentVersion = parts[2] || '10';
 
+  // Format updated timestamp cleanly by removing redundant PKT suffix since the PKT badge is already present
+  const formattedUpdatedAt = VERSION_UPDATED_AT.replace(/\s*\(PKT\)\s*/gi, '').trim();
+
   const handleClose = () => {
     if (vibrate) vibrate(15);
     onClose();
@@ -83,17 +86,17 @@ export default function VersionInfoModal({ isOpen, onClose }: VersionInfoModalPr
               </div>
 
               {/* Single Line Last Updated Badge */}
-              <div className="bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/25 rounded-xl px-3.5 py-2 flex items-center justify-between gap-2.5 text-xs">
-                <div className="flex items-center gap-2 min-w-0 truncate">
+              <div className="bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/25 rounded-xl px-3 py-2 flex items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-1.5 min-w-0 flex-1">
                   <Clock className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                   <span className="text-zinc-500 dark:text-zinc-400 font-medium text-[11px] shrink-0">
                     {t("Last Updated")}:
                   </span>
-                  <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300 text-xs truncate">
-                    {VERSION_UPDATED_AT}
+                  <span className="font-mono font-bold text-emerald-700 dark:text-emerald-300 text-[11px] sm:text-xs">
+                    {formattedUpdatedAt}
                   </span>
                 </div>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-mono shrink-0">
+                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-mono shrink-0">
                   PKT
                 </span>
               </div>

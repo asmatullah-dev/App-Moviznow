@@ -1297,7 +1297,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setProfile(data);
           safeStorage.setItem("profile_cache", JSON.stringify(data));
         } else {
-          // Create new user profile
+          // STRICT REFRESH & SYNC INVARIANT:
+          // If this is a refresh/sync operation (manual or auto) and the user document does not exist,
+          // we must NEVER create a new user profile doc!
+          // Instead, flush all cache and sign out so the user can re-register or log in properly.
+          if (reason !== "login" && !justLoggedInRef.current && !safeStorage.getItem("pending_signup_profile")) {
+            console.warn(`[refreshProfile] User ${currentUser.uid} document does not exist during ${reason} refresh/sync. Enforcing signout.`);
+            await performEnforcedSignout("User account not found on the server. Please sign up or log in again.");
+            return false;
+          }
+
+          // Create new user profile (Only during explicit Signup or fresh Login flows)
           const userEmailLower = currentUser.email?.toLowerCase();
           const isOwner = userEmailLower === "asmatn628@gmail.com";
           const isAdmin = [
@@ -2503,12 +2513,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const last10 = stdDigits.slice(-10);
 
     try {
-      // Check single document storage in settings/whitelisted_phones
-      const docRef = doc(db, "settings", "whitelisted_phones");
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const numbers: string[] = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
+      // Check memory/local cache first (30-minute TTL) to avoid burning Firestore reads on every check
+      const CACHE_KEY = 'cached_whitelisted_phones_doc';
+      const CACHE_TIME_KEY = 'cached_whitelisted_phones_time';
+      const cachedStr = safeStorage.getItem(CACHE_KEY);
+      const cachedTime = parseInt(safeStorage.getItem(CACHE_TIME_KEY) || '0', 10);
+      const now = Date.now();
+
+      let numbers: string[] = [];
+      if (cachedStr && (now - cachedTime < 30 * 60 * 1000)) {
+        try {
+          numbers = JSON.parse(cachedStr);
+        } catch (e) {}
+      }
+
+      if (!numbers || numbers.length === 0) {
+        // Fetch from Firestore only when cache expired or empty
+        const docRef = doc(db, "settings", "whitelisted_phones");
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          numbers = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
+          safeStorage.setItem(CACHE_KEY, JSON.stringify(numbers));
+          safeStorage.setItem(CACHE_TIME_KEY, now.toString());
+        }
+      }
+
+      if (numbers && numbers.length > 0) {
         return numbers.some((n: any) => {
           if (!n || typeof n !== "string") return false;
           const stdN = standardizePhone(n);
@@ -2539,6 +2570,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!list.includes(standardized)) {
         list = [...list, standardized];
         await setDoc(docRef, { numbers: list, updatedAt: new Date().toISOString() }, { merge: true });
+        safeStorage.setItem('cached_whitelisted_phones_doc', JSON.stringify(list));
+        safeStorage.setItem('cached_whitelisted_phones_time', Date.now().toString());
       }
       return true;
     } catch (err) {
@@ -2558,6 +2591,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const list: string[] = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
         const filtered = list.filter((n) => standardizePhone(n) !== standardized);
         await setDoc(docRef, { numbers: filtered, updatedAt: new Date().toISOString() }, { merge: true });
+        safeStorage.setItem('cached_whitelisted_phones_doc', JSON.stringify(filtered));
+        safeStorage.setItem('cached_whitelisted_phones_time', Date.now().toString());
       }
       return true;
     } catch (err) {
