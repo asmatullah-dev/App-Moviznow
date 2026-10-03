@@ -689,25 +689,42 @@ export async function autoRebalanceChunks(storagePrefix: string = 'admin_'): Pro
   }
 }
 
+// In-memory fast cache to avoid looping storage keys
+const itemChunkCache = new Map<string, string>();
+
 /**
- * Locates the chunk ID for a given content item from local storage
+ * Locates the chunk ID for a given content item from local storage in 0ms
  */
 export function findLocalChunkForContent(contentId: string): string | null {
-  for (let i = 0; i < 50; i++) {
-    const prefixes = ['content_chunk_', 'admin_content_chunk_', 'static_content_chunk_'];
+  if (!contentId) return null;
+  if (itemChunkCache.has(contentId)) {
+    return itemChunkCache.get(contentId) || null;
+  }
+
+  // Check known active chunk keys in safeStorage memory
+  const prefixes = ['content_chunk_', 'static_content_chunk_', 'admin_content_chunk_'];
+  for (let i = 0; i < 15; i++) {
     for (const prefix of prefixes) {
       const mStr = safeStorage.getItem(`${prefix}movie_chunk_${i}`);
       if (mStr && mStr.includes(`"${contentId}"`)) {
         try {
           const items = JSON.parse(mStr);
-          if (items[contentId]) return `movie_chunk_${i}`;
+          if (items[contentId]) {
+            const cid = `movie_chunk_${i}`;
+            itemChunkCache.set(contentId, cid);
+            return cid;
+          }
         } catch(e) {}
       }
       const sStr = safeStorage.getItem(`${prefix}series_chunk_${i}`);
       if (sStr && sStr.includes(`"${contentId}"`)) {
         try {
           const items = JSON.parse(sStr);
-          if (items[contentId]) return `series_chunk_${i}`;
+          if (items[contentId]) {
+            const cid = `series_chunk_${i}`;
+            itemChunkCache.set(contentId, cid);
+            return cid;
+          }
         } catch(e) {}
       }
     }

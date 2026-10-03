@@ -11,6 +11,7 @@ import { Helmet } from "react-helmet-async";
 
 import { canManageContent, canUserStreamContent } from "../../utils/roleUtils";
 import { normalizeContentUrl, getCachedLinkExtraction, saveCachedLinkExtraction } from "../../utils/linkUtils";
+import { getStaticContentById } from "../../utils/staticContentLoader";
 import { GuestAccessBanner } from "../../components/GuestAccessBanner";
 import { Content, QualityLinks, Season, Trailer } from "../../types";
 import { Translate } from "../../components/Translate";
@@ -283,7 +284,8 @@ export default function MovieDetails() {
     if (!id) return false;
     const hasCachedFull = Boolean(safeStorage.getItem(`movie_details_${id}`));
     const hasInList = contentList.some((c) => c.id === id) || (isAdminOrEditor && adminContentList.some((c) => c.id === id));
-    return !hasCachedFull && !hasInList;
+    const hasInStatic = Boolean(getStaticContentById(id));
+    return !hasCachedFull && !hasInList && !hasInStatic;
   });
   const [alertConfig, setAlertConfig] = useState<{
     isOpen: boolean;
@@ -488,6 +490,8 @@ export default function MovieDetails() {
           if (parsed.id === id) return parsed;
         } catch (e) {}
       }
+      const staticItem = getStaticContentById(id);
+      if (staticItem) return staticItem;
     }
     return null;
   });
@@ -524,8 +528,11 @@ export default function MovieDetails() {
         if (parsed.id === id) syncFull = parsed;
       } catch (e) {}
     }
+    if (!syncFull) {
+      syncFull = getStaticContentById(id);
+    }
 
-    const hasInList = contentList.some((c) => c.id === id) || (isAdminOrEditor && adminContentList.some((c) => c.id === id));
+    const hasInList = contentList.some((c) => c.id === id) || (isAdminOrEditor && adminContentList.some((c) => c.id === id)) || Boolean(syncFull);
     setLoading(!syncFull && !hasInList);
 
     // Set initial fullContent synchronously if available
@@ -602,10 +609,13 @@ export default function MovieDetails() {
     } catch (e) {}
     const hasFullSeasons =
       target.type === "series" &&
-      parsedSeasons.length > 0 &&
-      parsedSeasons.some((s: any) => s.episodes && s.episodes.length > 1);
+      (parsedSeasons.length > 0 || Boolean((target as any).sea));
+    const hasMovieLinks =
+      target.type === "movie" &&
+      (Boolean(target.movieLinks) || Boolean((target as any).links) || Boolean((target as any).lik));
+
     return (
-      (target.type === "movie" && !target.movieLinks) ||
+      (target.type === "movie" && !hasMovieLinks) ||
       (target.type === "series" && !hasFullSeasons)
     );
   }, [content, fullContent, id]);
@@ -1820,7 +1830,7 @@ export default function MovieDetails() {
     : false;
 
   if (!mergedContent || !isAuthorized) {
-    if (contentLoading || loading || profileLoading || isManualRefreshing) {
+    if (contentLoading || loading || isManualRefreshing) {
       return <MovieDetailsSkeleton onBack={handleGoBack} />;
     }
     return (

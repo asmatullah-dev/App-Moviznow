@@ -16,6 +16,28 @@ const staticContentData = unifiedData.content;
 const staticMetadataData = (unifiedData as any).metadata || {};
 const staticCollectionsData = (unifiedData as any).collections || {};
 
+// Fast in-memory Map of all static items for instant O(1) synchronous lookup
+const staticItemMap = new Map<string, StaticContentItem>();
+if (Array.isArray(staticContentData)) {
+  for (let i = 0; i < staticContentData.length; i++) {
+    const item = staticContentData[i] as StaticContentItem;
+    if (item && item.id) {
+      staticItemMap.set(item.id, item);
+    }
+  }
+}
+
+/**
+ * Returns fully expanded content from the in-memory static catalog in 0ms synchronously.
+ */
+export function getStaticContentById(id: string): Content | null {
+  if (!id) return null;
+  const raw = staticItemMap.get(id);
+  if (!raw) return null;
+  const chunkId = raw.chunkId || (raw.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
+  return expandContent({ ...raw, id }, chunkId);
+}
+
 // In-memory reference to avoid repeatedly deserializing JSON on re-renders or context accesses
 let memoizedContentList: Content[] | null = null;
 let memoizedJsonVersion: string | null = null;

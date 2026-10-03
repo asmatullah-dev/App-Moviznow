@@ -4,6 +4,7 @@ import {
   isStaticExportNewer,
   mergeStaticExportDataSafely,
   getStaticExportContent,
+  getStaticContentById,
   getStaticExportMetadata,
   getStaticExportCollections,
   formatContentUpdateToast
@@ -139,13 +140,21 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const getContent = async (id: string): Promise<Content | null> => {
+    if (!id) return null;
     // 1. Check in state
     const foundInState = contentList.find(c => c.id === id);
-    if (foundInState && (foundInState.movieLinks || foundInState.seasons)) {
+    if (foundInState && (foundInState.movieLinks || foundInState.seasons || (foundInState as any).lik || (foundInState as any).sea)) {
       return foundInState;
     }
 
-    // 2. Check in local chunk storage (sync memory first, then async IDB)
+    // 2. Instant O(1) in-memory static catalog lookup (0ms)
+    const staticItem = getStaticContentById(id);
+    if (staticItem) {
+      if (foundInState?.order !== undefined) staticItem.order = foundInState.order;
+      return staticItem;
+    }
+
+    // 3. Check in local chunk storage (sync memory first, then async IDB)
     const localChunkId = findLocalChunkForContent(id);
     if (localChunkId) {
       let chunkStr = safeStorage.getItem(`content_chunk_${localChunkId}`) || 
@@ -165,16 +174,6 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
           }
         } catch (e) {}
       }
-    }
-
-    // 3. Fallback to static export data
-    const staticContent = getStaticExportContent();
-    const staticItem = staticContent.find(s => s.id === id);
-    if (staticItem) {
-      const chunkId = staticItem.chunkId || (staticItem.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
-      const expanded = expandContent({ ...staticItem, id }, chunkId);
-      if (foundInState?.order !== undefined) expanded.order = foundInState.order;
-      return expanded;
     }
 
     return foundInState || null;
