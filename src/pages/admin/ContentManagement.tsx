@@ -5859,6 +5859,7 @@ export default function ContentManagement() {
       let finalImdb = newerContent.imdbLink || targetItem.imdbLink;
       let finalTrailer = newerContent.trailerUrl || targetItem.trailerUrl;
       let finalQuality = newerContent.qualityId || targetItem.qualityId;
+      let finalOttPlatform = newerContent.ottPlatform || targetItem.ottPlatform;
       let finalDesc = newerContent.description || targetItem.description;
       let finalCountry = newerContent.country || targetItem.country;
       let finalReleaseDate = newerContent.releaseDate || targetItem.releaseDate;
@@ -5899,6 +5900,7 @@ export default function ContentManagement() {
         if (!finalImdb) finalImdb = item.imdbLink;
         if (!finalTrailer) finalTrailer = item.trailerUrl;
         if (!finalQuality) finalQuality = item.qualityId;
+        if (!finalOttPlatform) finalOttPlatform = item.ottPlatform;
         if (!finalDesc) finalDesc = item.description;
         if (!finalCountry) finalCountry = item.country;
         if (!finalReleaseDate) finalReleaseDate = item.releaseDate;
@@ -5998,6 +6000,7 @@ export default function ContentManagement() {
         trailers: JSON.stringify(combinedTrailers),
         subtitles: !!finalSubtitles,
         qualityId: finalQuality || "",
+        ottPlatform: finalOttPlatform || "",
         description: finalDesc || "",
         cast: Array.from(combinedCast),
         country: finalCountry || "",
@@ -6131,6 +6134,7 @@ export default function ContentManagement() {
         trailers: newerContent.trailers || previousContent.trailers || "[]",
         subtitles: newerContent.subtitles !== undefined ? newerContent.subtitles : previousContent.subtitles,
         qualityId: newerContent.qualityId || previousContent.qualityId || "",
+        ottPlatform: newerContent.ottPlatform || previousContent.ottPlatform || "",
         country: newerContent.country || previousContent.country || "",
         releaseDate: newerContent.releaseDate || previousContent.releaseDate || "",
         runtime: newerContent.runtime || previousContent.runtime || "",
@@ -6534,8 +6538,8 @@ export default function ContentManagement() {
                   onClick={() => {
                     const minifiedList = contentList.map(item => {
                       const min = minifyContent(item);
-                      // Preserve id and chunkId at top level for easy parsing later
-                      return { id: item.id, chunkId: item.chunkId, ...min };
+                      delete min.chunkId;
+                      return { id: item.id, ...min };
                     });
                     const collectionsMap: Record<string, any> = {};
                     collections.forEach(c => { collectionsMap[c.id] = c; });

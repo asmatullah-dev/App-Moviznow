@@ -87,8 +87,10 @@ export function useModalBehavior(isOpen: boolean, onClose: () => void) {
         // If this modal pushed a history state and we are NOT handling a popstate event,
         // pop the history state programmatically to keep history clean.
         if (removed.pushedHistory && !isHandlingPopState && typeof window !== 'undefined') {
-          setProgrammaticBack();
-          window.history.back();
+          if (window.history.state && window.history.state.__modalId === modalId) {
+            setProgrammaticBack();
+            window.history.back();
+          }
         }
       }
       hasPushedRef.current = false;
@@ -120,8 +122,10 @@ export function useModalBehavior(isOpen: boolean, onClose: () => void) {
         const [removed] = modalStack.splice(idx, 1);
         updateBodyScroll();
         if (removed.pushedHistory && !isHandlingPopState && typeof window !== 'undefined') {
-          setProgrammaticBack();
-          window.history.back();
+          if (window.history.state && window.history.state.__modalId === modalId) {
+            setProgrammaticBack();
+            window.history.back();
+          }
         }
       }
     };

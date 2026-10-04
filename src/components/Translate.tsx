@@ -1,19 +1,25 @@
 import React, { useEffect, useState } from 'react';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAuth } from '../contexts/AuthContext';
+import { canUserUseAiTranslation } from '../utils/roleUtils';
 
 /**
  * Component for AI-powered translation (primarily for long-form content like synopses)
+ * AI translation is strictly restricted to admin, owner & VIP users only.
  */
 export const Translate: React.FC<{ 
   children: string | React.ReactNode;
   loadingFallback?: React.ReactNode;
 }> = ({ children, loadingFallback }) => {
   const { language, translate } = useLanguage();
+  const { profile, user } = useAuth();
   const [translated, setTranslated] = useState<string | React.ReactNode>(children);
   const [loading, setLoading] = useState(false);
 
+  const canAiTranslate = canUserUseAiTranslation(profile, user);
+
   useEffect(() => {
-    if (language === 'en') {
+    if (language === 'en' || !canAiTranslate) {
       setTranslated(children);
       setLoading(false);
       return;
@@ -33,9 +39,13 @@ export const Translate: React.FC<{
       setTranslated(children);
       setLoading(false);
     }
-  }, [children, language, translate]);
+  }, [children, language, translate, canAiTranslate]);
 
-  if (loading && loadingFallback && language !== 'en') {
+  if (!canAiTranslate || language === 'en') {
+    return <>{children}</>;
+  }
+
+  if (loading && loadingFallback) {
     return <>{loadingFallback}</>;
   }
 

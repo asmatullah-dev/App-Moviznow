@@ -191,30 +191,34 @@ export default function Unsubscribe() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white flex flex-col items-center justify-center p-4">
-      <div className="w-full max-w-md bg-zinc-900 border border-zinc-800 rounded-3xl p-8 shadow-2xl text-center space-y-6">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white flex flex-col items-center justify-center p-4 transition-colors duration-300">
+      <div className="w-full max-w-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-8 shadow-xl dark:shadow-2xl text-center space-y-6">
         <div className="flex justify-center mb-2">
-          <img src="/Whitelogo.svg" alt="MovizNow" className="h-16 w-auto" />
+          <img src="/Whitelogo.svg" alt="MovizNow" className="h-16 w-auto dark:block hidden" />
+          <img src="/Blacklogo.svg" alt="MovizNow" className="h-16 w-auto dark:hidden block" onError={(e) => {
+            // fallback if Blacklogo doesn't exist
+            e.currentTarget.src = "/Whitelogo.svg";
+          }} />
         </div>
 
         {authLoading && (
           <div className="py-8 space-y-4">
             <Loader2 className="w-12 h-12 text-rose-500 animate-spin mx-auto" />
-            <h2 className="text-xl font-bold">Verifying Account...</h2>
-            <p className="text-zinc-400 text-sm">Checking authentication status</p>
+            <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Verifying Account...</h2>
+            <p className="text-zinc-500 dark:text-zinc-400 text-sm">Checking authentication status</p>
           </div>
         )}
 
         {!authLoading && !isEmailValid && (
           <div className="py-6 space-y-4">
-            <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 text-red-400 rounded-2xl flex items-center justify-center mx-auto">
+            <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 text-red-500 dark:text-red-400 rounded-2xl flex items-center justify-center mx-auto">
               <AlertCircle className="w-8 h-8" />
             </div>
-            <h2 className="text-xl font-bold text-white">Invalid Unsubscribe Link</h2>
-            <p className="text-zinc-400 text-sm">{message || 'The unsubscribe link is missing a valid email parameter.'}</p>
+            <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Invalid Unsubscribe Link</h2>
+            <p className="text-zinc-600 dark:text-zinc-400 text-sm">{message || 'The unsubscribe link is missing a valid email parameter.'}</p>
             <button
               onClick={() => navigate('/')}
-              className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-bold rounded-xl transition-colors mt-2"
+              className="w-full py-3 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white font-bold rounded-xl transition-colors mt-2 cursor-pointer border border-zinc-200 dark:border-zinc-700"
             >
               Return to Home
             </button>
@@ -224,26 +228,26 @@ export default function Unsubscribe() {
         {/* User NOT logged in */}
         {!authLoading && isEmailValid && !loggedInEmail && (
           <div className="py-6 space-y-4">
-            <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-2xl flex items-center justify-center mx-auto">
+            <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/20 text-amber-500 dark:text-amber-400 rounded-2xl flex items-center justify-center mx-auto">
               <Lock className="w-8 h-8" />
             </div>
-            <h2 className="text-2xl font-bold text-white">Log In Required</h2>
-            <p className="text-zinc-300 text-sm leading-relaxed">
-              This unsubscribe link is for <strong className="text-amber-300">{targetEmail}</strong>.
+            <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">Log In Required</h2>
+            <p className="text-zinc-600 dark:text-zinc-300 text-sm leading-relaxed">
+              This unsubscribe link is for <strong className="text-amber-600 dark:text-amber-300">{targetEmail}</strong>.
             </p>
-            <p className="text-zinc-400 text-xs">
+            <p className="text-zinc-500 dark:text-zinc-400 text-xs">
               To protect account security, you must log in to MovizNow with this account before you can unsubscribe.
             </p>
             <div className="pt-2 flex flex-col gap-3">
               <button
                 onClick={handleGoToLogin}
-                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-lg flex items-center justify-center gap-2"
+                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
               >
                 Log In to Unsubscribe
               </button>
               <button
                 onClick={() => navigate('/')}
-                className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium rounded-xl transition-colors text-sm"
+                className="w-full py-3 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-medium rounded-xl transition-colors text-sm cursor-pointer border border-zinc-200 dark:border-zinc-700"
               >
                 Return to Home
               </button>
@@ -254,26 +258,26 @@ export default function Unsubscribe() {
         {/* Account Mismatch: Logged in as user X, but link is for user Y */}
         {!authLoading && isEmailValid && loggedInEmail && loggedInEmail !== targetEmail && (
           <div className="py-6 space-y-4">
-            <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 text-red-400 rounded-2xl flex items-center justify-center mx-auto">
+            <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 text-red-500 dark:text-red-400 rounded-2xl flex items-center justify-center mx-auto">
               <UserX className="w-8 h-8" />
             </div>
-            <h2 className="text-2xl font-bold text-white">Account Mismatch</h2>
-            <p className="text-zinc-300 text-sm leading-relaxed">
-              You are currently logged in as <strong className="text-white">{loggedInEmail}</strong>, but this link is to unsubscribe <strong className="text-rose-400">{targetEmail}</strong>.
+            <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">Account Mismatch</h2>
+            <p className="text-zinc-600 dark:text-zinc-300 text-sm leading-relaxed">
+              You are currently logged in as <strong className="text-zinc-900 dark:text-white">{loggedInEmail}</strong>, but this link is to unsubscribe <strong className="text-rose-600 dark:text-rose-400">{targetEmail}</strong>.
             </p>
-            <p className="text-zinc-400 text-xs">
+            <p className="text-zinc-500 dark:text-zinc-400 text-xs">
               Unsubscribe links only work when logged into the matching user account.
             </p>
             <div className="pt-2 flex flex-col gap-3">
               <button
                 onClick={handleSwitchAccount}
-                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-lg flex items-center justify-center gap-2"
+                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
               >
                 <LogOut className="w-4 h-4" /> Log Out & Switch Account
               </button>
               <button
                 onClick={() => navigate('/')}
-                className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-medium rounded-xl transition-colors text-sm"
+                className="w-full py-3 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-medium rounded-xl transition-colors text-sm cursor-pointer border border-zinc-200 dark:border-zinc-700"
               >
                 Continue as {loggedInEmail}
               </button>
@@ -285,29 +289,29 @@ export default function Unsubscribe() {
         {!authLoading && isEmailValid && loggedInEmail === targetEmail && status === 'processing' && (
           <div className="py-8 space-y-4">
             <Loader2 className="w-12 h-12 text-rose-500 animate-spin mx-auto" />
-            <h2 className="text-xl font-bold">Unsubscribing...</h2>
-            <p className="text-zinc-400 text-sm">Processing request for <span className="text-white font-medium">{targetEmail}</span></p>
+            <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Unsubscribing...</h2>
+            <p className="text-zinc-500 dark:text-zinc-400 text-sm">Processing request for <span className="text-zinc-900 dark:text-white font-medium">{targetEmail}</span></p>
           </div>
         )}
 
         {/* Successfully Unsubscribed */}
         {!authLoading && isEmailValid && loggedInEmail === targetEmail && status === 'success' && (
           <div className="py-6 space-y-4">
-            <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-2xl flex items-center justify-center mx-auto">
+            <div className="w-16 h-16 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center mx-auto">
               <CheckCircle2 className="w-8 h-8" />
             </div>
-            <h2 className="text-2xl font-extrabold text-white">Unsubscribed Successfully</h2>
-            <p className="text-zinc-300 text-sm leading-relaxed">{message}</p>
-            <div className="bg-zinc-800/80 border border-zinc-700/60 rounded-xl p-3 text-xs text-zinc-300">
-              Verified Account: <strong className="text-emerald-400">{targetEmail}</strong>
+            <h2 className="text-2xl font-extrabold text-zinc-900 dark:text-white">Unsubscribed Successfully</h2>
+            <p className="text-zinc-600 dark:text-zinc-300 text-sm leading-relaxed">{message}</p>
+            <div className="bg-zinc-50 dark:bg-zinc-800/80 border border-zinc-200 dark:border-zinc-700/60 rounded-xl p-3 text-xs text-zinc-700 dark:text-zinc-300">
+              Verified Account: <strong className="text-emerald-600 dark:text-emerald-400">{targetEmail}</strong>
             </div>
             <p className="text-zinc-500 text-xs">
-              You will no longer receive movie or series alert emails at <strong className="text-zinc-300">{targetEmail}</strong>. Essential account alerts will still be delivered.
+              You will no longer receive movie or series alert emails at <strong className="text-zinc-700 dark:text-zinc-300">{targetEmail}</strong>. Essential account alerts will still be delivered.
             </p>
             <div className="pt-2">
               <button
                 onClick={() => navigate('/')}
-                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-lg flex items-center justify-center gap-2"
+                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
               >
                 <ArrowLeft className="w-4 h-4" /> Go to MovizNow
               </button>
@@ -318,21 +322,21 @@ export default function Unsubscribe() {
         {/* Error during unsubscribe */}
         {!authLoading && isEmailValid && loggedInEmail === targetEmail && status === 'error' && (
           <div className="py-6 space-y-4">
-            <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 text-red-400 rounded-2xl flex items-center justify-center mx-auto">
+            <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 text-red-500 dark:text-red-400 rounded-2xl flex items-center justify-center mx-auto">
               <AlertCircle className="w-8 h-8" />
             </div>
-            <h2 className="text-xl font-bold text-white">Unsubscribe Request Failed</h2>
-            <p className="text-red-400 text-sm leading-relaxed">{message}</p>
+            <h2 className="text-xl font-bold text-zinc-900 dark:text-white">Unsubscribe Request Failed</h2>
+            <p className="text-red-500 dark:text-red-400 text-sm leading-relaxed">{message}</p>
             <div className="pt-2 flex flex-col gap-3">
               <button
                 onClick={executeUnsubscribe}
-                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all text-sm font-bold"
+                className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-xl transition-all text-sm cursor-pointer shadow-md"
               >
                 Try Again
               </button>
               <button
                 onClick={() => navigate('/')}
-                className="w-full py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-medium rounded-xl transition-colors text-sm"
+                className="w-full py-3 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white font-medium rounded-xl transition-colors text-sm cursor-pointer border border-zinc-200 dark:border-zinc-700"
               >
                 Return to Home
               </button>

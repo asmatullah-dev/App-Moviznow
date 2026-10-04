@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Calendar,
   Film,
@@ -7,6 +7,7 @@ import {
   Star,
   Play,
   X,
+  Crown,
   Share2,
   RefreshCw,
   CheckCircle2,
@@ -53,6 +54,7 @@ import { useHaptics } from '../hooks/useHaptics';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { getOptimizedImageUrl } from '../utils/imageUtils';
 import { getOttBadgeConfig } from '../utils/contentUtils';
+import { canUserUseAiTranslation } from '../utils/roleUtils';
 import SharePreviewModal from './SharePreviewModal';
 
 interface ComingSoonSectionProps {
@@ -135,9 +137,13 @@ interface LibraryMatchInfo {
 }
 
 export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className, profile, onRequireLogin }) => {
+  const navigate = useNavigate();
   const { t, language, translate } = useLanguage();
-  const { profile: authProfile } = useAuth();
+  const { profile: authProfile, user } = useAuth();
   const activeProfile = profile || authProfile;
+  const canAiTranslate = useMemo(() => {
+    return canUserUseAiTranslation(activeProfile, user);
+  }, [activeProfile, user]);
   const { vibrate } = useHaptics();
   const { contentList, qualities } = useContent();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -482,7 +488,7 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
       return;
     }
 
-    if (language === 'en') {
+    if (language === 'en' || !canAiTranslate) {
       setTranslatedSynopsis(null);
       setIsTranslatingSynopsis(false);
       return;
@@ -507,7 +513,7 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
     return () => {
       isCurrent = false;
     };
-  }, [selectedItem, language, translate]);
+  }, [selectedItem, language, translate, canAiTranslate]);
 
   // Watch trailer action inside modal
   const handlePlayTrailer = async (item: TMDBUpcomingItem) => {
@@ -1134,35 +1140,46 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
                   </div>
                 </div>
 
-                {/* Synopsis with AI Translation */}
+                {/* Synopsis with Translation */}
                 <div className="mb-2">
-                  <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
                     <h4 className={clsx(
                       "font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5",
                       language === 'ur' ? 'urdu-font text-sm' : 'text-xs'
                     )}>
                       <span>{t('Synopsis')}</span>
-                      {language !== 'en' && translatedSynopsis && !showOriginalSynopsis && (
-                        <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20 flex items-center gap-1">
-                          <Sparkles className="w-2.5 h-2.5" />
-                          {t('AI Translated')}
-                        </span>
-                      )}
                     </h4>
 
-                    {/* Language Switch Toggle (Original vs Translated) */}
-                    {language !== 'en' && selectedItem.overview && (
+                    {/* Buy VIP to Translate for non-VIPs */}
+                    {language !== 'en' && !canAiTranslate && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          vibrate(20);
+                          setSelectedItem(null);
+                          navigate('/plans');
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-amber-500 to-orange-500 text-white shadow-xs hover:from-amber-600 hover:to-orange-600 active:scale-95 transition-all cursor-pointer"
+                      >
+                        <Crown className="w-3.5 h-3.5" />
+                        <span>{t('Buy VIP to Translate')}</span>
+                        <ArrowRight className="w-3 h-3 ml-0.5" />
+                      </button>
+                    )}
+
+                    {/* Language Switch Toggle (Original vs Translated) - VIP only */}
+                    {language !== 'en' && canAiTranslate && selectedItem.overview && (
                       <button
                         type="button"
                         onClick={() => {
                           vibrate(20);
                           setShowOriginalSynopsis(!showOriginalSynopsis);
                         }}
-                        className="flex items-center gap-1 text-[11px] font-bold text-amber-500 hover:text-amber-400 transition-colors"
+                        className="flex items-center gap-1 text-[11px] font-bold text-amber-500 hover:text-amber-400 transition-colors cursor-pointer"
                       >
                         <Languages className="w-3.5 h-3.5" />
                         <span>
-                          {showOriginalSynopsis ? t('Show AI Translation') : t('Show Original')}
+                          {showOriginalSynopsis ? t('Show Translation') : t('Show Original')}
                         </span>
                       </button>
                     )}
@@ -1171,7 +1188,7 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
                   {isTranslatingSynopsis && !translatedSynopsis ? (
                     <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 flex items-center gap-3 text-xs text-zinc-500">
                       <Sparkles className="w-4 h-4 text-amber-500 animate-spin" />
-                      <span>{t('Translating synopsis to your selected language with AI...')}</span>
+                      <span>{t('Translating synopsis to your selected language...')}</span>
                     </div>
                   ) : (
                     <p

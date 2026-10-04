@@ -4,7 +4,6 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { safeStorage } from '../utils/safeStorage';
 import { getChunkMeta, parseVersionTime } from '../utils/chunkMeta';
-import { seedStaticExportData } from '../utils/staticContentLoader';
 import { executeSyncUserData } from './SyncUserDataManager';
 
 export function RefreshAppDataManager() {

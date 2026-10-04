@@ -41,7 +41,7 @@ export default function Contact() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white flex flex-col relative overflow-hidden">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white flex flex-col relative overflow-hidden transition-colors duration-300">
       <Helmet>
         <title>{appName} - {t("Contact Us")}</title>
       </Helmet>
@@ -49,7 +49,7 @@ export default function Contact() {
       <Header showBackButton={true} />
 
       {/* Ambient Lighting Background */}
-      <div className="absolute top-10 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-gradient-to-r from-[#25D366]/15 via-emerald-600/15 to-teal-600/15 blur-[120px] pointer-events-none rounded-full animate-pulse" />
+      <div className="absolute top-10 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-gradient-to-r from-[#25D366]/10 dark:from-[#25D366]/15 via-emerald-600/10 dark:via-emerald-600/15 to-teal-600/10 dark:to-teal-600/15 blur-[120px] pointer-events-none rounded-full animate-pulse" />
       <div className="absolute top-[35rem] -right-20 w-[400px] h-[400px] bg-rose-500/10 blur-[100px] pointer-events-none rounded-full" />
       <div className="absolute top-[55rem] -left-20 w-[400px] h-[400px] bg-purple-500/10 blur-[100px] pointer-events-none rounded-full" />
 
@@ -60,20 +60,20 @@ export default function Contact() {
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="relative overflow-hidden bg-gradient-to-br from-zinc-900/90 via-zinc-950/95 to-zinc-900/90 border border-[#25D366]/30 rounded-3xl p-6 sm:p-12 shadow-2xl backdrop-blur-2xl text-center space-y-5"
+            className="relative overflow-hidden bg-white/95 via-zinc-50/90 to-emerald-50/40 dark:from-zinc-900/90 dark:via-zinc-950/95 dark:to-zinc-900/90 border border-[#25D366]/30 rounded-3xl p-6 sm:p-12 shadow-xl dark:shadow-2xl backdrop-blur-2xl text-center space-y-5"
           >
             <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-[#25D366] to-transparent opacity-80" />
 
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider bg-[#25D366]/10 border border-[#25D366]/30 text-[#25D366] shadow-inner">
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-wider bg-[#25D366]/10 border border-[#25D366]/30 text-emerald-700 dark:text-[#25D366] shadow-inner">
               <span className="w-2 h-2 rounded-full bg-[#25D366] animate-ping" />
               <span>{t("24/7 Instant Support")}</span>
             </div>
 
-            <h1 className="text-3xl sm:text-5xl md:text-6xl font-black tracking-tight text-white leading-tight max-w-3xl mx-auto">
+            <h1 className="text-3xl sm:text-5xl md:text-6xl font-black tracking-tight text-zinc-900 dark:text-white leading-tight max-w-3xl mx-auto">
               {t("Contact Us")}
             </h1>
 
-            <p className="text-zinc-300 text-sm sm:text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
+            <p className="text-zinc-600 dark:text-zinc-300 text-sm sm:text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
               {t("Get in touch with the %APP_NAME% team.").replace("%APP_NAME%", appName)}
             </p>
           </motion.div>
@@ -83,22 +83,22 @@ export default function Contact() {
             {/* WhatsApp Direct Support */}
             <motion.div 
               whileHover={{ y: -6 }}
-              className="bg-gradient-to-b from-zinc-900/90 to-zinc-950/95 border border-[#25D366]/40 hover:border-[#25D366] rounded-3xl p-6 sm:p-8 text-center flex flex-col items-center justify-between space-y-6 shadow-2xl shadow-[#25D366]/10 backdrop-blur-xl relative overflow-hidden group transition-all"
+              className="bg-white/95 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200/80 dark:border-[#25D366]/40 hover:border-[#25D366] rounded-3xl p-6 sm:p-8 text-center flex flex-col items-center justify-between space-y-6 shadow-xl dark:shadow-2xl dark:shadow-[#25D366]/10 backdrop-blur-xl relative overflow-hidden group transition-all"
             >
               <div className="space-y-4 w-full">
-                <div className="w-16 h-16 bg-[#25D366]/15 text-[#25D366] border border-[#25D366]/30 rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-[#25D366]/20 group-hover:scale-110 transition-transform">
+                <div className="w-16 h-16 bg-[#25D366]/15 text-[#25D366] border border-[#25D366]/30 rounded-2xl flex items-center justify-center mx-auto shadow-md group-hover:scale-110 transition-transform">
                   <MessageCircle className="w-8 h-8 fill-current" />
                 </div>
 
                 <div>
-                  <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-[11px] font-black uppercase bg-[#25D366]/10 text-[#25D366] mb-2 border border-[#25D366]/20">
+                  <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-[11px] font-black uppercase bg-[#25D366]/10 text-emerald-700 dark:text-[#25D366] mb-2 border border-[#25D366]/20">
                     <span className="w-1.5 h-1.5 rounded-full bg-[#25D366] animate-ping" />
                     <span>{t("Online • Instant Support")}</span>
                   </div>
-                  <h3 className="text-2xl font-black text-white">{t("WhatsApp Support")}</h3>
+                  <h3 className="text-2xl font-black text-zinc-900 dark:text-white">{t("WhatsApp Support")}</h3>
                 </div>
 
-                <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed">
+                <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed">
                   {t("Have a question or need to request a specific movie? Reach out directly on WhatsApp for fast support.")}
                 </p>
               </div>
@@ -107,7 +107,7 @@ export default function Contact() {
                 whileHover={{ scale: 1.03 }}
                 whileTap={{ scale: 0.97 }}
                 onClick={handleWhatsappSupportClick}
-                className="w-full bg-gradient-to-r from-[#25D366] to-emerald-600 hover:from-[#20b858] hover:to-emerald-500 text-white py-4 rounded-2xl font-black transition-all shadow-xl shadow-[#25D366]/25 flex items-center justify-center gap-2.5 text-xs sm:text-sm tracking-wide"
+                className="w-full bg-gradient-to-r from-[#25D366] to-emerald-600 hover:from-[#20b858] hover:to-emerald-500 text-white py-4 rounded-2xl font-black transition-all shadow-lg shadow-[#25D366]/25 flex items-center justify-center gap-2.5 text-xs sm:text-sm tracking-wide"
               >
                 <MessageCircle className="w-5 h-5 fill-current" />
                 <span>{t("Chat on WhatsApp")}</span>
@@ -117,22 +117,22 @@ export default function Contact() {
             {/* WhatsApp Official Channel */}
             <motion.div 
               whileHover={{ y: -6 }}
-              className="bg-gradient-to-b from-zinc-900/90 to-zinc-950/95 border border-purple-500/40 hover:border-purple-500 rounded-3xl p-6 sm:p-8 text-center flex flex-col items-center justify-between space-y-6 shadow-2xl backdrop-blur-xl relative overflow-hidden group transition-all"
+              className="bg-white/95 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200/80 dark:border-purple-500/40 hover:border-purple-500 rounded-3xl p-6 sm:p-8 text-center flex flex-col items-center justify-between space-y-6 shadow-xl dark:shadow-2xl backdrop-blur-xl relative overflow-hidden group transition-all"
             >
               <div className="space-y-4 w-full">
-                <div className="w-16 h-16 bg-purple-500/15 text-purple-400 border border-purple-500/30 rounded-2xl flex items-center justify-center mx-auto shadow-lg shadow-purple-500/20 group-hover:scale-110 transition-transform">
+                <div className="w-16 h-16 bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30 rounded-2xl flex items-center justify-center mx-auto shadow-md group-hover:scale-110 transition-transform">
                   <Send className="w-8 h-8" />
                 </div>
 
                 <div>
-                  <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-[11px] font-black uppercase bg-purple-500/10 text-purple-300 mb-2 border border-purple-500/20">
-                    <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                  <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-[11px] font-black uppercase bg-purple-500/10 text-purple-700 dark:text-purple-300 mb-2 border border-purple-500/20">
+                    <Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
                     <span>{t("Official Channel")}</span>
                   </div>
-                  <h3 className="text-2xl font-black text-white">{t("WhatsApp Channel")}</h3>
+                  <h3 className="text-2xl font-black text-zinc-900 dark:text-white">{t("WhatsApp Channel")}</h3>
                 </div>
 
-                <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed">
+                <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300 leading-relaxed">
                   {t("Join our official WhatsApp channel for the latest movie drops, series updates, and exclusive offers.")}
                 </p>
               </div>
@@ -143,7 +143,7 @@ export default function Contact() {
                   whileTap={{ scale: 0.98 }}
                   onClick={handleWhatsappChannelClick}
                   disabled={!settings?.whatsappChannelLink}
-                  className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 text-white disabled:opacity-50 disabled:cursor-not-allowed py-3.5 sm:py-4 rounded-2xl font-black transition-all shadow-xl shadow-purple-600/25 flex items-center justify-center gap-2.5 text-xs sm:text-sm tracking-wide"
+                  className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 text-white disabled:opacity-50 disabled:cursor-not-allowed py-3.5 sm:py-4 rounded-2xl font-black transition-all shadow-lg shadow-purple-600/25 flex items-center justify-center gap-2.5 text-xs sm:text-sm tracking-wide"
                 >
                   <Send className="w-5 h-5" />
                   <span>{t("Join Official Channel")}</span>
@@ -154,18 +154,18 @@ export default function Contact() {
                     href="https://whatsapp.com/channel/0029VbBU43bHFxOwOghfmD1I"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-200 hover:text-white text-xs font-bold transition-all shadow-sm hover:scale-[1.02] active:scale-95 whitespace-nowrap"
+                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-purple-500/10 dark:bg-purple-500/15 hover:bg-purple-500/20 dark:hover:bg-purple-500/25 border border-purple-500/30 text-purple-700 dark:text-purple-200 hover:text-purple-900 dark:hover:text-white text-xs font-bold transition-all shadow-xs hover:scale-[1.02] active:scale-95 whitespace-nowrap"
                   >
-                    <Send className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                    <Send className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
                     <span className="whitespace-nowrap">{t("For Updates")}</span>
                   </a>
                   <a
                     href={settings?.whatsappClipsLink || "https://chat.whatsapp.com/DJvn1Vssg8pCC6JTosnOQQ"}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/30 text-pink-200 hover:text-white text-xs font-bold transition-all shadow-sm hover:scale-[1.02] active:scale-95 whitespace-nowrap"
+                    className="flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-xl bg-pink-500/10 dark:bg-pink-500/15 hover:bg-pink-500/20 dark:hover:bg-pink-500/25 border border-pink-500/30 text-pink-700 dark:text-pink-200 hover:text-pink-900 dark:hover:text-white text-xs font-bold transition-all shadow-xs hover:scale-[1.02] active:scale-95 whitespace-nowrap"
                   >
-                    <Film className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+                    <Film className="w-3.5 h-3.5 text-pink-600 dark:text-pink-400 shrink-0" />
                     <span className="whitespace-nowrap">{t("For Clips")}</span>
                   </a>
                 </div>
@@ -174,48 +174,48 @@ export default function Contact() {
           </div>
 
           {/* Response Promise Bar */}
-          <div className="bg-gradient-to-r from-zinc-900/90 via-zinc-950/90 to-zinc-900/90 rounded-3xl p-6 border border-zinc-800/90 grid grid-cols-1 sm:grid-cols-3 gap-4 text-center shadow-inner">
+          <div className="bg-white/95 dark:bg-gradient-to-r dark:from-zinc-900/90 dark:via-zinc-950/90 dark:to-zinc-900/90 rounded-3xl p-6 border border-zinc-200/80 dark:border-zinc-800/90 grid grid-cols-1 sm:grid-cols-3 gap-4 text-center shadow-sm dark:shadow-inner">
             <div className="p-2 flex flex-col items-center">
-              <Clock className="w-6 h-6 text-emerald-400 mb-1.5" />
-              <p className="font-extrabold text-sm text-white">{t("< 3 Minutes")}</p>
-              <p className="text-[11px] text-zinc-400">{t("Average response time")}</p>
+              <Clock className="w-6 h-6 text-emerald-600 dark:text-emerald-400 mb-1.5" />
+              <p className="font-extrabold text-sm text-zinc-900 dark:text-white">{t("< 3 Minutes")}</p>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{t("Average response time")}</p>
             </div>
             <div className="p-2 flex flex-col items-center">
-              <UserCheck className="w-6 h-6 text-purple-400 mb-1.5" />
-              <p className="font-extrabold text-sm text-white">{t("Real Support Staff")}</p>
-              <p className="text-[11px] text-zinc-400">{t("Friendly human assistance")}</p>
+              <UserCheck className="w-6 h-6 text-purple-600 dark:text-purple-400 mb-1.5" />
+              <p className="font-extrabold text-sm text-zinc-900 dark:text-white">{t("Real Support Staff")}</p>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{t("Friendly human assistance")}</p>
             </div>
             <div className="p-2 flex flex-col items-center">
-              <ShieldCheck className="w-6 h-6 text-teal-400 mb-1.5" />
-              <p className="font-extrabold text-sm text-white">{t("100% Privacy")}</p>
-              <p className="text-[11px] text-zinc-400">{t("Your data is never shared")}</p>
+              <ShieldCheck className="w-6 h-6 text-teal-600 dark:text-teal-400 mb-1.5" />
+              <p className="font-extrabold text-sm text-zinc-900 dark:text-white">{t("100% Privacy")}</p>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{t("Your data is never shared")}</p>
             </div>
           </div>
 
           {/* Quick FAQ Section */}
-          <div className="bg-gradient-to-b from-zinc-900/90 to-zinc-950/95 border border-zinc-800/90 rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl backdrop-blur-xl">
-            <div className="flex items-center gap-3 border-b border-zinc-800 pb-4">
-              <HelpCircle className="w-6 h-6 text-amber-400" />
-              <h2 className="text-xl sm:text-2xl font-black text-white">{t("Frequently Asked Questions")}</h2>
+          <div className="bg-white/95 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200/80 dark:border-zinc-800/90 rounded-3xl p-6 sm:p-8 space-y-6 shadow-xl backdrop-blur-xl">
+            <div className="flex items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 pb-4">
+              <HelpCircle className="w-6 h-6 text-amber-500 dark:text-amber-400" />
+              <h2 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white">{t("Frequently Asked Questions")}</h2>
             </div>
 
             <div className="grid sm:grid-cols-2 gap-4">
-              <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-2xl p-5 space-y-2">
-                <h4 className="font-extrabold text-xs sm:text-sm text-emerald-400 flex items-center gap-2">
+              <div className="bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200/80 dark:border-zinc-800/80 rounded-2xl p-5 space-y-2">
+                <h4 className="font-extrabold text-xs sm:text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
                   <Zap className="w-4 h-4 shrink-0" />
                   <span>{t("How fast will I receive my movie?")}</span>
                 </h4>
-                <p className="text-xs text-zinc-300 leading-relaxed">
+                <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">
                   {t("Movies are sent directly to your WhatsApp as soon as payment or request is confirmed — usually within a few minutes.")}
                 </p>
               </div>
 
-              <div className="bg-zinc-950/80 border border-zinc-800/80 rounded-2xl p-5 space-y-2">
-                <h4 className="font-extrabold text-xs sm:text-sm text-emerald-400 flex items-center gap-2">
+              <div className="bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200/80 dark:border-zinc-800/80 rounded-2xl p-5 space-y-2">
+                <h4 className="font-extrabold text-xs sm:text-sm text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
                   <ShieldCheck className="w-4 h-4 shrink-0" />
                   <span>{t("Is it safe & virus-free?")}</span>
                 </h4>
-                <p className="text-xs text-zinc-300 leading-relaxed">
+                <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">
                   {t("Yes! All files are tested and verified in high-definition HD quality with zero popups, viruses, or broken links.")}
                 </p>
               </div>
@@ -223,7 +223,7 @@ export default function Contact() {
           </div>
 
           {/* Support Section */}
-          <div className="mt-12 border-t border-zinc-800/80 pt-8">
+          <div className="mt-12 border-t border-zinc-200 dark:border-zinc-800/80 pt-8">
             <ContactSupportButtons />
           </div>
         </main>

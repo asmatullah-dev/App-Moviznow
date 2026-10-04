@@ -205,25 +205,25 @@ export default function Trial() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white flex items-center justify-center p-4 transition-colors duration-300">
       <Helmet>
         <title>{t('Activate Trial')} - {settings?.headerText || 'Moviznow'}</title>
       </Helmet>
 
-      <div className="bg-gray-800 rounded-xl p-8 max-w-md w-full text-center shadow-2xl border border-gray-700 relative overflow-hidden">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl p-8 max-w-md w-full text-center shadow-xl dark:shadow-2xl border border-zinc-200 dark:border-zinc-800 relative overflow-hidden">
         {status === 'loading' && (
           <div className="flex flex-col items-center">
             <Loader2 className="w-16 h-16 text-emerald-500 animate-spin mb-4" />
-            <h2 className="text-2xl font-bold text-white mb-2">{t('Activating Trial')}</h2>
-            <p className="text-gray-400">{message}</p>
+            <h2 className="text-2xl font-bold text-zinc-900 dark:text-white mb-2">{t('Activating Trial')}</h2>
+            <p className="text-zinc-600 dark:text-zinc-400">{message}</p>
           </div>
         )}
 
         {status === 'missing_phone' && (
           <div className="flex flex-col items-center">
             <Phone className="w-16 h-16 text-emerald-500 mb-4" />
-            <h2 className="text-2xl font-bold text-white mb-2">{t('WhatsApp Number Required')}</h2>
-            <p className="text-gray-400 mb-6">{message}</p>
+            <h2 className="text-2xl font-bold text-zinc-900 dark:text-white mb-2">{t('WhatsApp Number Required')}</h2>
+            <p className="text-zinc-600 dark:text-zinc-400 mb-6">{message}</p>
             
             <form onSubmit={handlePhoneSubmit} className="w-full">
               <div className="mb-4">
@@ -232,17 +232,17 @@ export default function Trial() {
                   placeholder="e.g. 03001234567"
                   value={phoneNumber}
                   onChange={(e) => { setPhoneNumber(e.target.value); setPhoneError(''); }}
-                  className="w-full bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 rounded-xl px-4 py-3 text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
                   disabled={isSubmittingPhone}
                 />
                 {phoneError && <p className="text-red-500 text-sm mt-2 text-left">{phoneError}</p>}
-                <p className="text-xs text-gray-500 mt-2 text-left">{t('We need your WhatsApp number to verify your trial and provide support.')}</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2 text-left">{t('We need your WhatsApp number to verify your trial and provide support.')}</p>
               </div>
               
               <button
                 type="submit"
                 disabled={isSubmittingPhone || !phoneNumber.trim()}
-                className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-transform active:scale-95"
+                className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer shadow-md"
               >
                 {isSubmittingPhone ? (
                   <Loader2 className="w-5 h-5 animate-spin" />
@@ -257,32 +257,32 @@ export default function Trial() {
         {status === 'success' && (
           <div className="flex flex-col items-center">
             <CheckCircle className="w-16 h-16 text-emerald-500 mb-4" />
-            <h2 className="text-2xl font-bold text-white mb-2">{t('Success!')}</h2>
-            <p className="text-gray-400 mb-6">{message}</p>
-            <p className="text-sm text-gray-500">{t('Redirecting to home...')}</p>
+            <h2 className="text-2xl font-bold text-zinc-900 dark:text-white mb-2">{t('Success!')}</h2>
+            <p className="text-zinc-600 dark:text-zinc-400 mb-6">{message}</p>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('Redirecting to home...')}</p>
           </div>
         )}
 
         {status === 'error' && (
           <div className="flex flex-col items-center">
             <AlertCircle className="w-16 h-16 text-red-500 mb-4" />
-            <h2 className="text-2xl font-bold text-white mb-2">{t('Cannot Activate Trial')}</h2>
-            <p className="text-gray-400 mb-6">{message}</p>
-            <p className="text-sm text-gray-500">{t('Redirecting to home...')}</p>
+            <h2 className="text-2xl font-bold text-zinc-900 dark:text-white mb-2">{t('Cannot Activate Trial')}</h2>
+            <p className="text-zinc-600 dark:text-zinc-400 mb-6">{message}</p>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">{t('Redirecting to home...')}</p>
           </div>
         )}
 
         {status === 'disabled' && (
           <div className="flex flex-col items-center">
             <AlertCircle className="w-16 h-16 text-yellow-500 mb-4" />
-            <h2 className="text-2xl font-bold text-white mb-2">{t('Trial Disabled')}</h2>
-            <p className="text-gray-300 mb-6 text-sm sm:text-base leading-relaxed bg-gray-900/50 p-4 rounded-lg border border-gray-700/50">{message}</p>
+            <h2 className="text-2xl font-bold text-zinc-900 dark:text-white mb-2">{t('Trial Disabled')}</h2>
+            <p className="text-zinc-700 dark:text-zinc-300 mb-6 text-sm sm:text-base leading-relaxed bg-zinc-100 dark:bg-zinc-950/50 p-4 rounded-lg border border-zinc-200 dark:border-zinc-700/50">{message}</p>
             
             <div className="flex flex-col gap-3 w-full mb-6">
               {settings?.isAdminContactEnabled !== false && (
                 <button 
                   onClick={handleContactAdmin}
-                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-transform active:scale-95 shadow-lg shadow-emerald-900/20"
+                  className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-transform active:scale-95 shadow-md shadow-emerald-600/20 cursor-pointer"
                 >
                   <MessageCircle className="w-5 h-5" />
                   {t('Contact Admin (WhatsApp)')}
@@ -291,15 +291,15 @@ export default function Trial() {
               
               <button 
                 onClick={() => navigate('/')}
-                className="w-full py-3 px-4 bg-gray-700 hover:bg-gray-600 text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors active:scale-95 border border-gray-600"
+                className="w-full py-3 px-4 bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-900 dark:text-white font-medium rounded-xl flex items-center justify-center gap-2 transition-colors active:scale-95 border border-zinc-300 dark:border-zinc-700 cursor-pointer"
               >
                 <Home className="w-5 h-5" />
                 {t('Go to Home')}
               </button>
             </div>
             
-            <p className="text-sm text-gray-500 flex items-center justify-center gap-2 bg-gray-900/50 py-2 px-4 rounded-full w-fit mx-auto">
-              {t('Redirecting to home in')} <span className="font-mono text-emerald-400 font-bold">{countdown}</span>...
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 flex items-center justify-center gap-2 bg-zinc-100 dark:bg-zinc-950/50 py-2 px-4 rounded-full w-fit mx-auto border border-zinc-200 dark:border-zinc-800">
+              {t('Redirecting to home in')} <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">{countdown}</span>...
             </p>
           </div>
         )}

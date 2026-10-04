@@ -251,10 +251,13 @@ export const updateChunkMetaLocalCache = (updates: Record<string, any>) => {
       memoryCache = {};
     }
   }
-  if (updates.users) {
-    memoryCache.users = { ...(memoryCache.users || {}), ...updates.users };
-  }
+  const mergedUsers = updates.users
+    ? { ...(memoryCache.users || {}), ...updates.users }
+    : memoryCache.users;
   memoryCache = { ...memoryCache, ...updates };
+  if (mergedUsers) {
+    memoryCache.users = mergedUsers;
+  }
   safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(memoryCache));
 };
 

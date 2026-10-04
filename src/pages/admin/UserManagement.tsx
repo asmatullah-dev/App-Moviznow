@@ -45,7 +45,7 @@ import {
   hasCheckedAutoExpiryToday,
   isWithinExpiryCheckTimeWindow,
 } from '../../utils/expiryNotificationTracker';
-import { getUtcVersion } from '../../utils/chunkMeta';
+import { getUtcVersion, updateChunkMetaLocalCache } from '../../utils/chunkMeta';
 import {
   getStoredContactsToken,
   getConnectedAccountEmail,
@@ -565,9 +565,6 @@ export default function UserManagement() {
     }
   };
 
-  useModalBehavior(alertConfig.isOpen, () => setAlertConfig(prev => ({ ...prev, isOpen: false })));
-  useModalBehavior(!!deleteConfirm, () => setDeleteConfirm(null));
-  useModalBehavior(isBulkDeleteConfirmOpen, () => setIsBulkDeleteConfirmOpen(false));
   useModalBehavior(isContentPickerOpen, () => setIsContentPickerOpen(false));
   useModalBehavior(isAddUserModalOpen, () => setIsAddUserModalOpen(false));
   useModalBehavior(!!selectedUser, () => {
@@ -1283,14 +1280,33 @@ export default function UserManagement() {
   const handleDelete = async () => {
     if (!deleteConfirm) return;
     setProcessing(prev => ({ ...prev, delete: true }));
-    const userToDelete = users.find(u => u.uid === deleteConfirm);
-    if (userToDelete?.role === 'owner') {
+    const currentDeleteConfirm = deleteConfirm;
+
+    if (currentDeleteConfirm === profile?.uid) {
       setProcessing(prev => ({ ...prev, delete: false }));
+      setDeleteConfirm(null);
+      setAlertConfig({
+        isOpen: true,
+        title: 'Action Not Allowed',
+        message: 'You cannot delete your own logged-in account.'
+      });
       return;
     }
-    const currentDeleteConfirm = deleteConfirm;
+
+    const userToDelete = users.find(u => u.uid === currentDeleteConfirm);
+    if (userToDelete?.role === 'owner') {
+      setProcessing(prev => ({ ...prev, delete: false }));
+      setDeleteConfirm(null);
+      setAlertConfig({
+        isOpen: true,
+        title: 'Action Not Allowed',
+        message: 'Owner accounts cannot be deleted.'
+      });
+      return;
+    }
     
     try {
+      let deletedViaApi = false;
       if (profile?.uid) {
         try {
           const res = await fetch('/api/admin/users/delete', {
@@ -1298,7 +1314,12 @@ export default function UserManagement() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ uid: currentDeleteConfirm, adminUid: profile.uid })
           });
-          if (!res.ok) {
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            if (data.deletedFirestore) {
+              deletedViaApi = true;
+            }
+          } else {
              const errorData = await res.json().catch(() => ({}));
              console.error("Failed to delete user from Firebase Auth:", errorData);
           }
@@ -1307,13 +1328,19 @@ export default function UserManagement() {
         }
       }
 
-      const batch = writeBatch(db);
-      
-      // 1. Delete user document
-      batch.delete(doc(db, 'users', currentDeleteConfirm));
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentDeleteConfirm]: -1 } }, { merge: true });
+      if (!deletedViaApi) {
+        const batch = writeBatch(db);
+        // 1. Delete user document
+        batch.delete(doc(db, 'users', currentDeleteConfirm));
+        // Use field path dot notation to prevent overwriting other users in chunk_meta.versions
+        batch.set(doc(db, 'chunk_meta', 'versions'), { [`users.${currentDeleteConfirm}`]: -1 }, { merge: true });
+        await batch.commit();
+      }
 
-      await batch.commit();
+      // Update local chunk_meta cache safely
+      try {
+        updateChunkMetaLocalCache({ users: { [currentDeleteConfirm]: -1 } });
+      } catch (e) {}
 
       // Clean up sync_user_mtimes cache
       const mtimesStr = safeStorage.getItem('sync_user_mtimes');
@@ -1335,14 +1362,19 @@ export default function UserManagement() {
         } catch (e) {}
       }
 
-      // OPTIONAL: Immediately hide it from UI if refreshUsers takes time
-      // But refreshUsers should pick up the -1 mtime anyway
+      // Close modal state before refresh to keep UI transitions smooth
+      setDeleteConfirm(null);
+      if (selectedUser?.uid === currentDeleteConfirm) {
+        setSelectedUser(null);
+        setIsEditingOverlay(false);
+      }
+
       await refreshUsers(true);
 
       setAlertConfig({ isOpen: true, title: 'Success', message: 'User and all associated data deleted successfully' });
-      setDeleteConfirm(null);
     } catch (error) {
       console.error('Error in delete action:', error);
+      setDeleteConfirm(null);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to delete user' });
       handleFirestoreError(error, OperationType.DELETE, `users/${currentDeleteConfirm}`);
     } finally {
@@ -1380,7 +1412,8 @@ export default function UserManagement() {
     const validUidsSet = new Set(uidsToDelete);
 
     try {
-      // 1. Delete users from Firebase Auth via Admin API
+      let deletedViaApi = false;
+      // 1. Delete users from Firebase Auth and Firestore via Admin API
       if (profile?.uid) {
         try {
           const res = await fetch('/api/admin/users/delete', {
@@ -1388,7 +1421,12 @@ export default function UserManagement() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ uids: uidsToDelete, adminUid: profile.uid })
           });
-          if (!res.ok) {
+          if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            if (data.deletedFirestore) {
+              deletedViaApi = true;
+            }
+          } else {
             const errorData = await res.json().catch(() => ({}));
             console.error("Failed to bulk delete users from Firebase Auth:", errorData);
           }
@@ -1397,22 +1435,30 @@ export default function UserManagement() {
         }
       }
 
-      // 2. Process Firestore deletions in batches of up to 400 users
-      const BATCH_CHUNK_SIZE = 400;
-      for (let i = 0; i < uidsToDelete.length; i += BATCH_CHUNK_SIZE) {
-        const batch = writeBatch(db);
-        const chunkUids = uidsToDelete.slice(i, i + BATCH_CHUNK_SIZE);
-        const versionUsersUpdate: Record<string, any> = {};
+      // 2. Process Firestore deletions in batches of up to 400 users if not done via API
+      if (!deletedViaApi) {
+        const BATCH_CHUNK_SIZE = 400;
+        for (let i = 0; i < uidsToDelete.length; i += BATCH_CHUNK_SIZE) {
+          const batch = writeBatch(db);
+          const chunkUids = uidsToDelete.slice(i, i + BATCH_CHUNK_SIZE);
+          const versionUsersUpdate: Record<string, any> = {};
 
-        chunkUids.forEach(uid => {
-          batch.delete(doc(db, 'users', uid));
-          versionUsersUpdate[uid] = -1;
-        });
+          chunkUids.forEach(uid => {
+            batch.delete(doc(db, 'users', uid));
+            versionUsersUpdate[`users.${uid}`] = -1;
+          });
 
-        batch.set(doc(db, 'chunk_meta', 'versions'), { users: versionUsersUpdate }, { merge: true });
-
-        await batch.commit();
+          batch.set(doc(db, 'chunk_meta', 'versions'), versionUsersUpdate, { merge: true });
+          await batch.commit();
+        }
       }
+
+      // Update local chunk_meta cache safely
+      try {
+        const deletedMeta: Record<string, number> = {};
+        uidsToDelete.forEach(uid => { deletedMeta[uid] = -1; });
+        updateChunkMetaLocalCache({ users: deletedMeta });
+      } catch (e) {}
 
       // 3. Update local storage cache and mtimes
       const mtimesStr = safeStorage.getItem('sync_user_mtimes');
@@ -1433,11 +1479,17 @@ export default function UserManagement() {
         } catch (e) {}
       }
 
-      // 5. Refresh users list & reset state
-      await refreshUsers(true);
+      // 4. Reset modal state before refresh
       setSelectedUsers([]);
       setIsBulkDeleteConfirmOpen(false);
       setBulkDeleteValidUids([]);
+      if (selectedUser && validUidsSet.has(selectedUser.uid)) {
+        setSelectedUser(null);
+        setIsEditingOverlay(false);
+      }
+
+      // 5. Refresh users list
+      await refreshUsers(true);
 
       setAlertConfig({
         isOpen: true,
@@ -1446,6 +1498,7 @@ export default function UserManagement() {
       });
     } catch (error) {
       console.error('Error in bulk delete action:', error);
+      setIsBulkDeleteConfirmOpen(false);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to delete selected users.' });
       handleFirestoreError(error, OperationType.DELETE, 'users/bulk');
     } finally {

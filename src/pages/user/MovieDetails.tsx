@@ -9,7 +9,7 @@ import {
 } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 
-import { canManageContent, canUserStreamContent } from "../../utils/roleUtils";
+import { canManageContent, canUserStreamContent, canUserUseAiTranslation } from "../../utils/roleUtils";
 import { normalizeContentUrl, getCachedLinkExtraction, saveCachedLinkExtraction } from "../../utils/linkUtils";
 import { getStaticContentById } from "../../utils/staticContentLoader";
 import { GuestAccessBanner } from "../../components/GuestAccessBanner";
@@ -29,6 +29,9 @@ import {
   Phone,
   MessageSquare,
   ArrowLeft,
+  ArrowRight,
+  Crown,
+  Languages,
   Home,
   Play,
   Clock,
@@ -266,11 +269,16 @@ export default function MovieDetails() {
     return canManageContent(profile, user);
   }, [profile, user]);
 
+  const canAiTranslate = useMemo(() => {
+    return canUserUseAiTranslation(profile, user);
+  }, [profile, user]);
+
   const { cart, addToCart } = useCart();
   const { settings, refreshSettings } = useSettings();
   const [hasAttemptedGlobalRefresh, setHasAttemptedGlobalRefresh] =
     useState(false);
   const [isManualRefreshing, setIsManualRefreshing] = useState(false);
+  const [showOriginalSynopsis, setShowOriginalSynopsis] = useState(false);
 
   const content = useMemo(() => {
     if (isAdminOrEditor) {
@@ -916,9 +924,9 @@ export default function MovieDetails() {
 
   const hasPrefetched = useRef<Set<string>>(new Set());
 
-  // Prefetch translations for all content in one go
+  // Prefetch translations for all content in one go (VIP / Admin only)
   useEffect(() => {
-    if (language === 'en' || !mergedContent || isOffline) return;
+    if (language === 'en' || !mergedContent || isOffline || !canAiTranslate) return;
     
     // For series, wait until seasons are loaded to translate everything in one batch
     if (mergedContent.type === 'series' && seasons.length === 0) return;
@@ -948,7 +956,7 @@ export default function MovieDetails() {
       hasPrefetched.current.add(prefetchKey);
       translateMany(Array.from(stringsToTranslate));
     }
-  }, [mergedContent, language, seasons, id, translateMany, isOffline]);
+  }, [mergedContent, language, seasons, id, translateMany, isOffline, canAiTranslate]);
 
   const allTrailers = useMemo(() => {
     const list: Trailer[] = [];
@@ -3572,24 +3580,57 @@ export default function MovieDetails() {
 
                     {(displayData.description || mergedContent.description) && (
                       <div className="pt-2 border-t border-cyan-500/15">
-                        <h4 className="text-xs font-extrabold text-cyan-700 dark:text-cyan-400 mb-1.5 uppercase tracking-wider opacity-80">
-                          {t('Synopsis')}
-                        </h4>
+                        <div className="flex items-center justify-between flex-wrap gap-2 mb-1.5">
+                          <h4 className="text-xs font-extrabold text-cyan-700 dark:text-cyan-400 uppercase tracking-wider opacity-80">
+                            {t('Synopsis')}
+                          </h4>
+                          {(language === 'ur' || language === 'ur-roman') && !canAiTranslate && (
+                            <button
+                              type="button"
+                              onClick={() => navigate('/plans')}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white shadow-xs hover:shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                              title={t('Buy VIP to Translate')}
+                            >
+                              <Crown className="w-3.5 h-3.5" />
+                              <span>{t('Buy VIP to Translate')}</span>
+                              <ArrowRight className="w-3 h-3 ml-0.5" />
+                            </button>
+                          )}
+                          {(language === 'ur' || language === 'ur-roman') && canAiTranslate && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                vibrate(20);
+                                setShowOriginalSynopsis(!showOriginalSynopsis);
+                              }}
+                              className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-500 hover:text-amber-400 transition-colors cursor-pointer"
+                            >
+                              <Languages className="w-3.5 h-3.5" />
+                              <span>
+                                {showOriginalSynopsis ? t('Show Translation') : t('Show Original')}
+                              </span>
+                            </button>
+                          )}
+                        </div>
                         <div 
-                          dir={language === 'ur' ? 'rtl' : 'ltr'}
-                          className={`text-zinc-600 dark:text-zinc-300 leading-relaxed ${language === 'ur' || language === 'ur-roman' ? 'text-base sm:text-lg font-medium' : 'text-xs sm:text-sm'}`}
+                          dir={language === 'ur' && canAiTranslate && !showOriginalSynopsis ? 'rtl' : 'ltr'}
+                          className={`text-zinc-600 dark:text-zinc-300 leading-relaxed ${!showOriginalSynopsis && (language === 'ur' || language === 'ur-roman') ? 'text-base sm:text-lg font-medium' : 'text-xs sm:text-sm'}`}
                         >
-                          <Translate
-                            loadingFallback={
-                              <div className="flex flex-col gap-2 animate-pulse py-1">
-                                <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-full"></div>
-                                <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-5/6"></div>
-                                <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-4/6"></div>
-                              </div>
-                            }
-                          >
-                            {displayData.description || mergedContent.description}
-                          </Translate>
+                          {showOriginalSynopsis ? (
+                            displayData.description || mergedContent.description
+                          ) : (
+                            <Translate
+                              loadingFallback={
+                                <div className="flex flex-col gap-2 animate-pulse py-1">
+                                  <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-full"></div>
+                                  <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-5/6"></div>
+                                  <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-4/6"></div>
+                                </div>
+                              }
+                            >
+                              {displayData.description || mergedContent.description}
+                            </Translate>
+                          )}
                         </div>
                       </div>
                     )}
@@ -3759,24 +3800,57 @@ export default function MovieDetails() {
                       </div>
                     )}
 
-                    <h4 className="text-xs font-extrabold mb-1.5 text-cyan-700 dark:text-cyan-400 uppercase tracking-wider opacity-80">
-                      {t('Synopsis')}
-                    </h4>
+                    <div className="flex items-center justify-between flex-wrap gap-2 mb-1.5">
+                      <h4 className="text-xs font-extrabold text-cyan-700 dark:text-cyan-400 uppercase tracking-wider opacity-80">
+                        {t('Synopsis')}
+                      </h4>
+                      {(language === 'ur' || language === 'ur-roman') && !canAiTranslate && (
+                        <button
+                          type="button"
+                          onClick={() => navigate('/plans')}
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white shadow-xs hover:shadow-md hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                          title={t('Buy VIP to Translate')}
+                        >
+                          <Crown className="w-3.5 h-3.5" />
+                          <span>{t('Buy VIP to Translate')}</span>
+                          <ArrowRight className="w-3 h-3 ml-0.5" />
+                        </button>
+                      )}
+                      {(language === 'ur' || language === 'ur-roman') && canAiTranslate && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            vibrate(20);
+                            setShowOriginalSynopsis(!showOriginalSynopsis);
+                          }}
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-500 hover:text-amber-400 transition-colors cursor-pointer"
+                        >
+                          <Languages className="w-3.5 h-3.5" />
+                          <span>
+                            {showOriginalSynopsis ? t('Show Translation') : t('Show Original')}
+                          </span>
+                        </button>
+                      )}
+                    </div>
                     <div 
-                      dir={language === 'ur' ? 'rtl' : 'ltr'}
-                      className={`text-zinc-600 dark:text-zinc-300 leading-relaxed ${language === 'ur' || language === 'ur-roman' ? 'text-base sm:text-lg font-medium' : 'text-xs sm:text-sm'}`}
+                      dir={language === 'ur' && canAiTranslate && !showOriginalSynopsis ? 'rtl' : 'ltr'}
+                      className={`text-zinc-600 dark:text-zinc-300 leading-relaxed ${!showOriginalSynopsis && (language === 'ur' || language === 'ur-roman') ? 'text-base sm:text-lg font-medium' : 'text-xs sm:text-sm'}`}
                     >
-                      <Translate
-                        loadingFallback={
-                          <div className="flex flex-col gap-2 animate-pulse py-1">
-                            <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-full"></div>
-                            <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-5/6"></div>
-                            <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-4/6"></div>
-                          </div>
-                        }
-                      >
-                        {mergedContent.description}
-                      </Translate>
+                      {showOriginalSynopsis ? (
+                        mergedContent.description
+                      ) : (
+                        <Translate
+                          loadingFallback={
+                            <div className="flex flex-col gap-2 animate-pulse py-1">
+                              <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-full"></div>
+                              <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-5/6"></div>
+                              <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded w-4/6"></div>
+                            </div>
+                          }
+                        >
+                          {mergedContent.description}
+                        </Translate>
+                      )}
                     </div>
                   </section>
                 </div>

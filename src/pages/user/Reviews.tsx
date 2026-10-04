@@ -9,7 +9,6 @@ import {
   MessageSquare, 
   Loader2, 
   Sparkles, 
-  Gift, 
   CheckCircle2, 
   MapPin, 
   ShieldCheck, 
@@ -215,7 +214,7 @@ export default function Reviews() {
   const myReviewsCount = profile ? reviews.filter(r => r.userId === profile.uid).length : 0;
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white flex flex-col relative overflow-hidden">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white flex flex-col relative overflow-hidden transition-colors duration-300">
       <Helmet>
         <title>{appName} - {t("User Reviews")}</title>
       </Helmet>
@@ -223,7 +222,7 @@ export default function Reviews() {
       <Header showBackButton={true} />
 
       {/* Ambient Lighting Background */}
-      <div className="absolute top-20 left-1/2 -translate-x-1/2 w-full max-w-6xl h-96 bg-gradient-to-r from-amber-600/15 via-rose-600/15 to-purple-600/15 blur-3xl pointer-events-none rounded-full" />
+      <div className="absolute top-20 left-1/2 -translate-x-1/2 w-full max-w-6xl h-96 bg-gradient-to-r from-amber-600/10 dark:from-amber-600/15 via-rose-600/10 dark:via-rose-600/15 to-purple-600/10 dark:to-purple-600/15 blur-3xl pointer-events-none rounded-full" />
       <div className="absolute top-[28rem] right-0 w-80 h-80 bg-rose-500/10 blur-3xl pointer-events-none rounded-full" />
       <div className="absolute top-[45rem] left-0 w-80 h-80 bg-amber-500/10 blur-3xl pointer-events-none rounded-full" />
       
@@ -231,36 +230,36 @@ export default function Reviews() {
         <main className="max-w-4xl mx-auto px-4 pt-6 pb-16 w-full space-y-8">
           
           {/* Hero Ratings Header */}
-          <div className="relative overflow-hidden bg-gradient-to-br from-zinc-900/90 via-zinc-950/90 to-zinc-900/90 border border-rose-500/20 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl">
+          <div className="relative overflow-hidden bg-white/95 via-zinc-50/90 to-rose-50/30 dark:from-zinc-900/90 dark:via-zinc-950/90 dark:to-zinc-900/90 border border-zinc-200/80 dark:border-rose-500/20 rounded-3xl p-6 sm:p-8 shadow-xl dark:shadow-2xl backdrop-blur-xl">
             <div className="flex flex-col md:flex-row items-center justify-between gap-8 relative z-10">
               
               {/* Left Column: Title & Subtitle */}
               <div className="space-y-3 text-center md:text-left flex-1" dir={language === 'ur' ? 'rtl' : 'ltr'}>
-                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-gradient-to-r from-amber-500/20 to-rose-500/20 border border-amber-500/30 text-amber-300">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-gradient-to-r from-amber-500/20 to-rose-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-300">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
                   <span>{t("Reviews & Ratings")}</span>
                   {syncing && (
-                    <span className="flex items-center gap-1 text-[11px] text-zinc-400 ml-2">
-                      <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                    <span className="flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 ml-2">
+                      <Loader2 className="w-3 h-3 animate-spin text-amber-500 dark:text-amber-400" />
                       {t("Syncing...")}
                     </span>
                   )}
                 </div>
 
-                <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-white leading-tight">
+                <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-zinc-900 dark:text-white leading-tight">
                   {t("User Reviews")}
                 </h1>
                 
-                <p className="text-zinc-300 text-xs sm:text-sm max-w-lg leading-relaxed">
+                <p className="text-zinc-600 dark:text-zinc-300 text-xs sm:text-sm max-w-lg leading-relaxed">
                   {t("See what others are saying about %APP_NAME%").replace("%APP_NAME%", appName)}
                 </p>
               </div>
 
               {/* Right Column: Rating Score Card & Distribution */}
-              <div className="bg-zinc-950/80 border border-zinc-800 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-center gap-6 shadow-inner w-full md:w-auto shrink-0">
+              <div className="bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-center gap-6 shadow-xs dark:shadow-inner w-full md:w-auto shrink-0">
                 {/* Score Number Badge */}
-                <div className="flex flex-col items-center justify-center text-center pr-0 sm:pr-6 sm:border-r sm:border-zinc-800 w-full sm:w-auto">
-                  <div className="text-5xl font-black text-white tracking-tighter flex items-center gap-1">
+                <div className="flex flex-col items-center justify-center text-center pr-0 sm:pr-6 sm:border-r sm:border-zinc-200 dark:sm:border-zinc-800 w-full sm:w-auto">
+                  <div className="text-5xl font-black text-zinc-900 dark:text-white tracking-tighter flex items-center gap-1">
                     <span>{averageRating}</span>
                     <Star className="w-8 h-8 fill-amber-400 text-amber-400 animate-pulse" />
                   </div>
@@ -268,11 +267,11 @@ export default function Reviews() {
                     {[1, 2, 3, 4, 5].map(star => (
                       <Star 
                         key={`hero-star-${star}`} 
-                        className={`w-4 h-4 ${star <= Math.round(Number(averageRating)) ? 'fill-amber-400 text-amber-400' : 'text-zinc-700'}`} 
+                        className={`w-4 h-4 ${star <= Math.round(Number(averageRating)) ? 'fill-amber-400 text-amber-400' : 'text-zinc-300 dark:text-zinc-700'}`} 
                       />
                     ))}
                   </div>
-                  <span className="text-[11px] font-bold text-zinc-400 mt-1.5">
+                  <span className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 mt-1.5">
                     {t("Based on %COUNT% reviews").replace("%COUNT%", totalReviews.toString())}
                   </span>
                 </div>
@@ -284,9 +283,9 @@ export default function Reviews() {
                     const pct = totalReviews > 0 ? (count / totalReviews) * 100 : 0;
                     return (
                       <div key={`dist-${num}`} className="flex items-center gap-2 text-xs">
-                        <span className="font-bold text-zinc-400 w-3">{num}</span>
+                        <span className="font-bold text-zinc-600 dark:text-zinc-400 w-3">{num}</span>
                         <Star className="w-3 h-3 fill-amber-400 text-amber-400 shrink-0" />
-                        <div className="flex-1 h-2 bg-zinc-800 rounded-full overflow-hidden">
+                        <div className="flex-1 h-2 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
                           <div 
                             className="h-full bg-gradient-to-r from-amber-400 to-rose-500 rounded-full transition-all duration-500" 
                             style={{ width: `${pct}%` }} 
@@ -304,19 +303,19 @@ export default function Reviews() {
 
           {/* Not Logged In Banner */}
           {!isLoggedIn && !authLoading && !authProfileLoading && (
-            <div className="bg-gradient-to-r from-rose-950/60 via-purple-950/50 to-amber-950/60 border border-rose-500/30 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
+            <div className="bg-rose-50/80 dark:bg-gradient-to-r dark:from-rose-950/60 dark:via-purple-950/50 dark:to-amber-950/60 border border-rose-200 dark:border-rose-500/30 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md dark:shadow-xl">
               <div className="space-y-1 text-center sm:text-left" dir={language === 'ur' ? 'rtl' : 'ltr'}>
                 <div className="flex items-center justify-center sm:justify-start gap-2">
-                  <MessageSquare className="w-5 h-5 text-rose-400" />
-                  <h3 className="font-extrabold text-base sm:text-lg text-white">{t("Write a Review")}</h3>
+                  <MessageSquare className="w-5 h-5 text-rose-500 dark:text-rose-400" />
+                  <h3 className="font-extrabold text-base sm:text-lg text-zinc-900 dark:text-white">{t("Write a Review")}</h3>
                 </div>
-                <p className="text-xs sm:text-sm text-zinc-300">
+                <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300">
                   {t("Log in to your account to share your feedback and review!")}
                 </p>
               </div>
               <button
                 onClick={() => navigate('/login')}
-                className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-extrabold py-3 px-6 rounded-xl transition-all shrink-0 text-xs sm:text-sm shadow-lg shadow-rose-600/25 active:scale-95 w-full sm:w-auto"
+                className="bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-extrabold py-3 px-6 rounded-xl transition-all shrink-0 text-xs sm:text-sm shadow-md shadow-rose-600/25 active:scale-95 w-full sm:w-auto"
               >
                 {t("Log In to Review")}
               </button>
@@ -325,8 +324,8 @@ export default function Reviews() {
 
           {/* Max Reviews Reached Alert */}
           {profile && myReviewsCount >= 2 && (
-            <div className="bg-emerald-500/10 border border-emerald-500/30 p-4 rounded-2xl text-center text-xs sm:text-sm text-emerald-300 font-bold flex items-center justify-center gap-2 shadow-sm">
-              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <div className="bg-emerald-500/10 border border-emerald-500/30 p-4 rounded-2xl text-center text-xs sm:text-sm text-emerald-700 dark:text-emerald-300 font-bold flex items-center justify-center gap-2 shadow-sm">
+              <CheckCircle2 className="w-5 h-5 text-emerald-500 dark:text-emerald-400 shrink-0" />
               <span>{t("You have submitted the maximum allowed 2 reviews per account. Thank you for your feedback!")}</span>
             </div>
           )}
@@ -337,15 +336,15 @@ export default function Reviews() {
               initial={{ opacity: 0, y: 15 }}
               animate={{ opacity: 1, y: 0 }}
               onSubmit={handleSubmit} 
-              className="bg-gradient-to-b from-zinc-900/95 to-zinc-950/95 border border-rose-500/30 rounded-3xl p-6 sm:p-7 shadow-2xl backdrop-blur-md relative overflow-hidden space-y-5"
+              className="bg-white/95 dark:bg-gradient-to-b dark:from-zinc-900/95 dark:to-zinc-950/95 border border-zinc-200/80 dark:border-rose-500/30 rounded-3xl p-6 sm:p-7 shadow-xl dark:shadow-2xl backdrop-blur-md relative overflow-hidden space-y-5"
             >
-              <div className="flex items-center justify-between border-b border-zinc-800 pb-4">
+              <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-4">
                 <div>
-                  <h3 className="font-extrabold text-lg sm:text-xl text-white flex items-center gap-2">
-                    <MessageSquare className="w-5 h-5 text-rose-400" />
+                  <h3 className="font-extrabold text-lg sm:text-xl text-zinc-900 dark:text-white flex items-center gap-2">
+                    <MessageSquare className="w-5 h-5 text-rose-500 dark:text-rose-400" />
                     <span>{t("Write a Review")}</span>
                   </h3>
-                  <p className="text-xs text-zinc-400 mt-0.5">
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
                     {t("Share your honest experience and thoughts with the community!")}
                   </p>
                 </div>
@@ -353,7 +352,7 @@ export default function Reviews() {
 
               {/* Star Selection */}
               <div className="space-y-1.5">
-                <label className="text-xs font-extrabold uppercase tracking-wider text-zinc-400 block">
+                <label className="text-xs font-extrabold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
                   {t("Overall Rating")}
                 </label>
                 <div className="flex items-center gap-2">
@@ -372,13 +371,13 @@ export default function Reviews() {
                           className={`w-8 h-8 sm:w-9 sm:h-9 transition-colors ${
                             star <= activeRating 
                               ? 'fill-amber-400 text-amber-400 filter drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]' 
-                              : 'text-zinc-700 hover:text-zinc-500'
+                              : 'text-zinc-300 dark:text-zinc-700 hover:text-zinc-400 dark:hover:text-zinc-500'
                           }`} 
                         />
                       </button>
                     );
                   })}
-                  <span className="text-sm font-extrabold text-amber-400 ml-2 font-mono">
+                  <span className="text-sm font-extrabold text-amber-500 dark:text-amber-400 ml-2 font-mono">
                     {hoverRating || rating} / 5
                   </span>
                 </div>
@@ -387,7 +386,7 @@ export default function Reviews() {
               {/* Optional City Input */}
               {!profile.city && (
                 <div className="space-y-1.5">
-                  <label className="text-xs font-extrabold uppercase tracking-wider text-zinc-400 block">
+                  <label className="text-xs font-extrabold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
                     {t("Your City (Optional)")}
                   </label>
                   <div className="relative">
@@ -397,7 +396,7 @@ export default function Reviews() {
                       value={city}
                       onChange={(e) => setCity(e.target.value)}
                       placeholder="e.g. Lahore, Karachi, Rawalpindi"
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 text-white text-sm placeholder:text-zinc-600"
+                      className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl py-3 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 text-zinc-900 dark:text-white text-sm placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
                     />
                   </div>
                 </div>
@@ -405,14 +404,14 @@ export default function Reviews() {
 
               {/* Review Text */}
               <div className="space-y-1.5">
-                <label className="text-xs font-extrabold uppercase tracking-wider text-zinc-400 block">
+                <label className="text-xs font-extrabold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
                   {t("Review Text")}
                 </label>
                 <textarea
                   value={text}
                   onChange={(e) => setText(e.target.value)}
                   placeholder={t("Share your experience...")}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-4 min-h-[120px] focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 text-white text-sm placeholder:text-zinc-600 leading-relaxed"
+                  className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 min-h-[120px] focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:border-rose-500 text-zinc-900 dark:text-white text-sm placeholder:text-zinc-400 dark:placeholder:text-zinc-600 leading-relaxed"
                   required
                   disabled={submitting}
                 />
@@ -422,7 +421,7 @@ export default function Reviews() {
                 <button
                   type="submit"
                   disabled={submitting || !text.trim()}
-                  className="bg-gradient-to-r from-rose-600 via-purple-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-extrabold py-3.5 px-8 rounded-xl transition-all flex items-center gap-2.5 disabled:opacity-50 shadow-xl shadow-rose-600/30 text-sm active:scale-95"
+                  className="bg-gradient-to-r from-rose-600 via-purple-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-extrabold py-3.5 px-8 rounded-xl transition-all flex items-center gap-2.5 disabled:opacity-50 shadow-md shadow-rose-600/30 text-sm active:scale-95 cursor-pointer"
                 >
                   {submitting ? (
                     <>
@@ -432,7 +431,7 @@ export default function Reviews() {
                   ) : (
                     <>
                       <MessageSquare className="w-5 h-5" />
-                      <span>{t("Submit Review (+5 Days)")}</span>
+                      <span>{t("Submit Review")}</span>
                     </>
                   )}
                 </button>
@@ -441,10 +440,10 @@ export default function Reviews() {
           )}
 
           {/* Filters Bar */}
-          <div className="flex items-center justify-between flex-wrap gap-3 border-b border-zinc-800 pb-4">
+          <div className="flex items-center justify-between flex-wrap gap-3 border-b border-zinc-200 dark:border-zinc-800 pb-4">
             <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-amber-400" />
-              <span className="text-xs font-extrabold uppercase tracking-wider text-zinc-300">
+              <Filter className="w-4 h-4 text-amber-500 dark:text-amber-400" />
+              <span className="text-xs font-extrabold uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
                 {t("Reviews")} ({filteredReviews.length})
               </span>
             </div>
@@ -458,10 +457,10 @@ export default function Reviews() {
                   <button
                     key={`filter-${option}`}
                     onClick={() => setFilterRating(option)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all shrink-0 ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all shrink-0 cursor-pointer ${
                       isActive 
                         ? 'bg-gradient-to-r from-rose-600 to-amber-600 text-white shadow-md' 
-                        : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-zinc-800'
+                        : 'bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 shadow-xs'
                     }`}
                   >
                     {label}
@@ -492,10 +491,10 @@ export default function Reviews() {
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95 }}
                         transition={{ delay: i * 0.04 }}
-                        className={`p-5 sm:p-6 rounded-2xl border transition-all shadow-lg backdrop-blur-md relative ${
+                        className={`p-5 sm:p-6 rounded-2xl border transition-all shadow-md backdrop-blur-md relative ${
                           isMyReview 
-                            ? 'bg-gradient-to-b from-rose-950/30 via-zinc-900/90 to-zinc-950/90 border-rose-500/40 shadow-rose-950/30' 
-                            : 'bg-gradient-to-b from-zinc-900/90 to-zinc-950/90 border-zinc-800/80 hover:border-zinc-700'
+                            ? 'bg-rose-50/70 dark:bg-gradient-to-b dark:from-rose-950/30 dark:via-zinc-900/90 dark:to-zinc-950/90 border-rose-300 dark:border-rose-500/40 shadow-rose-500/10' 
+                            : 'bg-white/95 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/90 border-zinc-200/80 dark:border-zinc-800/80 hover:border-zinc-300 dark:hover:border-zinc-700'
                         }`}
                       >
                         <div className="flex items-start justify-between gap-4 mb-3">
@@ -507,24 +506,24 @@ export default function Reviews() {
 
                             <div dir={language === 'ur' ? 'rtl' : 'ltr'}>
                               <div className="flex items-center gap-2 flex-wrap">
-                                <span className="font-extrabold text-white text-sm sm:text-base">
+                                <span className="font-extrabold text-zinc-900 dark:text-white text-sm sm:text-base">
                                   {review.userName}
                                 </span>
                                 {isMyReview && (
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-500/10 dark:bg-rose-500/20 text-rose-600 dark:text-rose-300 border border-rose-500/30">
                                     {t("My Review")}
                                   </span>
                                 )}
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-                                  <ShieldCheck className="w-3 h-3 text-amber-400" />
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 dark:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                                  <ShieldCheck className="w-3 h-3 text-amber-500 dark:text-amber-400" />
                                   {t("Verified Member")}
                                 </span>
                               </div>
 
-                              <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-400">
+                              <div className="flex items-center gap-2 mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
                                 {review.city && (
-                                  <span className="flex items-center gap-1 text-zinc-300 font-medium">
-                                    <MapPin className="w-3 h-3 text-rose-400" />
+                                  <span className="flex items-center gap-1 text-zinc-600 dark:text-zinc-300 font-medium">
+                                    <MapPin className="w-3 h-3 text-rose-500 dark:text-rose-400" />
                                     {review.city}
                                   </span>
                                 )}
@@ -536,20 +535,20 @@ export default function Reviews() {
 
                           {/* Rating Stars & Controls */}
                           <div className="flex items-center gap-3 shrink-0">
-                            <div className="flex items-center gap-0.5 bg-zinc-950/80 px-2.5 py-1 rounded-lg border border-zinc-800">
+                            <div className="flex items-center gap-0.5 bg-zinc-100 dark:bg-zinc-950/80 px-2.5 py-1 rounded-lg border border-zinc-200 dark:border-zinc-800">
                               {[1, 2, 3, 4, 5].map(star => (
                                 <Star 
                                   key={`rev-star-${review.id}-${star}`} 
-                                  className={`w-3.5 h-3.5 ${star <= review.rating ? 'fill-amber-400 text-amber-400' : 'text-zinc-700'}`} 
+                                  className={`w-3.5 h-3.5 ${star <= review.rating ? 'fill-amber-400 text-amber-400' : 'text-zinc-300 dark:text-zinc-700'}`} 
                                 />
                               ))}
-                              <span className="text-xs font-bold text-amber-400 ml-1 font-mono">{review.rating}</span>
+                              <span className="text-xs font-bold text-amber-600 dark:text-amber-400 ml-1 font-mono">{review.rating}</span>
                             </div>
 
                             {isAdminOrOwner && (
                               <button
                                 onClick={() => openDeleteModal(review.id)}
-                                className="text-zinc-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-rose-500/10 transition-colors"
+                                className="text-zinc-400 dark:text-zinc-500 hover:text-rose-500 dark:hover:text-rose-400 p-1.5 rounded-lg hover:bg-rose-500/10 transition-colors cursor-pointer"
                                 title={t("Delete Review")}
                               >
                                 <Trash2 className="w-4 h-4" />
@@ -559,7 +558,7 @@ export default function Reviews() {
                         </div>
 
                         {/* Review Content */}
-                        <p className="text-zinc-200 text-xs sm:text-sm leading-relaxed pl-1 sm:pl-13 font-normal" dir={language === 'ur' ? 'rtl' : 'ltr'}>
+                        <p className="text-zinc-700 dark:text-zinc-200 text-xs sm:text-sm leading-relaxed pl-1 sm:pl-13 font-normal" dir={language === 'ur' ? 'rtl' : 'ltr'}>
                           "{review.text}"
                         </p>
                       </motion.div>
@@ -569,9 +568,9 @@ export default function Reviews() {
               </AnimatePresence>
 
               {filteredReviews.length === 0 && (
-                <div className="text-center py-16 bg-zinc-900/50 rounded-3xl border border-zinc-800/80 p-8 space-y-3">
-                  <MessageSquare className="w-10 h-10 text-zinc-600 mx-auto" />
-                  <p className="text-zinc-400 text-sm font-medium">
+                <div className="text-center py-16 bg-white/80 dark:bg-zinc-900/50 rounded-3xl border border-zinc-200/80 dark:border-zinc-800/80 p-8 space-y-3">
+                  <MessageSquare className="w-10 h-10 text-zinc-400 dark:text-zinc-600 mx-auto" />
+                  <p className="text-zinc-500 dark:text-zinc-400 text-sm font-medium">
                     {t("No reviews yet. Be the first to review!")}
                   </p>
                 </div>
@@ -580,7 +579,7 @@ export default function Reviews() {
           )}
 
           {/* Support Section */}
-          <div className="mt-12 border-t border-zinc-800/80 pt-8">
+          <div className="mt-12 border-t border-zinc-200 dark:border-zinc-800/80 pt-8">
             <ContactSupportButtons />
           </div>
         </main>

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, ReactNode, useRef } from 'react';
 import { safeStorage } from '../utils/safeStorage';
+import { canUserUseAiTranslation } from '../utils/roleUtils';
 
 export type Language = 'en' | 'ur-roman' | 'ur';
 
@@ -207,13 +208,13 @@ const translations: Record<string, Record<Language, string>> = {
   'Refresh': { en: 'Refresh', 'ur-roman': 'Refresh', ur: 'ریفریش' },
   'Write a Review': { en: 'Write a Review', 'ur-roman': 'Review Likhein', ur: 'جائزہ لکھیں' },
   'Log In to Review': { en: 'Log In to Review', 'ur-roman': 'Review ke liye Log In karein', ur: 'جائزہ کے لیے لاگ ان کریں' },
-  'Log in to your account to post a review and get +10 Days free membership!': { en: 'Log in to your account to post a review and get +10 Days free membership!', 'ur-roman': 'Review dene aur muft +10 din ki membership ke liye log in karein!', ur: 'جائزہ پوسٹ کرنے اور مفت 10 دن کی ممبرشپ حاصل کرنے کے لیے لاگ ان کریں!' },
-  'Submit Review (+10 Days)': { en: 'Submit Review (+10 Days)', 'ur-roman': 'Review Bhejein (+10 Din)', ur: 'جائزہ جمع کریں (+10 دن)' },
+  'Submit Review (+10 Days)': { en: 'Submit Review', 'ur-roman': 'Review Bhejein', ur: 'جائزہ جمع کریں' },
+  'Submit Review (+5 Days)': { en: 'Submit Review', 'ur-roman': 'Review Bhejein', ur: 'جائزہ جمع کریں' },
   'Your City (Optional)': { en: 'Your City (Optional)', 'ur-roman': 'Aapka Shahr (Optional)', ur: 'آپ کا شہر (اختیاری)' },
   'Verified Member': { en: 'Verified Member', 'ur-roman': 'Tasdeeq Shuda Member', ur: 'تصدیق شدہ ممبر' },
   'Overall Rating': { en: 'Overall Rating', 'ur-roman': 'Kull Rating', ur: 'مجموعی درجہ بندی' },
   'Reviews & Ratings': { en: 'Reviews & Ratings', 'ur-roman': 'Reviews & Ratings', ur: 'جائزے اور درجہ بندی' },
-  'Share your honest experience and earn 10 days of free Basic access!': { en: 'Share your honest experience and earn 10 days of free Basic access!', 'ur-roman': 'Apna sacha tajurba share karein aur 10 din ki muft Basic rasai haasil karein!', ur: 'اپنا سچا تجربہ شیئر کریں اور 10 دن کی مفت Basic رسائی حاصل کریں!' },
+  'Share your honest experience with the community!': { en: 'Share your honest experience with the community!', 'ur-roman': 'Community ke sath apna sacha tajurba share karein!', ur: 'کمیونٹی کے ساتھ اپنا سچا تجربہ شیئر کریں!' },
 
 
   'Share your experience...': { en: 'Share your experience...', 'ur-roman': 'Apna tajurba share karein...', ur: 'اپنا تجربہ شیئر کریں...' },
@@ -697,10 +698,22 @@ const translations: Record<string, Record<Language, string>> = {
   'No posters found in gallery.': { en: 'No posters found in gallery.', 'ur-roman': 'Gallery mein koi poster nahi mila.', ur: 'گیلری میں کوئی پوسٹر نہیں ملا۔' },
   'Poster Selected': { en: 'Poster selected!', 'ur-roman': 'Poster muntakhib ho gaya!', ur: 'پوسٹر منتخب ہو گیا!' },
   'View on TMDB': { en: 'View on TMDB', 'ur-roman': 'TMDB par Dekhein', ur: 'TMDB پر دیکھیں' },
-  'AI Translated': { en: 'AI Translated', 'ur-roman': 'AI se Tarjuma Shuda', ur: 'AI سے ترجمہ شدہ' },
-  'Show AI Translation': { en: 'Show AI Translation', 'ur-roman': 'AI Tarjuma Dekhein', ur: 'AI ترجمہ دیکھیں' },
+  'AI Translated': { en: 'Translated', 'ur-roman': 'Tarjuma Shuda', ur: 'ترجمہ شدہ' },
+  'Translated': { en: 'Translated', 'ur-roman': 'Tarjuma Shuda', ur: 'ترجمہ شدہ' },
+  'Buy VIP to Translate': { en: 'Buy VIP to Translate', 'ur-roman': 'Translation ke liye VIP Khareedein', ur: 'ترجمہ کے لیے VIP خریدیں' },
+  'Buy VIP to AI Translate': { en: 'Buy VIP to Translate', 'ur-roman': 'Translation ke liye VIP Khareedein', ur: 'ترجمہ کے لیے VIP خریدیں' },
+  'Titles & Description Translation': { en: 'Titles & Description Translation', 'ur-roman': 'Titles aur Description ki Translation', ur: 'ٹائٹلز اور تفصیل کا ترجمہ' },
+  'AI Translation of Titles & Description': { en: 'Titles & Description Translation', 'ur-roman': 'Titles aur Description ki Translation', ur: 'ٹائٹلز اور تفصیل کا ترجمہ' },
+  'High Priority 24/7 WhatsApp Support': { en: 'High Priority 24/7 WhatsApp Support', 'ur-roman': 'High Priority 24/7 WhatsApp Support', ur: 'اعلیٰ ترجیحی 24/7 واٹس ایپ سپورٹ' },
+  'AI translation for titles & synopsis is reserved for VIP members.': { en: 'Translation for titles & synopsis is reserved for VIP members.', 'ur-roman': 'Titles aur synopsis ki translation sirf VIP members ke liye hai.', ur: 'ٹائٹلز اور خلاصے کا ترجمہ صرف VIP ممبران کے لیے مخصوص ہے۔' },
+  'AI translation of titles, description and synopsis is an exclusive VIP feature.': { en: 'Translation of titles, description and synopsis is an exclusive VIP feature.', 'ur-roman': 'Titles, description aur synopsis ki translation VIP ka khasoosi feature hai.', ur: 'ٹائٹلز، تفصیل اور خلاصے کا ترجمہ صرف VIP کا خصوصی فیچر ہے۔' },
+  'View Plans': { en: 'View Plans', 'ur-roman': 'Plans Dekhein', ur: 'پلانز دیکھیں' },
+  'Upgrade': { en: 'Upgrade', 'ur-roman': 'Upgrade Karein', ur: 'اپ گریڈ کریں' },
+  'Show Translation': { en: 'Show Translation', 'ur-roman': 'Tarjuma Dekhein', ur: 'ترجمہ دیکھیں' },
+  'Show AI Translation': { en: 'Show Translation', 'ur-roman': 'Tarjuma Dekhein', ur: 'ترجمہ دیکھیں' },
   'Show Original': { en: 'Show Original', 'ur-roman': 'Asli Dekhein', ur: 'اصل دیکھیں' },
-  'Translating synopsis to your selected language with AI...': { en: 'Translating synopsis to your selected language with AI...', 'ur-roman': 'AI ke zariye khulasa ka tarjuma kiya ja raha hai...', ur: 'AI کے ذریعے خلاصے کا ترجمہ کیا جا رہا ہے...' },
+  'Translating synopsis to your selected language...': { en: 'Translating synopsis to your selected language...', 'ur-roman': 'Khulasa ka tarjuma kiya ja raha hai...', ur: 'خلاصے کا ترجمہ کیا جا رہا ہے...' },
+  'Translating synopsis to your selected language with AI...': { en: 'Translating synopsis to your selected language...', 'ur-roman': 'Khulasa ka tarjuma kiya ja raha hai...', ur: 'خلاصے کا ترجمہ کیا جا رہا ہے...' },
   'No overview available for this upcoming title.': { en: 'No overview available for this upcoming title.', 'ur-roman': 'Is title ka koi khulasa dastiyab nahi hai.', ur: 'اس آنے والے عنوان کے لیے کوئی خلاصہ دستیاب نہیں ہے۔' },
   'Official Trailer': { en: 'Official Trailer', 'ur-roman': 'Official Trailer', ur: 'آفیشل ٹریلر' },
   'Close Trailer': { en: 'Close Trailer', 'ur-roman': 'Trailer Band Karein', ur: 'ٹریلر بند کریں' },
@@ -776,7 +789,8 @@ const translations: Record<string, Record<Language, string>> = {
   'You already have a Pending Membership Order. Send payment screenshot or cancel it to place a new order.': { en: 'You already have a Pending Membership Order. Send payment screenshot or cancel it to place a new order.', 'ur-roman': 'Aap ka ek membership order pehle se pending hai. Payment screenshot bhejein ya naye order ke liye cancel karein.', ur: 'آپ کا ایک ممبرشپ آرڈر پہلے ہی زیر التواء ہے۔ ادائیگی کا اسکرین شاٹ بھیجیں یا نیا آرڈر دینے کے لیے اسے منسوخ کریں۔' },
   'Membership Plans': { en: 'Membership Plans', 'ur-roman': 'Membership Plans', ur: 'ممبرشپ پلانز' },
   'My Reviews': { en: 'My Reviews', 'ur-roman': 'Mere Reviews', ur: 'میرے جائزے' },
-  'You have not submitted a review yet. Please write a review first to get +10 Days free Basic access!': { en: 'You have not submitted a review yet. Please write a review first to get +10 Days free Basic access!', 'ur-roman': 'Aap ne abhi tak koi review nahi diya. 10 din ka free access paane ke liye review dein!', ur: 'آپ نے ابھی تک کوئی جائزہ جمع نہیں کرایا ہے۔ مفت 10 دن کی Basic رسائی حاصل کرنے کے لیے پہلے جائزہ لکھیں!' },
+  'You have not submitted a review yet. Please write a review to share your feedback!': { en: 'You have not submitted a review yet. Please write a review to share your feedback!', 'ur-roman': 'Aap ne abhi tak koi review nahi diya. Apni rai share karne ke liye review dein!', ur: 'آپ نے ابھی تک کوئی جائزہ جمع نہیں کرایا ہے۔ اپنی رائے شیئر کرنے کے لیے جائزہ لکھیں!' },
+  'You have not submitted a review yet. Please write a review first to get +10 Days free Basic access!': { en: 'You have not submitted a review yet. Please write a review to share your feedback!', 'ur-roman': 'Aap ne abhi tak koi review nahi diya. Apni rai share karne ke liye review dein!', ur: 'آپ نے ابھی تک کوئی جائزہ جمع نہیں کرایا ہے۔ اپنی رائے شیئر کرنے کے لیے جائزہ لکھیں!' },
   'Per Friend': { en: 'Per Friend', 'ur-roman': 'Har Dost Par', ur: 'فی دوست' },
   'Copy Code': { en: 'Copy Code', 'ur-roman': 'Code Copy Karein', ur: 'کوڈ کاپی کریں' },
   'Claimed (+10 Days)': { en: 'Claimed (+10 Days)', 'ur-roman': 'Claim Kar Liya (+10 Din)', ur: 'حاصل کر لیا (+10 دن)' },
@@ -981,6 +995,20 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
   const translate = async (text: string): Promise<string> => {
     if (language === 'en' || !text) return text;
     
+    // Restrict AI translation to admin, owner & VIP users only
+    let canAiTranslate = false;
+    try {
+      const cached = safeStorage.getItem('profile_cache') || (typeof window !== 'undefined' ? window.localStorage.getItem('profile_cache') : null);
+      if (cached) {
+        const prof = JSON.parse(cached);
+        canAiTranslate = canUserUseAiTranslation(prof, { email: prof?.email });
+      }
+    } catch (e) {}
+
+    if (!canAiTranslate) {
+      return text;
+    }
+    
     // Skip translating generic episode titles
     if (/^episode\s+\d+$/i.test(text.trim())) return text;
     
@@ -1021,6 +1049,20 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
 
   const translateMany = async (texts: string[]): Promise<string[]> => {
     if (language === 'en' || !texts || texts.length === 0) return texts;
+    
+    // Restrict AI translation to admin, owner & VIP users only
+    let canAiTranslate = false;
+    try {
+      const cached = safeStorage.getItem('profile_cache') || (typeof window !== 'undefined' ? window.localStorage.getItem('profile_cache') : null);
+      if (cached) {
+        const prof = JSON.parse(cached);
+        canAiTranslate = canUserUseAiTranslation(prof, { email: prof?.email });
+      }
+    } catch (e) {}
+
+    if (!canAiTranslate) {
+      return texts;
+    }
     
     const promises = texts.map(text => translate(text));
     

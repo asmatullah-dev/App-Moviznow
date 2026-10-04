@@ -34,8 +34,7 @@ export function getStaticContentById(id: string): Content | null {
   if (!id) return null;
   const raw = staticItemMap.get(id);
   if (!raw) return null;
-  const chunkId = raw.chunkId || (raw.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
-  return expandContent({ ...raw, id }, chunkId);
+  return expandContent({ ...raw, id });
 }
 
 // In-memory reference to avoid repeatedly deserializing JSON on re-renders or context accesses
@@ -140,14 +139,9 @@ export function getCachedContentData(includeStatic: boolean = true): {
   // 3. Cache empty on first launch: build in-memory list directly from unifiedData (0ms freeze)
   const items = staticContentData as StaticContentItem[];
   const itemMap: Record<string, Content> = {};
-  const chunkMap: Record<string, Record<string, any>> = {};
 
   for (const item of items) {
-    const chunkId = item.chunkId || (item.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
-    itemMap[item.id] = expandContent({ ...item, id: item.id }, chunkId);
-
-    if (!chunkMap[chunkId]) chunkMap[chunkId] = {};
-    chunkMap[chunkId][item.id] = item;
+    itemMap[item.id] = expandContent({ ...item, id: item.id });
   }
 
   const initialList = Object.values(itemMap).sort((a, b) => (b.order ?? 0) - (a.order ?? 0));
@@ -158,16 +152,10 @@ export function getCachedContentData(includeStatic: boolean = true): {
   setTimeout(() => {
     try {
       safeStorage.setItem('content_cache', JSON.stringify(initialList));
-      for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
-        safeStorage.setItem('static_content_chunk_' + chunkId, JSON.stringify(itemsObj));
-      }
       safeStorage.setItem('static_genres_cache', JSON.stringify(getStaticExportMetadata().genres));
       safeStorage.setItem('static_languages_cache', JSON.stringify(getStaticExportMetadata().languages));
       safeStorage.setItem('static_qualities_cache', JSON.stringify(getStaticExportMetadata().qualities));
       safeStorage.setItem('static_collections_cache', JSON.stringify(getStaticExportCollections()));
-      if (staticCollectionsData.items) {
-        safeStorage.setItem('static_collection_chunk_collection_chunk_0', JSON.stringify(staticCollectionsData.items));
-      }
     } catch (e) {}
   }, 100);
 
@@ -301,10 +289,8 @@ export function resetCollectionsFromStaticJson(markPendingSync: boolean = false)
     // 4. Save new collections to cache
     safeStorage.setItem('collections_cache', collJson);
     safeStorage.setItem('static_collections_cache', collJson);
-    safeStorage.setItem('admin_collections_cache', collJson);
 
     safeStorage.setItem('collection_chunk_0', chunkJson);
-    safeStorage.setItem('admin_collection_chunk_collection_chunk_0', chunkJson);
     safeStorage.setItem('static_collection_chunk_collection_chunk_0', chunkJson);
 
     if (markPendingSync) {
@@ -483,8 +469,7 @@ export function mergeStaticExportDataSafely(): {
     let preserved = 0;
 
     for (const jsonItem of jsonItems) {
-      const chunkId = jsonItem.chunkId || (jsonItem.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
-      const expandedJson = expandContent({ ...jsonItem, id: jsonItem.id }, chunkId);
+      const expandedJson = expandContent({ ...jsonItem, id: jsonItem.id });
 
       if (!existingMap.has(jsonItem.id)) {
         existingMap.set(jsonItem.id, expandedJson);
@@ -532,7 +517,6 @@ export function mergeStaticExportDataSafely(): {
         const mergedCollJson = JSON.stringify(mergedCollections);
         safeStorage.setItem('static_collections_cache', mergedCollJson);
         safeStorage.setItem('collections_cache', mergedCollJson);
-        safeStorage.setItem('admin_collections_cache', mergedCollJson);
 
         const collChunkItems: Record<string, any> = {};
         for (const col of mergedCollections) {
@@ -540,22 +524,11 @@ export function mergeStaticExportDataSafely(): {
         }
         const collChunkJson = JSON.stringify(collChunkItems);
         safeStorage.setItem('collection_chunk_0', collChunkJson);
-        safeStorage.setItem('admin_collection_chunk_collection_chunk_0', collChunkJson);
         safeStorage.setItem('static_collection_chunk_collection_chunk_0', collChunkJson);
         
         const collUpd = staticCollectionsData?.updatedAt;
         const verTime = collUpd ? parseVersionTime(collUpd) : Date.now();
         safeStorage.setItem('cached_json_collections_version', verTime.toString());
-
-        const chunkMap: Record<string, Record<string, any>> = {};
-        for (const item of jsonItems) {
-          const chunkId = item.chunkId || (item.type === 'movie' ? 'movie_chunk_0' : 'series_chunk_0');
-          if (!chunkMap[chunkId]) chunkMap[chunkId] = {};
-          chunkMap[chunkId][item.id] = item;
-        }
-        for (const [chunkId, itemsObj] of Object.entries(chunkMap)) {
-          safeStorage.setItem('static_content_chunk_' + chunkId, JSON.stringify(itemsObj));
-        }
 
         const currentVer = getStaticExportVersion();
         safeStorage.setItem('cached_json_catalog_version', currentVer);

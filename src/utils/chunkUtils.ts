@@ -702,7 +702,7 @@ export function findLocalChunkForContent(contentId: string): string | null {
   }
 
   // Check known active chunk keys in safeStorage memory
-  const prefixes = ['content_chunk_', 'static_content_chunk_', 'admin_content_chunk_'];
+  const prefixes = ['content_chunk_', 'admin_content_chunk_'];
   for (let i = 0; i < 15; i++) {
     for (const prefix of prefixes) {
       const mStr = safeStorage.getItem(`${prefix}movie_chunk_${i}`);

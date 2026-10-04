@@ -43,7 +43,9 @@ export default function ConfirmModal({
     setIsConfirming(true);
     try {
       await onConfirm();
-      onCancel();
+      if (isOpen) {
+        onCancel();
+      }
     } finally {
       setIsConfirming(false);
     }

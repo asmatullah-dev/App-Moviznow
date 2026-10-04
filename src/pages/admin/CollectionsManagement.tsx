@@ -130,12 +130,12 @@ export default function CollectionsManagement() {
   const handleReloadFromJson = async () => {
     setIsReloading(true);
     try {
-      const reloaded = await reloadCollectionsFromStaticJson(true);
-      setStatusMessage(`Successfully loaded ${reloaded.length} collections from JSON export and purged outdated cache.`);
+      const reloaded = await reloadCollectionsFromStaticJson(false);
+      setStatusMessage(`Successfully refreshed ${reloaded.length} collections.`);
       setTimeout(() => setStatusMessage(null), 5000);
     } catch (e) {
-      console.error('Failed to reload collections from JSON:', e);
-      setStatusMessage('Error loading collections from JSON export.');
+      console.error('Failed to reload collections:', e);
+      setStatusMessage('Error refreshing collections.');
     } finally {
       setIsReloading(false);
     }
@@ -166,11 +166,11 @@ export default function CollectionsManagement() {
             <button
               onClick={handleReloadFromJson}
               disabled={isReloading}
-              title="Purge old collection cache and reload all collections from static catalog JSON"
+              title="Refresh collections list"
               className="bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all active:scale-95 text-xs font-semibold border border-zinc-200 dark:border-zinc-700 disabled:opacity-50"
             >
               <RotateCcw className={`w-3.5 h-3.5 ${isReloading ? 'animate-spin text-purple-500' : ''}`} />
-              <span className="hidden sm:inline">Reset from JSON</span>
+              <span className="hidden sm:inline">Refresh Collections</span>
             </button>
 
             {hasPendingChanges && (

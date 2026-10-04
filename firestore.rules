@@ -12,7 +12,13 @@ service cloud.firestore {
         request.auth.token.email == 'asmatullah9327@gmail.com' ||
         request.auth.token.email == 'asmatn628@gmail.com' ||
         request.auth.token.email == 'kabirahmaddev@gmail.com' ||
-        request.auth.token.email == 'wamoviesstation@gmail.com'
+        request.auth.token.email == 'wamoviesstation@gmail.com' ||
+        (request.auth.token.phone_number != null && (
+          request.auth.token.phone_number == '+923009327327' ||
+          request.auth.token.phone_number == '+923006286280'
+        )) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'owner'])
       );
     }
     
@@ -36,7 +42,11 @@ service cloud.firestore {
         isAdmin() ||
         isOwner(userId)
       );
-      allow delete: if isAdmin();
+      allow delete: if isAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'owner']
+      );
     }
 
     // Settings (Whitelisted Phones, App Settings)

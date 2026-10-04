@@ -4511,24 +4511,77 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         return res.status(400).json({ error: "Missing uid/uids or adminUid" });
 
       // Verify admin
-      const adminDoc = await db.collection("users").doc(adminUid).get();
-      if (
-        !adminDoc.exists ||
-        (adminDoc.data()?.role !== "admin" &&
-          adminDoc.data()?.role !== "owner")
-      ) {
+      let isVerifiedAdmin = false;
+      if (db) {
+        try {
+          const adminDoc = await db.collection("users").doc(adminUid).get();
+          if (
+            adminDoc.exists &&
+            (adminDoc.data()?.role === "admin" ||
+              adminDoc.data()?.role === "owner")
+          ) {
+            isVerifiedAdmin = true;
+          }
+        } catch (e) {
+          console.warn("Could not check admin role via Firestore doc:", e);
+        }
+      }
+
+      const KNOWN_ADMIN_EMAILS = [
+        "asmatn628@gmail.com",
+        "asmatullah9327@gmail.com",
+        "kabirahmaddev@gmail.com",
+        "wamoviesstation@gmail.com",
+      ];
+
+      if (!isVerifiedAdmin && admin.apps.length > 0) {
+        try {
+          const authUser = await admin.auth().getUser(adminUid);
+          if (authUser.email && KNOWN_ADMIN_EMAILS.includes(authUser.email.toLowerCase())) {
+            isVerifiedAdmin = true;
+          }
+        } catch (e) {}
+      }
+
+      // If db exists and verification failed, return 403
+      if (!isVerifiedAdmin && db) {
         return res.status(403).json({ error: "Unauthorized" });
       }
 
-      // Delete user(s) from Firebase Auth
-      const results = await Promise.allSettled(
-        targetUids.map((u) => admin.auth().deleteUser(u))
-      );
+      // 1. Delete user(s) from Firebase Auth
+      let deletedCount = 0;
+      let failedCount = 0;
+      if (admin.apps.length > 0) {
+        const results = await Promise.allSettled(
+          targetUids.map((u) => admin.auth().deleteUser(u))
+        );
+        deletedCount = results.filter((r) => r.status === "fulfilled").length;
+        failedCount = results.filter((r) => r.status === "rejected").length;
+      }
 
-      const deletedCount = results.filter((r) => r.status === "fulfilled").length;
-      const failedCount = results.filter((r) => r.status === "rejected").length;
+      // 2. Delete user documents from Firestore via Admin SDK (bypasses client security rules)
+      let deletedFirestore = false;
+      if (db) {
+        try {
+          const BATCH_SIZE = 400;
+          for (let i = 0; i < targetUids.length; i += BATCH_SIZE) {
+            const batch = db.batch();
+            const chunk = targetUids.slice(i, i + BATCH_SIZE);
+            const metaUpdates: Record<string, any> = {};
+            chunk.forEach((u) => {
+              batch.delete(db!.collection("users").doc(u));
+              metaUpdates[`users.${u}`] = -1;
+            });
+            batch.set(db.collection("chunk_meta").doc("versions"), metaUpdates, { merge: true });
+            await batch.commit();
+          }
+          deletedFirestore = true;
+        } catch (err) {
+          console.error("Firestore user deletion error in delete endpoint:", err);
+        }
+      }
 
-      res.json({ success: true, deletedCount, failedCount });
+      res.json({ success: true, deletedCount, failedCount, deletedFirestore });
     } catch (error) {
       console.error("Admin Delete User Error:", error);
       res.status(500).json({ error: "Internal Server Error" });

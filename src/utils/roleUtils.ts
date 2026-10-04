@@ -97,3 +97,34 @@ export function canUserStreamContent(profile?: UserProfile | null, content?: Con
     !(isSelectedContent || isContentSelectedOnly)
   );
 }
+
+/**
+ * Checks if the user is authorized to use AI translation features.
+ * AI translation is strictly restricted to: admin, owner & VIP users only.
+ * Users, Basic Users, Guests, Trials, etc. are NOT allowed AI translation.
+ */
+export function canUserUseAiTranslation(profile?: UserProfile | null, user?: { email?: string | null } | null): boolean {
+  if (!profile && !user) return false;
+  if (isWhitelistedAdminEmail(user?.email || profile?.email)) return true;
+  if (!profile) return false;
+
+  // Admin, Owner & Management staff
+  if (
+    profile.role === 'owner' || 
+    profile.role === 'admin' || 
+    profile.role === 'manager' || 
+    profile.role === 'content_manager' || 
+    profile.role === 'user_manager'
+  ) {
+    return true;
+  }
+
+  // Active VIP users only (must be active or default status, not expired/suspended/deleted)
+  if (profile.role === 'vip' && (profile.status === 'active' || !profile.status)) {
+    return true;
+  }
+
+  // Explicitly deny for Users, Basic Users, Guests, Trials, or any other roles
+  return false;
+}
+
