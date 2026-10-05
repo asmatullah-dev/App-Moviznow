@@ -307,10 +307,10 @@ export default function Membership() {
 
                 {/* Comparison Table */}
                 <div className="overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                  <table className="w-full text-left text-xs border-collapse">
+                  <table className="w-full text-start text-xs border-collapse">
                     <thead>
                       <tr className="bg-zinc-50 dark:bg-zinc-950/90 border-b border-zinc-200 dark:border-zinc-800">
-                        <th className="p-3 sm:p-3.5 font-bold text-zinc-600 dark:text-zinc-400">{t('Features')}</th>
+                        <th className="p-3 sm:p-3.5 font-bold text-zinc-600 dark:text-zinc-400 text-start">{t('Features')}</th>
                         <th className="p-2.5 sm:p-3 font-black text-amber-600 dark:text-amber-400 bg-amber-500/10 dark:bg-amber-950/30 text-center w-20 sm:w-28 whitespace-nowrap">
                           <div className="flex items-center justify-center gap-1">
                             <Crown className="w-3.5 h-3.5" />
@@ -327,7 +327,7 @@ export default function Membership() {
                     </thead>
                     <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800/60 font-medium">
                       <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300">{t('All Movies & Series')}</td>
+                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300 text-start">{t('All Movies & Series')}</td>
                         <td className="p-2.5 sm:p-3 text-center bg-amber-500/5 dark:bg-amber-950/15">
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mx-auto" />
                         </td>
@@ -336,7 +336,7 @@ export default function Membership() {
                         </td>
                       </tr>
                       <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300">{t('Full HD 1080p Streaming')}</td>
+                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300 text-start">{t('Full HD 1080p Streaming')}</td>
                         <td className="p-2.5 sm:p-3 text-center bg-amber-500/5 dark:bg-amber-950/15">
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mx-auto" />
                         </td>
@@ -345,7 +345,7 @@ export default function Membership() {
                         </td>
                       </tr>
                       <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300">{t('Instant AI Auto-Approval')}</td>
+                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300 text-start">{t('Instant AI Auto-Approval')}</td>
                         <td className="p-2.5 sm:p-3 text-center bg-amber-500/5 dark:bg-amber-950/15">
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mx-auto" />
                         </td>
@@ -354,16 +354,7 @@ export default function Membership() {
                         </td>
                       </tr>
                       <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300 font-bold">{t('Titles & Description Translation')}</td>
-                        <td className="p-2.5 sm:p-3 text-center bg-amber-500/5 dark:bg-amber-950/15">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mx-auto" />
-                        </td>
-                        <td className="p-2.5 sm:p-3 text-center bg-sky-500/5 dark:bg-sky-950/15">
-                          <X className="w-4 h-4 text-zinc-400 dark:text-zinc-500 mx-auto" />
-                        </td>
-                      </tr>
-                      <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300 font-bold">{t('Free Demanding')}</td>
+                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300 font-bold text-start">{t('Titles & Description Translation')}</td>
                         <td className="p-2.5 sm:p-3 text-center bg-amber-500/5 dark:bg-amber-950/15">
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mx-auto" />
                         </td>
@@ -372,7 +363,7 @@ export default function Membership() {
                         </td>
                       </tr>
                       <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300 font-bold">{t('Offline Access')}</td>
+                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300 font-bold text-start">{t('Free Demanding')}</td>
                         <td className="p-2.5 sm:p-3 text-center bg-amber-500/5 dark:bg-amber-950/15">
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mx-auto" />
                         </td>
@@ -381,7 +372,16 @@ export default function Membership() {
                         </td>
                       </tr>
                       <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300">{t('High Priority 24/7 WhatsApp Support')}</td>
+                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300 font-bold text-start">{t('Offline Access')}</td>
+                        <td className="p-2.5 sm:p-3 text-center bg-amber-500/5 dark:bg-amber-950/15">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mx-auto" />
+                        </td>
+                        <td className="p-2.5 sm:p-3 text-center bg-sky-500/5 dark:bg-sky-950/15">
+                          <X className="w-4 h-4 text-zinc-400 dark:text-zinc-500 mx-auto" />
+                        </td>
+                      </tr>
+                      <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
+                        <td className="p-3 sm:p-3.5 text-zinc-700 dark:text-zinc-300 text-start">{t('High Priority 24/7 WhatsApp Support')}</td>
                         <td className="p-2.5 sm:p-3 text-center bg-amber-500/5 dark:bg-amber-950/15">
                           <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mx-auto" />
                         </td>

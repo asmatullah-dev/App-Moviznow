@@ -432,8 +432,10 @@ export function applyPreferencesToContent(
   }
 
   // OTT Platform
-  let finalOttPlatform = baseContent.ottPlatform || null;
+  let finalOttPlatform = baseContent.ottPlatform || (baseContent as any).ott_platform || null;
   if (p.ottPlatform && tmdbData?.ottPlatform) {
+    finalOttPlatform = tmdbData.ottPlatform;
+  } else if (!finalOttPlatform && tmdbData?.ottPlatform) {
     finalOttPlatform = tmdbData.ottPlatform;
   }
 

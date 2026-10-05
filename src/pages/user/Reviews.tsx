@@ -234,7 +234,7 @@ export default function Reviews() {
             <div className="flex flex-col md:flex-row items-center justify-between gap-8 relative z-10">
               
               {/* Left Column: Title & Subtitle */}
-              <div className="space-y-3 text-center md:text-left flex-1" dir={language === 'ur' ? 'rtl' : 'ltr'}>
+              <div className="space-y-3 text-center md:text-left flex-1">
                 <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-gradient-to-r from-amber-500/20 to-rose-500/20 border border-amber-500/30 text-amber-600 dark:text-amber-300">
                   <Sparkles className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" />
                   <span>{t("Reviews & Ratings")}</span>
@@ -304,7 +304,7 @@ export default function Reviews() {
           {/* Not Logged In Banner */}
           {!isLoggedIn && !authLoading && !authProfileLoading && (
             <div className="bg-rose-50/80 dark:bg-gradient-to-r dark:from-rose-950/60 dark:via-purple-950/50 dark:to-amber-950/60 border border-rose-200 dark:border-rose-500/30 rounded-2xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-md dark:shadow-xl">
-              <div className="space-y-1 text-center sm:text-left" dir={language === 'ur' ? 'rtl' : 'ltr'}>
+              <div className="space-y-1 text-center sm:text-left">
                 <div className="flex items-center justify-center sm:justify-start gap-2">
                   <MessageSquare className="w-5 h-5 text-rose-500 dark:text-rose-400" />
                   <h3 className="font-extrabold text-base sm:text-lg text-zinc-900 dark:text-white">{t("Write a Review")}</h3>
@@ -504,7 +504,7 @@ export default function Reviews() {
                               {initials}
                             </div>
 
-                            <div dir={language === 'ur' ? 'rtl' : 'ltr'}>
+                            <div>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="font-extrabold text-zinc-900 dark:text-white text-sm sm:text-base">
                                   {review.userName}
@@ -558,7 +558,7 @@ export default function Reviews() {
                         </div>
 
                         {/* Review Content */}
-                        <p className="text-zinc-700 dark:text-zinc-200 text-xs sm:text-sm leading-relaxed pl-1 sm:pl-13 font-normal" dir={language === 'ur' ? 'rtl' : 'ltr'}>
+                        <p className="text-zinc-700 dark:text-zinc-200 text-xs sm:text-sm leading-relaxed pl-1 sm:pl-13 font-normal">
                           "{review.text}"
                         </p>
                       </motion.div>

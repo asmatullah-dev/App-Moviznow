@@ -164,6 +164,7 @@ function AppLanguageEffect() {
   const { language } = useLanguage();
   useEffect(() => {
     document.documentElement.lang = language;
+    document.documentElement.dir = 'ltr';
     if (language === 'ur') {
       document.body.classList.add('urdu-font');
     } else {

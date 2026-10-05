@@ -579,11 +579,14 @@ export default function UserManagement() {
   const changedToExpiredUidsRef = useRef<Set<string>>(new Set());
   const prevUsersMapRef = useRef<Map<string, string>>(new Map());
   const isInitialMountCheckDoneRef = useRef(false);
+  const isSendingImmediateExpiryRef = useRef<boolean>(false);
+  const processedImmediateExpiredUidsRef = useRef<Set<string>>(new Set());
 
   // Helper to send expiry notifications immediately and flag the users
   const sendImmediateExpiryNotifications = useCallback(async (targetUids: string[], userList?: UserProfile[]) => {
     if (!targetUids || targetUids.length === 0 || !profile?.uid) return;
     if (profile.role !== 'admin' && profile.role !== 'owner') return;
+    if (isSendingImmediateExpiryRef.current) return;
 
     const sourceUsers = userList && userList.length > 0 ? userList : allUsers;
     const todayStr = new Date().toISOString().split('T')[0];
@@ -598,6 +601,7 @@ export default function UserManagement() {
 
     if (validUids.length === 0) return;
 
+    isSendingImmediateExpiryRef.current = true;
     console.log(`[UserManagement] Triggering immediate expiry email & push notifications for ${validUids.length} user(s):`, validUids);
 
     // 1. Immediately record in safeStorage / localStorage to prevent repeat triggers and avoid spamming Firestore
@@ -641,6 +645,8 @@ export default function UserManagement() {
       finalizeUserChanges(true).catch(err => console.warn("Failed to persist expiry flags on Firestore:", err));
     } catch (err) {
       console.error("[UserManagement] Error triggering immediate expiry notification:", err);
+    } finally {
+      isSendingImmediateExpiryRef.current = false;
     }
   }, [profile?.uid, profile?.role, allUsers, updateMultipleUserFields, finalizeUserChanges, autoSyncUserToContacts]);
 
@@ -770,9 +776,10 @@ export default function UserManagement() {
 
     allUsers.forEach(u => {
       if (u && u.uid && u.role !== 'admin' && u.role !== 'owner') {
+        const isAlreadyProcessed = processedImmediateExpiredUidsRef.current.has(u.uid);
         const prevStatus = prevUsersMapRef.current.get(u.uid);
         const isNowExpired = u.status === 'expired' || isUserExpired(u.expiryDate);
-        if (prevStatus !== undefined && prevStatus !== 'expired' && isNowExpired) {
+        if (!isAlreadyProcessed && prevStatus !== undefined && prevStatus !== 'expired' && isNowExpired) {
           // Trigger automatic contact sync with Exd prefix (or add to pending queue)
           if (u.phone) {
             autoSyncUserToContacts({ ...u, status: 'expired' }, false);
@@ -781,10 +788,12 @@ export default function UserManagement() {
           // Only send if it has less than 5 days of expiry and not already sent recently
           if (isExpiredWithinDays(u.expiryDate, 5) && !isNoticeSentRecently(u.uid, u.expiryDate, 5)) {
             changedToExpiredUidsRef.current.add(u.uid);
+            processedImmediateExpiredUidsRef.current.add(u.uid);
             immediateExpiredUids.push(u.uid);
           }
         }
-        prevUsersMapRef.current.set(u.uid, u.status || '');
+        const effectiveStatus = isNowExpired ? 'expired' : (u.status || 'active');
+        prevUsersMapRef.current.set(u.uid, effectiveStatus);
       }
     });
 
@@ -1332,8 +1341,8 @@ export default function UserManagement() {
         const batch = writeBatch(db);
         // 1. Delete user document
         batch.delete(doc(db, 'users', currentDeleteConfirm));
-        // Use field path dot notation to prevent overwriting other users in chunk_meta.versions
-        batch.set(doc(db, 'chunk_meta', 'versions'), { [`users.${currentDeleteConfirm}`]: -1 }, { merge: true });
+        // Put deleted user ID inside users map field in chunk_meta.versions
+        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentDeleteConfirm]: -1 } }, { merge: true });
         await batch.commit();
       }
 
@@ -1445,10 +1454,10 @@ export default function UserManagement() {
 
           chunkUids.forEach(uid => {
             batch.delete(doc(db, 'users', uid));
-            versionUsersUpdate[`users.${uid}`] = -1;
+            versionUsersUpdate[uid] = -1;
           });
 
-          batch.set(doc(db, 'chunk_meta', 'versions'), versionUsersUpdate, { merge: true });
+          batch.set(doc(db, 'chunk_meta', 'versions'), { users: versionUsersUpdate }, { merge: true });
           await batch.commit();
         }
       }

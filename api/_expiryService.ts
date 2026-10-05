@@ -530,7 +530,8 @@ export async function checkAndSendExpiryNotifications(targetUserIds?: string | s
       return await processUserDocs(docs, firestore, emailConfig, result, true);
     }
 
-    const usersSnap = await firestore.collection("users").get();
+    // If no target UIDs, query only expired status users (avoid reading all active users!)
+    const usersSnap = await firestore.collection("users").where("status", "==", "expired").limit(200).get();
     return await processUserDocs(usersSnap.docs, firestore, emailConfig, result, false);
   } catch (err: any) {
     console.error("[Expiry Service Error]:", err);

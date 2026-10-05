@@ -148,7 +148,9 @@ export const standardizePhone = (phone: string) => {
 const getInitialProfileFromStorage = (): UserProfile | null => {
   if (typeof window === "undefined") return null;
   try {
-    const raw = safeStorage.getItem("profile_cache") || window.localStorage.getItem("profile_cache");
+    const raw = safeStorage.getItem("profile_cache") || 
+      window.localStorage.getItem("profile_cache") || 
+      window.localStorage.getItem("last_known_logged_in_user");
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (parsed && (parsed.uid || parsed.email || parsed.role)) {
@@ -178,6 +180,7 @@ const persistProfileCache = (p: UserProfile | null) => {
       if (typeof window !== "undefined") {
         window.localStorage.setItem("profile_cache", json);
         window.localStorage.setItem("profile_cache_timestamp", Date.now().toString());
+        window.localStorage.setItem("last_known_logged_in_user", json);
       }
     } catch (e) {}
   }
@@ -598,8 +601,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const meta = await getChunkMeta(force);
             const chunkUsersMeta = meta.users || {};
             isChunkMetaChecked = true;
-            if (currentUser.uid in chunkUsersMeta) {
-              serverVersion = chunkUsersMeta[currentUser.uid];
+            // Check both standard users map and any legacy dot-notated field
+            if ((currentUser.uid in chunkUsersMeta) || (`users.${currentUser.uid}` in meta)) {
+              serverVersion = chunkUsersMeta[currentUser.uid] ?? (meta as any)[`users.${currentUser.uid}`];
               const verObj = typeof serverVersion === 'object' ? serverVersion : null;
               if (serverVersion === -1 || verObj?.deleted) {
                 isUidInChunkMeta = false;
@@ -653,32 +657,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           localProfile?.role === "manager" ||
           localProfile?.role === "user_manager";
 
-        if (
-          navigator.onLine &&
-          isChunkMetaChecked &&
-          !isUidInChunkMeta &&
-          !hasAdminPrivilegesEarly &&
-          !isGoogleOrGmailUser &&
-          !isUserPhoneAuthorized &&
-          !justLoggedInRef.current &&
-          !safeStorage.getItem("pending_signup_profile")
-        ) {
-          console.warn(`User ${currentUser.uid} has missing UID in chunk_meta and is neither Google/Gmail nor whitelisted. Enforcing signout.`);
-          await performEnforcedSignout("This account is not authorized. Please log in with Google or an authorized WhatsApp number.");
-          return false;
-        }
-
-        // 2. If version changes found
+        // 2. Compare server vs local chunk_meta version
         const serverVersionTime = parseVersionTime(serverVersion);
         const effectiveServerVersion = serverVersionTime > 0 ? (typeof serverVersion === 'object' ? (serverVersion.updatedAt || serverVersion.version) : serverVersion) : 1;
-        const versionChanged =
-          (serverVersionTime > 0 && serverVersionTime > localVersionTime) || (!localProfile);
+        const versionChanged = (serverVersionTime > 0 && serverVersionTime > localVersionTime) || (!localProfile);
 
         let serverProfile: UserProfile | null = null;
         let docSnap: any = undefined;
 
-        // 7. Verify user profile in Firestore when online if force, version changed, 10 hours passed, profile missing, or UID missing/deleted in chunk_meta
-        if (navigator.onLine && (force || versionChanged || is10HourSyncPassed || !localProfile || isVersionMissing || !isUidInChunkMeta)) {
+        // ONLY read user profile from Firestore if:
+        // 1. Explicitly forced (user pressed manual refresh)
+        // 2. Server chunk_meta version is strictly newer than local version
+        // 3. No local profile cached yet (first session on this device)
+        const shouldFetchUserDoc = force || versionChanged || (!localProfile);
+
+        if (navigator.onLine && shouldFetchUserDoc) {
           try {
             docSnap = await runWithNetwork(() => getDoc(userRef));
             if (docSnap.exists()) {
@@ -689,9 +682,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 await performEnforcedSignout("Your account has been deleted or deactivated. Please contact admin.");
                 return false;
               }
-              // If user UID was missing in chunk_meta but document exists in Firestore and user is authorized (Google/Gmail or whitelisted phone):
+              // If user UID was missing in chunk_meta but document exists in Firestore:
               // Self-heal chunk_meta so UID is registered and subsequent checks succeed seamlessly
-              if (!isUidInChunkMeta && (isGoogleOrGmailUser || isUserPhoneAuthorized)) {
+              if (!isUidInChunkMeta) {
                 try {
                   const { setDoc } = await import("firebase/firestore");
                   const healVer = getUtcVersion();
@@ -704,13 +697,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               }
               updatedSomething = true;
             } else {
-              console.log(
-                `User UID ${currentUser.uid} document not found in Firestore server check.`
-              );
-              // Missing UID in Firestore from local check to server: removed or deleted user that needs to relogin
+              // User document is confirmed NOT existing in Firestore (deleted by admin or removed)
               if (!justLoggedInRef.current && !safeStorage.getItem("pending_signup_profile")) {
-                console.warn(`User UID ${currentUser.uid} is missing from Firestore on server check. Enforcing signout to relogin.`);
-                await performEnforcedSignout("Your account was not found on the server or has been removed. Please log in again.");
+                console.warn(
+                  `User UID ${currentUser.uid} document does not exist in Firestore. Deletion confirmed. Enforcing signout and flushing data.`
+                );
+                await performEnforcedSignout("Your account has been deleted or deactivated. Please contact admin or sign in again.");
                 return false;
               }
             }
@@ -1297,15 +1289,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setProfile(data);
           safeStorage.setItem("profile_cache", JSON.stringify(data));
         } else {
-          // STRICT REFRESH & SYNC INVARIANT:
-          // If this is a refresh/sync operation (manual or auto) and the user document does not exist,
-          // we must NEVER create a new user profile doc!
-          // Instead, flush all cache and sign out so the user can re-register or log in properly.
-          if (reason !== "login" && !justLoggedInRef.current && !safeStorage.getItem("pending_signup_profile")) {
-            console.warn(`[refreshProfile] User ${currentUser.uid} document does not exist during ${reason} refresh/sync. Enforcing signout.`);
-            await performEnforcedSignout("User account not found on the server. Please sign up or log in again.");
-            return false;
-          }
+          // User document does not exist yet in Firestore — self-heal and create initial profile!
+          // Authenticated users (especially Google users) must NEVER be signed out.
+          console.log(`[refreshProfile] User ${currentUser.uid} document does not exist yet. Creating/self-healing profile...`);
 
           // Create new user profile (Only during explicit Signup or fresh Login flows)
           const userEmailLower = currentUser.email?.toLowerCase();
@@ -1765,10 +1751,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, 2500);
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      setAuthLoading(false);
-
       if (currentUser) {
+        setUser(currentUser);
+        setAuthLoading(false);
         const userRef = doc(db, "users", currentUser.uid);
         // Load profile immediately from local cache
         const cachedProfileStr = safeStorage.getItem("profile_cache");
@@ -1847,9 +1832,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
       } else {
-        // Firebase Auth confirms no user is currently authenticated
-        setProfile(null);
-        persistProfileCache(null);
+        // Firebase Auth reports no user in current memory
+        const wasExplicitLogout = safeStorage.getItem("user_explicit_logged_out") === "true";
+        if (wasExplicitLogout) {
+          setProfile(null);
+          persistProfileCache(null);
+          setUser(null);
+        } else {
+          // If not explicit logout, preserve cached profile so page refresh or slow auth restoration never forces user to guest!
+          const cached = getInitialProfileFromStorage();
+          if (cached && cached.uid) {
+            setProfile(cached);
+            setUser({
+              uid: cached.uid,
+              email: cached.email || null,
+              displayName: cached.displayName || null,
+              phoneNumber: cached.phone || null,
+              providerData: (cached.isGoogleUser || cached.provider === "google.com" || (cached.email && !cached.email.endsWith("@moviznow.com")))
+                ? [{ providerId: "google.com" }]
+                : [],
+            } as any);
+          } else {
+            setProfile(null);
+            setUser(null);
+          }
+        }
+        setAuthLoading(false);
         setLoading(false);
 
         if (sessionStartTimeRef.current) {
@@ -2112,7 +2120,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         updates.email = result.user.email;
         if (result.user.displayName) updates.displayName = result.user.displayName;
         if (result.user.photoURL) updates.photoURL = result.user.photoURL;
+      } else {
+        // New Google user — Google users are automatically whitelisted & active!
+        const userEmailLower = (result.user.email || "").toLowerCase();
+        const isOwner = userEmailLower === "asmatn628@gmail.com";
+        const isAdmin = [
+          "asmatullah9327@gmail.com",
+          "kabirahmaddev@gmail.com",
+          "wamoviesstation@gmail.com",
+        ].includes(userEmailLower);
+        updates.role = isOwner ? "owner" : (isAdmin ? "admin" : "user");
+        updates.status = "active";
+        updates.expiryDate = "Lifetime";
+        updates.email = result.user.email || "";
+        updates.displayName = result.user.displayName || "Movie Fan";
+        updates.photoURL = result.user.photoURL || "";
+        updates.provider = "google.com";
+        updates.isGoogleUser = true;
+        updates.createdAt = new Date().toISOString();
+        updates.updatedAt = new Date().toISOString();
+        updates.sessionId = localSessionId;
       }
+
+      safeStorage.removeItem("user_explicit_logged_out");
 
       const applyUpdates = async () => {
         if (Object.keys(updates).length > 0) {
@@ -2128,21 +2158,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               updateChunkMetaLocalCache({ users: { [result.user.uid]: googleUtcVer } });
             } catch (e) {}
             setProfile((prev: any) => {
-              if (!prev) return prev;
-              const newProfile = { ...prev, ...updates };
+              const newProfile = { ...(prev || {}), ...updates };
               persistProfileCache(newProfile);
               return newProfile;
             });
-          } catch (e) {}
+          } catch (e) {
+            console.warn("Failed to write Google user updates to Firestore:", e);
+          }
         }
       };
 
-      if (docExists) {
-         await applyUpdates();
-      } else {
-        // If it doesn't exist, it will be created by onAuthStateChanged shortly
-        setTimeout(applyUpdates, 3000);
-      }
+      await applyUpdates();
 
       if (result.user) {
         triggerWelcomeNotificationAndEmail(
@@ -2190,6 +2216,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await setPersistence(auth, indexedDBLocalPersistence).catch(() => setPersistence(auth, browserLocalPersistence));
       } catch (pErr) {}
       const result = await signInWithEmailAndPassword(auth, email, password);
+      safeStorage.removeItem("user_explicit_logged_out");
 
       // Force refresh app data
       safeStorage.removeItem("profile_cache");
@@ -3008,6 +3035,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     
     // Explicitly clear cache on intentional logout to ensure user is logged out
+    safeStorage.setItem("user_explicit_logged_out", "true");
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem("last_known_logged_in_user");
+      } catch (e) {}
+    }
     persistProfileCache(null);
     purgeAllUserDataCache(auth.currentUser?.uid, profile?.email);
     setProfile(null);

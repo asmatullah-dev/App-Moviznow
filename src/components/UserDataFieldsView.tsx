@@ -52,10 +52,32 @@ export const UserDataFieldsView: React.FC<UserDataFieldsViewProps> = ({
   isProcessing = false,
   onBack,
 }) => {
-  // Working copy of fields merged with local storage pending updates
-  const [data, setData] = useState<Record<string, any>>(() => {
+  // Working copy of fields merged with local storage user document snapshot and pending updates
+  const getLatestLocalUserData = (): Record<string, any> => {
     let initial: Record<string, any> = { ...user };
     try {
+      // Check stored user caches
+      const userCachedStr = safeStorage.getItem(`user_${user.uid}`) || safeStorage.getItem(`user_profile_${user.uid}`);
+      if (userCachedStr) {
+        const parsed = JSON.parse(userCachedStr);
+        if (typeof parsed === 'object' && parsed !== null) {
+          initial = { ...initial, ...parsed };
+        }
+      }
+
+      // Check admin users list cache
+      const adminUsersStr = safeStorage.getItem('admin_users');
+      if (adminUsersStr) {
+        const adminUsers = JSON.parse(adminUsersStr);
+        if (Array.isArray(adminUsers)) {
+          const found = adminUsers.find((u: any) => u.uid === user.uid);
+          if (found && typeof found === 'object') {
+            initial = { ...initial, ...found };
+          }
+        }
+      }
+
+      // Check pending user updates
       const pendingStr = safeStorage.getItem('pending_user_updates');
       if (pendingStr) {
         const pending = JSON.parse(pendingStr);
@@ -65,8 +87,10 @@ export const UserDataFieldsView: React.FC<UserDataFieldsViewProps> = ({
       }
     } catch (e) {}
     return initial;
-  });
-  const [originalData, setOriginalData] = useState<Record<string, any>>(() => ({ ...user }));
+  };
+
+  const [data, setData] = useState<Record<string, any>>(() => getLatestLocalUserData());
+  const [originalData, setOriginalData] = useState<Record<string, any>>(() => getLatestLocalUserData());
   const [deletedKeys, setDeletedKeys] = useState<Set<string>>(new Set());
 
   // Search and filters
@@ -100,18 +124,9 @@ export const UserDataFieldsView: React.FC<UserDataFieldsViewProps> = ({
 
   // Sync working copy if the user prop changes identity
   useEffect(() => {
-    let initial: Record<string, any> = { ...user };
-    try {
-      const pendingStr = safeStorage.getItem('pending_user_updates');
-      if (pendingStr) {
-        const pending = JSON.parse(pendingStr);
-        if (pending[user.uid]) {
-          initial = { ...initial, ...pending[user.uid] };
-        }
-      }
-    } catch (e) {}
-    setData({ ...initial });
-    setOriginalData({ ...initial });
+    const latestLocal = getLatestLocalUserData();
+    setData({ ...latestLocal });
+    setOriginalData({ ...latestLocal });
     setDeletedKeys(new Set());
     setEditingKey(null);
     setConfirmDeleteKey(null);
@@ -714,19 +729,23 @@ export const UserDataFieldsView: React.FC<UserDataFieldsViewProps> = ({
 
           {/* Fields List Table */}
           <div className="flex-1 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-white dark:bg-zinc-950/60 custom-scrollbar">
-            <table className="w-full text-left text-xs border-collapse">
+            <table className="w-full text-left text-xs table-fixed border-collapse">
+              <colgroup>
+                <col className="w-[30%]" />
+                <col className="w-[58%]" />
+                <col className="w-[12%]" />
+              </colgroup>
               <thead className="sticky top-0 bg-zinc-100/90 dark:bg-zinc-900/90 backdrop-blur-xs border-b border-zinc-200 dark:border-zinc-800 z-10 text-[10px] uppercase font-bold text-zinc-500 tracking-wider">
                 <tr>
-                  <th className="py-2.5 px-3 w-1/4">Field (Key)</th>
-                  <th className="py-2.5 px-2 w-20">Type</th>
+                  <th className="py-2.5 px-3">Field & Type</th>
                   <th className="py-2.5 px-3">Value</th>
-                  <th className="py-2.5 px-3 w-28 text-right">Actions</th>
+                  <th className="py-2.5 px-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60 font-sans">
                 {filteredKeys.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="p-8 text-center text-zinc-500">
+                    <td colSpan={3} className="p-8 text-center text-zinc-500">
                       No matching fields found {searchTerm ? `for "${searchTerm}"` : ''}.
                     </td>
                   </tr>
@@ -757,39 +776,42 @@ export const UserDataFieldsView: React.FC<UserDataFieldsViewProps> = ({
                           isModified ? 'bg-amber-500/5' : isNewField ? 'bg-emerald-500/5' : ''
                         }`}
                       >
-                        {/* Field Key */}
-                        <td className="py-2 px-3 align-top">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100 text-[11px] break-all">
-                              {key}
-                            </span>
-                            {key === 'uid' && (
-                              <span className="text-[9px] px-1 py-0.2 rounded font-bold uppercase bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
-                                Primary
+                        {/* Combined Field Key & Type */}
+                        <td className="py-2.5 px-3.5 align-top overflow-hidden">
+                          <div className="flex flex-col gap-1.5 overflow-hidden">
+                            {/* 1st row: Field Key & Badges */}
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-mono font-bold text-zinc-900 dark:text-zinc-100 text-[11px] break-all">
+                                {key}
                               </span>
-                            )}
-                            {isNewField && (
-                              <span className="text-[9px] px-1 py-0.2 rounded font-bold uppercase bg-emerald-500/20 text-emerald-500">
-                                New
+                              {key === 'uid' && (
+                                <span className="text-[9px] px-1 py-0.2 rounded font-bold uppercase bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
+                                  Primary
+                                </span>
+                              )}
+                              {isNewField && (
+                                <span className="text-[9px] px-1 py-0.2 rounded font-bold uppercase bg-emerald-500/20 text-emerald-500">
+                                  New
+                                </span>
+                              )}
+                              {isModified && (
+                                <span className="text-[9px] px-1 py-0.2 rounded font-bold uppercase bg-amber-500/20 text-amber-500">
+                                  Modified
+                                </span>
+                              )}
+                            </div>
+
+                            {/* 2nd row: Type Badge */}
+                            <div>
+                              <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border inline-block ${typeBadgeStyles[type]}`}>
+                                {type}
                               </span>
-                            )}
-                            {isModified && (
-                              <span className="text-[9px] px-1 py-0.2 rounded font-bold uppercase bg-amber-500/20 text-amber-500">
-                                Modified
-                              </span>
-                            )}
+                            </div>
                           </div>
                         </td>
 
-                        {/* Type badge */}
-                        <td className="py-2 px-2 align-top">
-                          <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border inline-block ${typeBadgeStyles[type]}`}>
-                            {type}
-                          </span>
-                        </td>
-
                         {/* Value Column */}
-                        <td className="py-2 px-3 align-top">
+                        <td className="py-2 px-3 align-top overflow-hidden">
                           {isEditing ? (
                             <div className="space-y-1.5">
                               {type === 'boolean' ? (

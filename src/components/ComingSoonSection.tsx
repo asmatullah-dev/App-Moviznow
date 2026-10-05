@@ -975,7 +975,7 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
               {/* TOP MEDIA GALLERY: All posters in full size portrait format */}
               {allModalImages.length > 0 && (
                 <div className="relative w-full bg-zinc-950 shrink-0 border-b border-zinc-200/80 dark:border-zinc-800/80 pt-3.5 pb-2.5 px-3.5 sm:pt-4 sm:pb-3 sm:px-4">
-                  <div className="flex items-center justify-between mb-2 pr-12 rtl:pr-0 rtl:pl-12">
+                  <div className="flex items-center justify-between mb-2 pr-12">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className={clsx(
                         "text-[11px] font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1.5 py-0.5 leading-normal",

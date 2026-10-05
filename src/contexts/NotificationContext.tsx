@@ -43,25 +43,65 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   });
   const [loading, setLoading] = useState(notifications.length === 0);
 
+  const profileUidRef = useRef(profile?.uid);
+  profileUidRef.current = profile?.uid;
+  const userUidRef = useRef(user?.uid);
+  userUidRef.current = user?.uid;
+  const isFetchingRef = useRef(false);
+
   const fetchNotifications = useCallback(async (force = false) => {
+    if (isFetchingRef.current && !force) return;
     try {
       const lastFetchStr = safeStorage.getItem('last_notifications_fetch_time');
       const lastFetchTime = lastFetchStr ? parseInt(lastFetchStr, 10) : 0;
       const now = Date.now();
       const cachedData = safeStorage.getItem('cached_notifications_data');
+      const cachedVersion = safeStorage.getItem('cached_notifications_version');
 
-      // If cached data exists and 24 hours haven't elapsed, use local storage
-      if (!force && cachedData && (now - lastFetchTime < NOTIFICATION_FETCH_INTERVAL)) {
+      // 1. If we have cached data and within 24 hours, check chunk_meta version
+      let meta: any = null;
+      try {
+        meta = await getChunkMeta(force);
+      } catch (err) {}
+
+      let serverVersionTime = 0;
+      let effectiveServerVersion = '1';
+      const chunksToFetch = new Set<string>();
+
+      if (meta && meta.notifications) {
+        if (Array.isArray(meta.notifications.chunks)) {
+          meta.notifications.chunks.forEach((c: string) => { if (c) chunksToFetch.add(c); });
+        }
+        if (Array.isArray(meta.notifications.chunkIds)) {
+          meta.notifications.chunkIds.forEach((c: string) => { if (c) chunksToFetch.add(c); });
+        }
+        if (meta.notifications.latestAppChunkId) chunksToFetch.add(meta.notifications.latestAppChunkId);
+        if (meta.notifications.latestPushChunkId) chunksToFetch.add(meta.notifications.latestPushChunkId);
+        if (meta.notifications.latestEmailChunkId) chunksToFetch.add(meta.notifications.latestEmailChunkId);
+        if (meta.notifications.latestChunkId) chunksToFetch.add(meta.notifications.latestChunkId);
+        
+        serverVersionTime = parseVersionTime(meta.notifications);
+        effectiveServerVersion = typeof meta.notifications === 'object' ? (meta.notifications.updatedAt || meta.notifications.version || '1').toString() : meta.notifications.toString();
+      }
+
+      const cachedVersionTime = parseVersionTime(cachedVersion);
+      const isServerNewer = serverVersionTime > 0 && serverVersionTime > cachedVersionTime;
+      const shouldFetch = force || isServerNewer || (!cachedData);
+
+      // If version matches or server has not updated and we have cached notifications, use local storage directly (0 chunk reads!)
+      if (!shouldFetch && cachedData) {
         try {
           const parsed = JSON.parse(cachedData);
           if (Array.isArray(parsed)) {
+            const currentProfileUid = profileUidRef.current;
+            const currentUserUid = userUidRef.current;
             let filtered = parsed.filter(n => {
-              if (n.targetAudience === 'registered' && (!profile?.uid && !user?.uid)) return false;
-              if (n.targetAudience === 'guests' && (profile?.uid || user?.uid)) return false;
+              if (n.targetAudience === 'registered' && (!currentProfileUid && !currentUserUid)) return false;
+              if (n.targetAudience === 'guests' && (currentProfileUid || currentUserUid)) return false;
               const isTargeted = n.targetUserId || (n.targetUserIds && n.targetUserIds.length > 0);
               if (isTargeted) {
-                if (!profile?.uid) return false;
-                return n.targetUserId === profile.uid || n.targetUserIds?.includes(profile.uid);
+                if (!currentProfileUid) return false;
+                return n.targetUserId === currentProfileUid || n.targetUserIds?.includes(currentProfileUid);
               }
               return true;
             });
@@ -72,59 +112,17 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
         } catch(e) {}
       }
 
-      setLoading(true);
-
-      const chunksToFetch = new Set<string>();
-      let serverVersionTime = 0;
-      let effectiveServerVersion = '1';
-
-      try {
-        const meta = await getChunkMeta(force);
-        if (meta && meta.notifications) {
-          if (Array.isArray(meta.notifications.chunks)) {
-            meta.notifications.chunks.forEach((c: string) => { if (c) chunksToFetch.add(c); });
-          }
-          if (Array.isArray(meta.notifications.chunkIds)) {
-            meta.notifications.chunkIds.forEach((c: string) => { if (c) chunksToFetch.add(c); });
-          }
-          if (meta.notifications.latestAppChunkId) chunksToFetch.add(meta.notifications.latestAppChunkId);
-          if (meta.notifications.latestPushChunkId) chunksToFetch.add(meta.notifications.latestPushChunkId);
-          if (meta.notifications.latestEmailChunkId) chunksToFetch.add(meta.notifications.latestEmailChunkId);
-          if (meta.notifications.latestChunkId) chunksToFetch.add(meta.notifications.latestChunkId);
-          
-          serverVersionTime = parseVersionTime(meta.notifications);
-          effectiveServerVersion = typeof meta.notifications === 'object' ? (meta.notifications.updatedAt || meta.notifications.version || '1').toString() : meta.notifications.toString();
-        }
-      } catch (err) { }
+      if (!shouldFetch) {
+        setLoading(false);
+        return;
+      }
 
       if (chunksToFetch.size === 0) {
         chunksToFetch.add('notification_chunk_0');
       }
-      
-      const cachedVersion = safeStorage.getItem('cached_notifications_version');
-      const cachedVersionTime = parseVersionTime(cachedVersion);
-      const isVersionMatch = (serverVersionTime > 0 && cachedVersionTime === serverVersionTime) || (cachedVersion === effectiveServerVersion);
 
-      if (!force && cachedData && (isVersionMatch || (now - lastFetchTime < NOTIFICATION_FETCH_INTERVAL))) {
-        try {
-          const parsed = JSON.parse(cachedData);
-          if (Array.isArray(parsed)) {
-            let filtered = parsed.filter(n => {
-              if (n.targetAudience === 'registered' && (!profile?.uid && !user?.uid)) return false;
-              if (n.targetAudience === 'guests' && (profile?.uid || user?.uid)) return false;
-              const isTargeted = n.targetUserId || (n.targetUserIds && n.targetUserIds.length > 0);
-              if (isTargeted) {
-                if (!profile?.uid) return false;
-                return n.targetUserId === profile.uid || n.targetUserIds?.includes(profile.uid);
-              }
-              return true;
-            });
-            setNotifications(filtered);
-            setLoading(false);
-            return;
-          }
-        } catch(e) {}
-      }
+      isFetchingRef.current = true;
+      setLoading(true);
 
       const notifMap = new Map<string, AppNotification>();
       
@@ -177,9 +175,10 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } catch (e) {
       console.error("Failed to fetch notifications:", e);
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
-  }, [profile?.uid]);
+  }, []);
 
   useEffect(() => {
     fetchNotifications();

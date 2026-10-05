@@ -104,19 +104,20 @@ export function RefreshAppDataManager() {
         const localUserVer = safeStorage.getItem(`profile_version_${user.uid}`) || '0';
         const serverUserTime = parseVersionTime(serverUserVer || 0);
         const localUserTime = parseVersionTime(localUserVer);
-        const isDeletedInChunkMeta = !(user.uid in chunkUsersMeta) || serverUserVer === -1 || (typeof serverUserVer === 'object' && (serverUserVer as any)?.deleted);
+        // Only treat as deleted if explicitly marked -1 or { deleted: true } on server.
+        // Ordinary users not in chunkUsersMeta are completely normal.
+        const isExplicitlyDeleted = serverUserVer === -1 || (typeof serverUserVer === 'object' && (serverUserVer as any)?.deleted === true) || (versions as any)?.[`users.${user.uid}`] === -1;
 
-        if (isDeletedInChunkMeta || isManualTrigger || (serverUserTime > 0 && serverUserTime > localUserTime)) {
-          const profileFetched = await refreshProfile(true, 'manual').catch((err) => {
+        if (isExplicitlyDeleted || isManualTrigger || (serverUserTime > 0 && serverUserTime > localUserTime)) {
+          const profileFetched = await refreshProfile(true, isManualTrigger ? 'manual' : 'auto').catch((err) => {
             console.error("Profile refresh failed:", err);
             return null;
           });
-          // If refreshProfile returned false, it means they might be deleted or user ID not found. It handles logout internally.
-          if (profileFetched === false) {
+          if (profileFetched === false && isExplicitlyDeleted) {
             window.dispatchEvent(new CustomEvent('sync_status', {
               detail: {
                 status: 'error',
-                message: 'User ID not found / session expired.'
+                message: 'Account has been deactivated.'
               }
             }));
             isRefreshingRef.current = false;
@@ -144,11 +145,11 @@ export function RefreshAppDataManager() {
         if (!syncSuccess) {
           console.warn("Unified Step 2: Syncing pending changes failed/returned false, but proceeding.");
         }
-      }
 
-      // Save unified last successful refresh & sync timestamp
-      const storageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
-      localStorage.setItem(storageKey, Date.now().toString());
+        // Save unified last successful refresh & sync timestamp
+        const storageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
+        localStorage.setItem(storageKey, Date.now().toString());
+      }
 
       // Dispatch single unified completion toast
       if (isManualTrigger) {

@@ -212,24 +212,24 @@ export default function Cart() {
             </div>
             <div>
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-extrabold text-xs uppercase tracking-wider mb-2">
-                ⚡ AI Auto-Approved
+                {t('⚡ AI Auto-Approved')}
               </span>
               <h3 className="text-2xl font-black text-zinc-900 dark:text-white">
-                🎉 Order Approved Instantly!
+                {t('🎉 Order Approved Instantly!')}
               </h3>
               <p className="text-sm text-zinc-600 dark:text-zinc-300 mt-1 max-w-md mx-auto">
-                Your payment was verified with the bank. Your content has been unlocked for streaming and download!
+                {t('Your payment was verified with the bank. Your content has been unlocked for streaming and download!')}
               </p>
             </div>
             <div className="p-3 bg-white/80 dark:bg-black/40 rounded-2xl border border-zinc-200 dark:border-zinc-800 text-xs font-mono text-zinc-600 dark:text-zinc-300 flex items-center justify-between">
-              <span>Order #{completedOrder.id}</span>
+              <span>{t('Order')} #{completedOrder.id}</span>
               <span className="font-bold text-emerald-600 dark:text-emerald-400">Rs. {completedOrder.amount}</span>
             </div>
             <button
               onClick={() => navigate('/')}
               className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-extrabold py-3.5 rounded-2xl shadow-lg shadow-emerald-500/20 text-sm cursor-pointer"
             >
-              Start Watching Now 🍿
+              {t('Start Watching Now 🍿')}
             </button>
           </div>
         )}

@@ -1,10 +1,12 @@
 import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
+  initializeAuth,
   setPersistence, 
   indexedDBLocalPersistence, 
   browserLocalPersistence, 
-  inMemoryPersistence 
+  inMemoryPersistence,
+  Auth
 } from 'firebase/auth';
 import { 
   initializeFirestore, 
@@ -49,15 +51,22 @@ export async function runWithNetwork<T>(fn: () => Promise<T>): Promise<T> {
   return fn();
 }
 
-export const auth = getAuth(app);
-if (typeof window !== 'undefined') {
-  // Prioritize indexedDBLocalPersistence to keep user sessions persistently safe across browser sessions
-  setPersistence(auth, indexedDBLocalPersistence)
-    .catch(() => setPersistence(auth, browserLocalPersistence))
-    .catch((err) => {
-      console.warn('Could not set auth persistence:', err);
+let authInstance: Auth;
+try {
+  if (typeof window !== 'undefined') {
+    authInstance = initializeAuth(app, {
+      persistence: [indexedDBLocalPersistence, browserLocalPersistence]
     });
+  } else {
+    authInstance = getAuth(app);
+  }
+} catch (e) {
+  authInstance = getAuth(app);
 }
+
+export const auth = authInstance;
+// Firebase Auth Web SDK persistence is configured with IndexedDB and localStorage fallback.
+
 export const storage = getStorage(app);
 export let messaging: any = null;
 if (typeof window !== 'undefined') {

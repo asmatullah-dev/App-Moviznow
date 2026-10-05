@@ -18,6 +18,7 @@ export const IMDB_OTT_TTL_MS = 5 * 24 * 60 * 60 * 1000;         // 5 days
 
 const ACCESS_TIMESTAMP_PREFIX = 'cache_access_ts_';
 const PROTECTED_KEYS_PREFIXES = [
+  'admin_',
   'content_cache',
   'cached_json_catalog_version',
   'chunk_meta_versions',
@@ -28,19 +29,24 @@ const PROTECTED_KEYS_PREFIXES = [
   'genres_cache',
   'languages_cache',
   'qualities_cache',
-  'profile_cache',
+  'profile_',
   'cached_all_users',
   'sync_user_mtimes',
   'last_users_sync_timestamp',
   'last_chunk_users_check_period',
   'last_user_finalize_period',
+  'last_session_start_',
+  'last_known_logged_in_user',
+  'last_unified_10h_refresh_sync_time_',
+  'device_session_id',
   'cached_notifications_',
   'theme',
   'app_language',
   'pending_',
   'needs_user_sync',
   'fcm_token_',
-  'daily_sync_date_'
+  'daily_sync_date_',
+  'firebase:'
 ];
 
 /**

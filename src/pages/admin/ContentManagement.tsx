@@ -147,6 +147,7 @@ import {
   applyPreferencesToContent,
   verifyAndFetchTmdbData,
 } from "../../services/tmdbEnricher";
+import { getCachedImdbRating } from "../../services/imdbRatingService";
 
 const extractMediaUrls = (content: Content): string[] => {
   const urls: string[] = [];
@@ -885,15 +886,15 @@ export default function ContentManagement() {
   const handleManualFirestoreRefresh = async () => {
     setIsSyncingFromFirestore(true);
     try {
-      const res = await quickRefreshCatalog(true, undefined, true);
+      const res = await quickRefreshCatalog(true, undefined, false);
       if (res.updated || res.updatedCount > 0) {
-        triggerAlert("Sync Complete", `Updated ${res.updatedCount} items from Firestore based on version changes`, "success");
+        triggerAlert("Refresh Complete", res.updatedCount > 0 ? `Updated ${res.updatedCount} items from newer chunks` : "Content catalog and collections refreshed with newer versions", "success");
       } else {
-        triggerAlert("Refreshed", "Content catalog and metadata refreshed successfully", "info");
+        triggerAlert("Up to Date", "All content chunks and collections are already on the latest version", "info");
       }
     } catch (err) {
-      console.error("Sync Failed:", err);
-      triggerAlert("Sync Failed", "Could not refresh chunks from Firestore", "error");
+      console.error("Refresh Failed:", err);
+      triggerAlert("Refresh Failed", "Could not refresh chunks from Firestore", "error");
     } finally {
       setIsSyncingFromFirestore(false);
     }
@@ -5859,7 +5860,7 @@ export default function ContentManagement() {
       let finalImdb = newerContent.imdbLink || targetItem.imdbLink;
       let finalTrailer = newerContent.trailerUrl || targetItem.trailerUrl;
       let finalQuality = newerContent.qualityId || targetItem.qualityId;
-      let finalOttPlatform = newerContent.ottPlatform || targetItem.ottPlatform;
+      let finalOttPlatform = (newerContent.ottPlatform || (newerContent as any).ott_platform || targetItem.ottPlatform || (targetItem as any).ott_platform || "").trim();
       let finalDesc = newerContent.description || targetItem.description;
       let finalCountry = newerContent.country || targetItem.country;
       let finalReleaseDate = newerContent.releaseDate || targetItem.releaseDate;
@@ -5900,7 +5901,10 @@ export default function ContentManagement() {
         if (!finalImdb) finalImdb = item.imdbLink;
         if (!finalTrailer) finalTrailer = item.trailerUrl;
         if (!finalQuality) finalQuality = item.qualityId;
-        if (!finalOttPlatform) finalOttPlatform = item.ottPlatform;
+        if (!finalOttPlatform) {
+          const itemOtt = (item.ottPlatform || (item as any).ott_platform || getCachedImdbRating(item.id)?.ottPlatform || "").trim();
+          if (itemOtt) finalOttPlatform = itemOtt;
+        }
         if (!finalDesc) finalDesc = item.description;
         if (!finalCountry) finalCountry = item.country;
         if (!finalReleaseDate) finalReleaseDate = item.releaseDate;
@@ -6134,7 +6138,7 @@ export default function ContentManagement() {
         trailers: newerContent.trailers || previousContent.trailers || "[]",
         subtitles: newerContent.subtitles !== undefined ? newerContent.subtitles : previousContent.subtitles,
         qualityId: newerContent.qualityId || previousContent.qualityId || "",
-        ottPlatform: newerContent.ottPlatform || previousContent.ottPlatform || "",
+        ottPlatform: (newerContent.ottPlatform || (newerContent as any).ott_platform || previousContent.ottPlatform || (previousContent as any).ott_platform || getCachedImdbRating(newerContent.id)?.ottPlatform || getCachedImdbRating(previousContent.id)?.ottPlatform || "").trim(),
         country: newerContent.country || previousContent.country || "",
         releaseDate: newerContent.releaseDate || previousContent.releaseDate || "",
         runtime: newerContent.runtime || previousContent.runtime || "",

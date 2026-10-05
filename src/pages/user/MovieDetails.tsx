@@ -3688,7 +3688,7 @@ export default function MovieDetails() {
                         mergedContent.type !== "series" && (
                           <div className="bg-white/80 dark:bg-zinc-900/80 border border-cyan-500/15 rounded-2xl p-3 flex flex-col shadow-sm">
                             <span className="text-zinc-400 dark:text-zinc-500 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
-                              <Clock className="w-3 h-3 text-cyan-500" /> Runtime
+                              <Clock className="w-3 h-3 text-cyan-500" /> {t('Runtime')}
                             </span>
                             <span className="text-xs sm:text-sm font-extrabold text-zinc-800 dark:text-zinc-200">
                               {formatRuntime(mergedContent.runtime)}
@@ -3698,7 +3698,7 @@ export default function MovieDetails() {
                       {mergedContent.country && (
                         <div className="bg-white/80 dark:bg-zinc-900/80 border border-cyan-500/15 rounded-2xl p-3 flex flex-col shadow-sm">
                           <span className="text-zinc-400 dark:text-zinc-500 text-[10px] uppercase font-bold tracking-wider mb-1 flex items-center gap-1">
-                            <Globe className="w-3 h-3 text-cyan-500" /> Country
+                            <Globe className="w-3 h-3 text-cyan-500" /> {t('Country')}
                           </span>
                           <span className="text-xs sm:text-sm font-extrabold text-zinc-800 dark:text-zinc-200 truncate">
                             {mergedContent.country}
@@ -3711,7 +3711,7 @@ export default function MovieDetails() {
                       {mergedContent.genreIds && mergedContent.genreIds.length > 0 && (
                         <div className="flex items-center gap-2 text-xs sm:text-sm">
                           <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
-                            Genre
+                            {t('Genre')}
                           </span>
                           <div className="flex gap-1.5 flex-wrap">
                             {mergedContent.genreIds.map((id) => {
@@ -3733,7 +3733,7 @@ export default function MovieDetails() {
                       {mergedContent.languageIds && mergedContent.languageIds.length > 0 && (
                         <div className="flex items-center gap-2 text-xs sm:text-sm">
                           <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
-                            Language
+                            {t('Language')}
                           </span>
                           <div className="flex gap-1.5 flex-wrap">
                             {mergedContent.languageIds.map((id) => {
@@ -3761,7 +3761,7 @@ export default function MovieDetails() {
                           return (
                             <div className="flex items-center gap-2 text-xs sm:text-sm">
                               <span className="text-zinc-400 dark:text-zinc-500 font-bold uppercase tracking-wider text-[11px] w-20 shrink-0">
-                                Quality
+                                {t('Quality')}
                               </span>
                               <button
                                 onClick={() => {
@@ -3785,7 +3785,7 @@ export default function MovieDetails() {
                     {mergedContent.cast && mergedContent.cast.length > 0 && (
                       <div className="mb-6">
                         <h4 className="text-xs font-extrabold text-cyan-700 dark:text-cyan-400 mb-2 uppercase tracking-wider opacity-80">
-                          Cast
+                          {t('Cast')}
                         </h4>
                         <div className="flex flex-wrap gap-1.5">
                           {mergedContent.cast.map((actor, idx) => (

@@ -4407,7 +4407,8 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           }
         }
 
-        const result = await checkAndSendExpiryNotifications(uids, true);
+        const isForce = Boolean(req.body?.force);
+        const result = await checkAndSendExpiryNotifications(uids, isForce);
         res.json({ success: true, ...result });
       } catch (error: any) {
         console.error("Error checking expiry notifications:", error);
@@ -4570,9 +4571,9 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             const metaUpdates: Record<string, any> = {};
             chunk.forEach((u) => {
               batch.delete(db!.collection("users").doc(u));
-              metaUpdates[`users.${u}`] = -1;
+              metaUpdates[u] = -1;
             });
-            batch.set(db.collection("chunk_meta").doc("versions"), metaUpdates, { merge: true });
+            batch.set(db.collection("chunk_meta").doc("versions"), { users: metaUpdates }, { merge: true });
             await batch.commit();
           }
           deletedFirestore = true;

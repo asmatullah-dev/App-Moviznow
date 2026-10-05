@@ -14,7 +14,7 @@ import {
 import { db, runWithNetwork } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
 import { expandContent, CONTENT_CHUNK_MOVIE_SIZE, CONTENT_CHUNK_SERIES_SIZE } from '../utils/chunkUtils';
-import { getUtcVersion, parseVersionTime } from '../utils/chunkMeta';
+import { getUtcVersion, parseVersionTime, getNewerUtcVersion } from '../utils/chunkMeta';
 import { useAuth } from './AuthContext';
 import { useUsers, ADMIN_EMAILS } from './UsersContext';
 import { canManageContent } from '../utils/roleUtils';
@@ -142,23 +142,23 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   const { users: allUsers, finalizeUserChanges } = useUsers();
 
   const [contentList, setContentList] = useState<Content[]>(() => {
-    const cached = safeStorage.getItem('admin_content_cache') || safeStorage.getItem('content_cache');
+    const cached = safeStorage.getItem('admin_content_cache');
     return cached ? JSON.parse(cached) : [];
   });
   const [genres, setGenres] = useState<Genre[]>(() => {
-    const cached = safeStorage.getItem('admin_genres_cache') || safeStorage.getItem('genres_cache');
+    const cached = safeStorage.getItem('admin_genres_cache');
     return cached ? JSON.parse(cached).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)) : [];
   });
   const [languages, setLanguages] = useState<Language[]>(() => {
-    const cached = safeStorage.getItem('admin_languages_cache') || safeStorage.getItem('languages_cache');
+    const cached = safeStorage.getItem('admin_languages_cache');
     return cached ? JSON.parse(cached).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)) : [];
   });
   const [qualities, setQualities] = useState<Quality[]>(() => {
-    const cached = safeStorage.getItem('admin_qualities_cache') || safeStorage.getItem('qualities_cache');
+    const cached = safeStorage.getItem('admin_qualities_cache');
     return cached ? JSON.parse(cached).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)) : [];
   });
   const [collections, setCollections] = useState<AppCollection[]>(() => {
-    const cached = safeStorage.getItem('admin_collections_cache') || safeStorage.getItem('collections_cache');
+    const cached = safeStorage.getItem('admin_collections_cache');
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
@@ -168,7 +168,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     return [];
   });
   const [loading, setLoading] = useState(() => {
-    const hasC = safeStorage.getItem('admin_content_cache') || safeStorage.getItem('content_cache');
+    const hasC = safeStorage.getItem('admin_content_cache');
     return !hasC;
   });
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -188,19 +188,18 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       await Promise.race([hydratePromise, timeoutPromise]);
       if (!isMounted) return;
 
-      // 2. Initial sync from local storage for IMMEDIATE UI feedback
+      // 2. Initial sync from admin local storage for IMMEDIATE UI feedback
       refreshContentFromLocal();
       refreshCollectionsFromLocal();
 
-      // 3. Load auxiliary from cache
-      const g = safeStorage.getItem('admin_genres_cache') || safeStorage.getItem('genres_cache');
+      // 3. Load auxiliary from admin cache
+      const g = safeStorage.getItem('admin_genres_cache');
       if (g) try { setGenres(JSON.parse(g).sort((a: any, b: any) => (a.order || 999) - (b.order || 999))); } catch(e) {}
-      const l = safeStorage.getItem('admin_languages_cache') || safeStorage.getItem('languages_cache');
+      const l = safeStorage.getItem('admin_languages_cache');
       if (l) try { setLanguages(JSON.parse(l).sort((a: any, b: any) => (a.order || 999) - (b.order || 999))); } catch(e) {}
-      const q = safeStorage.getItem('admin_qualities_cache') || safeStorage.getItem('qualities_cache');
+      const q = safeStorage.getItem('admin_qualities_cache');
       if (q) try { setQualities(JSON.parse(q).sort((a: any, b: any) => (a.order || 999) - (b.order || 999))); } catch(e) {}
 
-      // 4. Guest / non-admin: keep admin state clean and light without polluting with static JSON
       setLoading(false);
 
       // Note: No automatic Firestore content sync on mount for any user or admin.
@@ -395,6 +394,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     }
     
     try {
+        const localMetaString = safeStorage.getItem('admin_chunk_meta_versions') || '{}';
+        let localMeta: Record<string, any> = {};
+        try { localMeta = JSON.parse(localMetaString); } catch(e) {}
+
         const batches: any[] = [writeBatch(db)];
         let opCount = 0;
         const addBatchOp = (fn: (b: any) => void) => {
@@ -407,16 +410,20 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         };
 
         const utcNow = getUtcVersion();
+        const globalVersion = getNewerUtcVersion(localMeta.lastGlobalUpdate);
         const versionsUpdate: Record<string, any> = { 
-            lastGlobalUpdate: serverTimestamp() 
+            lastGlobalUpdate: globalVersion 
         };
 
-        // Handle content chunks - sync all 100%
+        // Handle content chunks - sync all with strictly newer version timestamps
         const syncedContentToSave: Record<string, string> = {};
         if (pendingChunkIds.length > 0) {
             for (const cid of pendingChunkIds) {
                 const chunkStr = safeStorage.getItem('admin_content_chunk_' + cid) || '{}';
                 const parsedItems = JSON.parse(chunkStr);
+                const prevVer = localMeta[cid]?.updatedAt || localMeta[cid];
+                const newChunkVer = getNewerUtcVersion(prevVer);
+
                 addBatchOp((batch) => {
                     batch.set(doc(db, 'content_chunks', cid), { 
                         items: parsedItems,
@@ -427,13 +434,13 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                 syncedContentToSave[cid] = chunkStr;
                 
                 versionsUpdate[cid] = {
-                    updatedAt: utcNow,
+                    updatedAt: newChunkVer,
                     count: Object.keys(parsedItems).length
                 };
             }
         }
 
-        // Handle collection chunks - sync all 100%
+        // Handle collection chunks - sync with strictly newer version timestamp
         const syncedCollToSave: Record<string, string> = {};
         if (pendingCollChunkIds.length > 0) {
             for (const cid of pendingCollChunkIds) {
@@ -459,8 +466,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                 }
             }
             
+            const prevCollVer = typeof localMeta.collections === 'object' ? localMeta.collections.updatedAt : localMeta.collections;
+            const newCollVer = getNewerUtcVersion(prevCollVer);
             versionsUpdate.collections = {
-                updatedAt: utcNow,
+                updatedAt: newCollVer,
                 latestChunkId: COLLECTION_CHUNK_PREFIX + maxCollIndex
             };
         }
@@ -479,8 +488,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                 });
             });
             
+            const prevMetaVer = typeof localMeta.metadata === 'object' ? localMeta.metadata.updatedAt : localMeta.metadata;
             versionsUpdate.metadata = {
-                updatedAt: utcNow
+                updatedAt: getNewerUtcVersion(prevMetaVer)
             };
         }
 
@@ -499,16 +509,10 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         for (const [cid, chunkStr] of Object.entries(syncedCollToSave)) {
             safeStorage.setItem('admin_synced_collection_chunk_' + cid, chunkStr);
         }
-        
-        const localMetaString = safeStorage.getItem('admin_chunk_meta_versions') || '{}';
-        let localMeta: Record<string, any> = {};
-        try { localMeta = JSON.parse(localMetaString); } catch(e) {}
 
         // Update local version metadata with the exact server versions just committed
         for (const [key, val] of Object.entries(versionsUpdate)) {
-            if (key !== 'lastGlobalUpdate') {
-                localMeta[key] = val;
-            }
+            localMeta[key] = val;
         }
 
         safeStorage.removeItem('admin_pending_chunk_updates');
@@ -601,9 +605,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
     }
 
-    // Fallback: If no chunks found yet, check admin_content_cache or content_cache
+    // Fallback: If no chunks found yet, check admin_content_cache
     if (Object.keys(rawContentMap).length === 0) {
-      const cachedContent = safeStorage.getItem('admin_content_cache') || safeStorage.getItem('content_cache');
+      const cachedContent = safeStorage.getItem('admin_content_cache');
       if (cachedContent && cachedContent !== '[]') {
         try {
           const parsed = JSON.parse(cachedContent);
@@ -730,100 +734,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     try { pendingItemsMap = JSON.parse(pendingItemsMapStr); } catch(e) {}
 
     try {
-      // In Admin sync, directly fetch all content_chunks to guarantee 100% of all chunks and items are fetched
-      const chunkDocsSnap = await runWithNetwork(() => getDocs(collection(db, 'content_chunks')));
-      const serverChunkIds = new Set<string>();
-
-      chunkDocsSnap.docs.forEach((cDoc) => {
-        const chunkId = cDoc.id;
-        if (chunkId === 'metadata') {
-          const data = cDoc.data();
-          const chunksGenres = data.genres || [];
-          const chunksLanguages = data.languages || [];
-          const chunksQualities = data.qualities || [];
-
-          safeStorage.setItem('admin_genres_cache', JSON.stringify(chunksGenres));
-          safeStorage.setItem('admin_languages_cache', JSON.stringify(chunksLanguages));
-          safeStorage.setItem('admin_qualities_cache', JSON.stringify(chunksQualities));
-
-          setGenres([...chunksGenres].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
-          setLanguages([...chunksLanguages].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
-          setQualities([...chunksQualities].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
-          updatedSomething = true;
-          return;
-        }
-
-        if (chunkId.startsWith('movie_chunk_') || chunkId.startsWith('series_chunk_')) {
-          serverChunkIds.add(chunkId);
-          let items = cDoc.data().items || {};
-          const localChunkStr = safeStorage.getItem('admin_content_chunk_' + chunkId);
-          const localItems: Record<string, any> = localChunkStr ? JSON.parse(localChunkStr) : {};
-
-          for (const [id, incomingItem] of Object.entries(items)) {
-            const localItem = localItems[id];
-            if (!localItem) {
-              updatedContentCount++;
-            } else if (!isContentDataEqual(localItem, incomingItem)) {
-              updatedContentCount++;
-            }
-          }
-
-          if (pendingChunkIds.has(chunkId)) {
-            const itemIds = pendingItemsMap[chunkId];
-            if (Array.isArray(itemIds) && itemIds.length > 0) {
-              for (const itemId of itemIds) {
-                if (localItems[itemId]) {
-                  items[itemId] = localItems[itemId];
-                } else {
-                  delete items[itemId];
-                }
-              }
-            } else {
-              items = { ...items, ...localItems };
-            }
-          }
-
-          safeStorage.setItem('admin_content_chunk_' + chunkId, JSON.stringify(items));
-          safeStorage.setItem('admin_synced_content_chunk_' + chunkId, JSON.stringify(items));
-          localMeta[chunkId] = {
-            updatedAt: cDoc.data().updatedAt || getUtcVersion(),
-            count: Object.keys(items).length
-          };
-          updatedSomething = true;
-        }
-      });
-
-      // Clean up any stale admin chunks that no longer exist on server and have no pending changes
-      const allLocalKeys = safeStorage.keys().filter(k => k.startsWith('admin_content_chunk_'));
-      for (const key of allLocalKeys) {
-        const cid = key.replace('admin_content_chunk_', '');
-        if (!serverChunkIds.has(cid) && !pendingChunkIds.has(cid)) {
-          safeStorage.removeItem(key);
-          safeStorage.removeItem('admin_synced_content_chunk_' + cid);
-          delete localMeta[cid];
-          updatedSomething = true;
-        }
-      }
-
-      safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
-
-      // Also sync all collections from collection_chunks
-      const collSnap = await runWithNetwork(() => getDocs(collection(db, 'collection_chunks')));
-      let allCollections: AppCollection[] = [];
-      collSnap.docs.forEach((cDoc) => {
-        const items = cDoc.data().items || {};
-        const chunkList = Object.values(items) as AppCollection[];
-        allCollections = [...allCollections, ...chunkList];
-        safeStorage.setItem('admin_collection_chunk_' + cDoc.id, JSON.stringify(items));
-        safeStorage.setItem('admin_synced_collection_chunk_' + cDoc.id, JSON.stringify(items));
-      });
-
-      if (allCollections.length > 0) {
-        const sorted = allCollections.sort((a, b) => (b.order || 0) - (a.order || 0));
-        setCollections(sorted);
-        safeStorage.setItem('admin_collections_cache', JSON.stringify(sorted));
-        updatedSomething = true;
-      }
+      const res = await quickRefreshCatalog(true, undefined, false);
+      updatedSomething = res.updated;
+      updatedContentCount = res.updatedCount;
     } catch (err) {
       console.error("Error during admin syncWithServer:", err);
     }
@@ -946,7 +859,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   const quickRefreshCatalog = async (manual: boolean = false, prefetchedVersions?: Record<string, any>, forceAdminSync: boolean = false): Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }> => {
     // Strictly require explicit manual click from the Content Management tab's refresh button.
     // Do not refresh automatically on tab open or from any other refresh button.
-    if (!manual || !forceAdminSync) {
+    if (!manual) {
         refreshContentFromLocal();
         refreshCollectionsFromLocal();
         setLoading(false);
@@ -1032,16 +945,117 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       let localMeta: Record<string, any> = {};
       try { localMeta = JSON.parse(localMetaString); } catch(e) {}
 
-      // 2. Fetch content chunks directly or via version diff
-      if (forceAdminSync) {
-        // Direct full fetch of all content_chunks to guarantee 100% of all content items are loaded
-        const chunkDocsSnap = await runWithNetwork(() => getDocs(collection(db, 'content_chunks')));
-        const serverChunkIds = new Set<string>();
+      // 2. Compare content chunk versions — ONLY get newer or changed chunks!
+      const chunksToFetch: string[] = [];
+      const serverChunkIds = new Set<string>();
 
-        chunkDocsSnap.docs.forEach((cDoc) => {
-          const chunkId = cDoc.id;
-          if (chunkId === 'metadata') {
-            const data = cDoc.data();
+      for (const [chunkId, versionMeta] of Object.entries(versions)) {
+        if (['collections', 'notifications', 'lastGlobalUpdate', 'metadata', 'users', 'fcm_tokens', 'settings'].includes(chunkId)) continue;
+        if (!chunkId.startsWith('movie_chunk_') && !chunkId.startsWith('series_chunk_')) continue;
+
+        serverChunkIds.add(chunkId);
+        const serverVersion = typeof versionMeta === 'object' ? (versionMeta as any).updatedAt : versionMeta;
+        const localV = localMeta[chunkId];
+        const localVersion = typeof localV === 'object' ? localV.updatedAt : localV;
+        const hasData = !!safeStorage.getItem('admin_content_chunk_' + chunkId);
+
+        const serverVersionTime = parseVersionTime(serverVersion);
+        const localVersionTime = parseVersionTime(localVersion);
+
+        // ONLY fetch if chunk data is missing locally OR server version is strictly newer!
+        if (!hasData || serverVersionTime > localVersionTime) {
+          chunksToFetch.push(chunkId);
+        }
+      }
+
+      const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
+      const pendingChunkIds = new Set(JSON.parse(pendingStr));
+      const pendingItemsMapStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
+      let pendingItemsMap: Record<string, any> = {};
+      try { pendingItemsMap = JSON.parse(pendingItemsMapStr); } catch(e) {}
+
+      if (chunksToFetch.length > 0) {
+        await Promise.all(chunksToFetch.map(async (chunkId) => {
+          try {
+            const chunkDoc = await runWithNetwork(() => getDoc(doc(db, 'content_chunks', chunkId)));
+            if (chunkDoc.exists()) {
+              let items = chunkDoc.data().items || {};
+              const localChunkStr = safeStorage.getItem('admin_content_chunk_' + chunkId);
+              let localItems: Record<string, any> = {};
+              if (localChunkStr) {
+                try { localItems = JSON.parse(localChunkStr); } catch(e) {}
+              }
+
+              if (pendingChunkIds.has(chunkId)) {
+                const itemIds = pendingItemsMap[chunkId];
+                if (Array.isArray(itemIds) && itemIds.length > 0) {
+                  for (const itemId of itemIds) {
+                    if (localItems[itemId]) {
+                      items[itemId] = localItems[itemId];
+                    } else {
+                      delete items[itemId];
+                    }
+                  }
+                } else {
+                  items = { ...items, ...localItems };
+                }
+              }
+
+              if (!isLibraryEmpty) {
+                for (const [id, incomingItem] of Object.entries(items)) {
+                  const localItem = localItems[id];
+                  if (!localItem) {
+                    totalUpdatedContentCount++;
+                  } else if (!isContentDataEqual(localItem, incomingItem)) {
+                    totalUpdatedContentCount++;
+                  }
+                }
+              }
+
+              safeStorage.setItem('admin_content_chunk_' + chunkId, JSON.stringify(items));
+              safeStorage.setItem('admin_synced_content_chunk_' + chunkId, JSON.stringify(items));
+              localMeta[chunkId] = typeof versions[chunkId] === 'object'
+                ? versions[chunkId]
+                : { updatedAt: versions[chunkId], count: Object.keys(items).length };
+              updatedSomething = true;
+            }
+          } catch(err) {
+            console.error(`Error fetching chunk ${chunkId}:`, err);
+          }
+        }));
+
+        safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
+        refreshContentFromLocal();
+      }
+
+      // Remove any local admin chunk files that no longer exist on server and have no pending changes
+      const allLocalKeys = safeStorage.keys().filter(k => k.startsWith('admin_content_chunk_'));
+      for (const key of allLocalKeys) {
+        const cid = key.replace('admin_content_chunk_', '');
+        if (!serverChunkIds.has(cid) && !pendingChunkIds.has(cid)) {
+          safeStorage.removeItem(key);
+          safeStorage.removeItem('admin_synced_content_chunk_' + cid);
+          delete localMeta[cid];
+          updatedSomething = true;
+        }
+      }
+
+      // 3. Compare metadata version (genres, languages, qualities) - ONLY get if newer or missing
+      const metadataMeta = versions.metadata;
+      const metadataVersion = metadataMeta ? (typeof metadataMeta === 'object' ? metadataMeta.updatedAt : metadataMeta) : 0;
+      const localMetaV = localMeta.metadata;
+      const localMetaVersion = typeof localMetaV === 'object' ? localMetaV.updatedAt : localMetaV;
+      const genresCacheStr = safeStorage.getItem('admin_genres_cache');
+      const hasMetadata = !!genresCacheStr && genresCacheStr !== '[]';
+
+      const metadataVersionTime = parseVersionTime(metadataVersion);
+      const localMetaVersionTime = parseVersionTime(localMetaVersion);
+
+      if (!hasMetadata || metadataVersionTime > localMetaVersionTime) {
+        try {
+          const metaDoc = await getDoc(doc(db, 'content_chunks', 'metadata'));
+          if (metaDoc.exists()) {
+            const data = metaDoc.data();
             const chunksGenres = data.genres || [];
             const chunksLanguages = data.languages || [];
             const chunksQualities = data.qualities || [];
@@ -1049,254 +1063,64 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             safeStorage.setItem('admin_genres_cache', JSON.stringify(chunksGenres));
             safeStorage.setItem('admin_languages_cache', JSON.stringify(chunksLanguages));
             safeStorage.setItem('admin_qualities_cache', JSON.stringify(chunksQualities));
-
+            if (metadataVersion) {
+              localMeta.metadata = metadataVersion;
+              safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
+            }
             setGenres([...chunksGenres].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
             setLanguages([...chunksLanguages].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
             setQualities([...chunksQualities].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
             updatedSomething = true;
-            return;
           }
-
-          if (chunkId.startsWith('movie_chunk_') || chunkId.startsWith('series_chunk_')) {
-            serverChunkIds.add(chunkId);
-            let items = cDoc.data().items || {};
-            const localChunkStr = safeStorage.getItem('admin_content_chunk_' + chunkId);
-            const localItems: Record<string, any> = localChunkStr ? JSON.parse(localChunkStr) : {};
-
-            for (const [id, incomingItem] of Object.entries(items)) {
-              const localItem = localItems[id];
-              if (!localItem) {
-                totalUpdatedContentCount++;
-              } else if (!isContentDataEqual(localItem, incomingItem)) {
-                totalUpdatedContentCount++;
-              }
-            }
-
-            const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
-            const pendingChunkIds = new Set(JSON.parse(pendingStr));
-            const pendingItemsMapStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
-            let pendingItemsMap: Record<string, any> = {};
-            try { pendingItemsMap = JSON.parse(pendingItemsMapStr); } catch(e) {}
-
-            if (pendingChunkIds.has(chunkId)) {
-              const itemIds = pendingItemsMap[chunkId];
-              if (Array.isArray(itemIds) && itemIds.length > 0) {
-                for (const itemId of itemIds) {
-                  if (localItems[itemId]) {
-                    items[itemId] = localItems[itemId];
-                  } else {
-                    delete items[itemId];
-                  }
-                }
-              } else {
-                items = { ...items, ...localItems };
-              }
-            }
-
-            safeStorage.setItem('admin_content_chunk_' + chunkId, JSON.stringify(items));
-            safeStorage.setItem('admin_synced_content_chunk_' + chunkId, JSON.stringify(items));
-            localMeta[chunkId] = {
-              updatedAt: cDoc.data().updatedAt || getUtcVersion(),
-              count: Object.keys(items).length
-            };
-            updatedSomething = true;
-          }
-        });
-
-        // Remove any local admin chunk files that no longer exist on server and have no pending changes
-        const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
-        const pendingChunkIds = new Set(JSON.parse(pendingStr));
-        const allLocalKeys = safeStorage.keys().filter(k => k.startsWith('admin_content_chunk_'));
-        for (const key of allLocalKeys) {
-          const cid = key.replace('admin_content_chunk_', '');
-          if (!serverChunkIds.has(cid) && !pendingChunkIds.has(cid)) {
-            safeStorage.removeItem(key);
-            safeStorage.removeItem('admin_synced_content_chunk_' + cid);
-            delete localMeta[cid];
-            updatedSomething = true;
-          }
+        } catch (e) {
+          console.error("Error fetching metadata chunk:", e);
         }
+      }
 
-        safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
+      // 4. Compare collections version - ONLY get newer version or missing
+      const collectionsMeta = versions.collections;
+      const collectionsVersion = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.updatedAt : collectionsMeta) || 0;
+      const localCollectionsVersion = typeof localMeta.collections === 'object' ? localMeta.collections.updatedAt : localMeta.collections || 0;
+      const hasCollectionsCache = !!safeStorage.getItem('admin_collections_cache');
 
-        // Also fetch all collections directly
-        const collSnap = await runWithNetwork(() => getDocs(collection(db, 'collection_chunks')));
-        let allCollections: AppCollection[] = [];
-        collSnap.docs.forEach((cDoc) => {
-          const items = cDoc.data().items || {};
-          const chunkList = Object.values(items) as AppCollection[];
-          allCollections = [...allCollections, ...chunkList];
-          safeStorage.setItem('admin_collection_chunk_' + cDoc.id, JSON.stringify(items));
-          safeStorage.setItem('admin_synced_collection_chunk_' + cDoc.id, JSON.stringify(items));
-        });
+      const collectionsVersionTime = parseVersionTime(collectionsVersion);
+      const localCollectionsVersionTime = parseVersionTime(localCollectionsVersion);
 
-        if (allCollections.length > 0) {
+      if (!hasCollectionsCache || collectionsVersionTime > localCollectionsVersionTime) {
+        try {
+          const latestCollChunkId = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.latestChunkId : null) || 'collection_chunk_0';
+          const matchIndex = latestCollChunkId.match(/(\d+)$/);
+          const maxIndex = matchIndex ? parseInt(matchIndex[1]) : 0;
+          
+          let allCollections: AppCollection[] = [];
+          const collPromises = [];
+          for (let i = 0; i <= maxIndex; i++) {
+            const cid = 'collection_chunk_' + i;
+            collPromises.push(
+              getDoc(doc(db, 'collection_chunks', cid))
+                .then(cDoc => ({ cid, cDoc }))
+                .catch(() => null)
+            );
+          }
+          const collResults = await Promise.all(collPromises);
+          for (const res of collResults) {
+            if (res && res.cDoc && res.cDoc.exists()) {
+              const items = res.cDoc.data().items || {};
+              const chunkList = Object.values(items) as AppCollection[];
+              allCollections = [...allCollections, ...chunkList];
+              safeStorage.setItem('admin_collection_chunk_' + res.cid, JSON.stringify(items));
+              safeStorage.setItem('admin_synced_collection_chunk_' + res.cid, JSON.stringify(items));
+            }
+          }
           const sorted = allCollections.sort((a, b) => (b.order || 0) - (a.order || 0));
           setCollections(sorted);
           safeStorage.setItem('admin_collections_cache', JSON.stringify(sorted));
-          updatedSomething = true;
-        }
-
-        refreshContentFromLocal();
-        refreshCollectionsFromLocal();
-      } else {
-        const chunksToFetch: string[] = [];
-        for (const [chunkId, versionMeta] of Object.entries(versions)) {
-          if (['collections', 'notifications', 'lastGlobalUpdate', 'metadata', 'users', 'fcm_tokens', 'settings'].includes(chunkId)) continue;
-          
-          const serverVersion = typeof versionMeta === 'object' ? (versionMeta as any).updatedAt : versionMeta;
-          const localV = localMeta[chunkId];
-          const localVersion = typeof localV === 'object' ? localV.updatedAt : localV;
-          const hasData = !!safeStorage.getItem('admin_content_chunk_' + chunkId);
-
-          const serverVersionTime = parseVersionTime(serverVersion);
-          const localVersionTime = parseVersionTime(localVersion);
-
-          if (manual || !hasData || !localVersionTime || localVersionTime < serverVersionTime) {
-            chunksToFetch.push(chunkId);
-          }
-        }
-
-        if (chunksToFetch.length > 0) {
-          const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
-          const pendingChunkIds = new Set(JSON.parse(pendingStr));
-          const pendingItemsMapStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
-          let pendingItemsMap: Record<string, any> = {};
-          try { pendingItemsMap = JSON.parse(pendingItemsMapStr); } catch(e) {}
-
-          await Promise.all(chunksToFetch.map(async (chunkId) => {
-            try {
-              const chunkDoc = await runWithNetwork(() => getDoc(doc(db, 'content_chunks', chunkId)));
-              if (chunkDoc.exists()) {
-                let items = chunkDoc.data().items || {};
-                const localChunkStr = safeStorage.getItem('admin_content_chunk_' + chunkId);
-                let localItems: Record<string, any> = {};
-                if (localChunkStr) {
-                  try { localItems = JSON.parse(localChunkStr); } catch(e) {}
-                }
-
-                if (pendingChunkIds.has(chunkId)) {
-                  const itemIds = pendingItemsMap[chunkId];
-                  if (Array.isArray(itemIds) && itemIds.length > 0) {
-                    for (const itemId of itemIds) {
-                      if (localItems[itemId]) {
-                        items[itemId] = localItems[itemId];
-                      } else {
-                        delete items[itemId];
-                      }
-                    }
-                  } else {
-                    items = { ...items, ...localItems };
-                  }
-                }
-
-                if (!isLibraryEmpty) {
-                  for (const [id, incomingItem] of Object.entries(items)) {
-                    const localItem = localItems[id];
-                    if (!localItem) {
-                      totalUpdatedContentCount++;
-                    } else if (!isContentDataEqual(localItem, incomingItem)) {
-                      totalUpdatedContentCount++;
-                    }
-                  }
-                }
-
-                safeStorage.setItem('admin_content_chunk_' + chunkId, JSON.stringify(items));
-                safeStorage.setItem('admin_synced_content_chunk_' + chunkId, JSON.stringify(items));
-                localMeta[chunkId] = typeof versions[chunkId] === 'object'
-                  ? versions[chunkId]
-                  : { updatedAt: versions[chunkId], count: Object.keys(items).length };
-                updatedSomething = true;
-              }
-            } catch(err) {
-              console.error(`Error fetching chunk ${chunkId}:`, err);
-            }
-          }));
+          localMeta.collections = collectionsVersion;
           safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
-          refreshContentFromLocal();
-        }
-
-        // 3. Compare metadata version (genres, languages, qualities)
-        const metadataMeta = versions.metadata;
-        const metadataVersion = metadataMeta ? (typeof metadataMeta === 'object' ? metadataMeta.updatedAt : metadataMeta) : 0;
-        const localMetaV = localMeta.metadata;
-        const localMetaVersion = typeof localMetaV === 'object' ? localMetaV.updatedAt : localMetaV;
-        const genresCacheStr = safeStorage.getItem('admin_genres_cache');
-        const hasMetadata = !!genresCacheStr && genresCacheStr !== '[]';
-
-        const metadataVersionTime = parseVersionTime(metadataVersion);
-        const localMetaVersionTime = parseVersionTime(localMetaVersion);
-
-        if (manual || !hasMetadata || !localMetaVersionTime || localMetaVersionTime < metadataVersionTime) {
-          try {
-            const metaDoc = await getDoc(doc(db, 'content_chunks', 'metadata'));
-            if (metaDoc.exists()) {
-              const data = metaDoc.data();
-              const chunksGenres = data.genres || [];
-              const chunksLanguages = data.languages || [];
-              const chunksQualities = data.qualities || [];
-
-              safeStorage.setItem('admin_genres_cache', JSON.stringify(chunksGenres));
-              safeStorage.setItem('admin_languages_cache', JSON.stringify(chunksLanguages));
-              safeStorage.setItem('admin_qualities_cache', JSON.stringify(chunksQualities));
-              if (metadataVersion) {
-                localMeta.metadata = metadataVersion;
-                safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
-              }
-              setGenres([...chunksGenres].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
-              setLanguages([...chunksLanguages].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
-              setQualities([...chunksQualities].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
-              updatedSomething = true;
-            }
-          } catch (e) {
-            console.error("Error fetching metadata chunk:", e);
-          }
-        }
-
-        // 4. Compare collections version
-        const collectionsMeta = versions.collections;
-        const collectionsVersion = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.updatedAt : collectionsMeta) || 0;
-        const localCollectionsVersion = localMeta.collections || 0;
-        const hasCollectionsCache = !!safeStorage.getItem('admin_collections_cache');
-
-        const collectionsVersionTime = parseVersionTime(collectionsVersion);
-        const localCollectionsVersionTime = parseVersionTime(localCollectionsVersion);
-
-        if (manual || !hasCollectionsCache || !localCollectionsVersionTime || localCollectionsVersionTime < collectionsVersionTime) {
-          try {
-            const latestCollChunkId = (collectionsMeta && typeof collectionsMeta === 'object' ? collectionsMeta.latestChunkId : null) || 'collection_chunk_0';
-            const matchIndex = latestCollChunkId.match(/(\d+)$/);
-            const maxIndex = matchIndex ? parseInt(matchIndex[1]) : 0;
-            
-            let allCollections: AppCollection[] = [];
-            const collPromises = [];
-            for (let i = 0; i <= maxIndex; i++) {
-              const cid = 'collection_chunk_' + i;
-              collPromises.push(
-                getDoc(doc(db, 'collection_chunks', cid))
-                  .then(cDoc => ({ cid, cDoc }))
-                  .catch(() => null)
-              );
-            }
-            const collResults = await Promise.all(collPromises);
-            for (const res of collResults) {
-              if (res && res.cDoc && res.cDoc.exists()) {
-                const items = res.cDoc.data().items || {};
-                const chunkList = Object.values(items) as AppCollection[];
-                allCollections = [...allCollections, ...chunkList];
-                safeStorage.setItem('admin_collection_chunk_' + res.cid, JSON.stringify(items));
-                safeStorage.setItem('admin_synced_collection_chunk_' + res.cid, JSON.stringify(items));
-              }
-            }
-            const sorted = allCollections.sort((a, b) => (b.order || 0) - (a.order || 0));
-            setCollections(sorted);
-            safeStorage.setItem('admin_collections_cache', JSON.stringify(sorted));
-            localMeta.collections = collectionsVersion;
-            safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
-            updatedSomething = true;
-          } catch (e) {
-            console.error("Error fetching collection chunks:", e);
-          }
+          updatedSomething = true;
+          refreshCollectionsFromLocal();
+        } catch (e) {
+          console.error("Error fetching collection chunks:", e);
         }
       }
 

@@ -496,8 +496,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         return { users: locallyCachedUsers, updatedSomething: false };
       }
 
+      // Non-privileged users NEVER need to fetch the users collection
       const isPrivileged = isUserPrivileged(user, profile);
-      if (!isPrivileged && !user) {
+      if (!isPrivileged) {
         setLoading(false);
         return { users: locallyCachedUsers, updatedSomething: false };
       }
@@ -506,9 +507,9 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       const lastFetchTimeStr = safeStorage.getItem('last_users_sync_timestamp');
       const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
 
-      const FIFTEEN_SECONDS_MS = 15 * 1000;
-      // Cooldown for non-forced fetch: if within 15 seconds, return local cache
-      if (!force && (now - lastFetchTime < FIFTEEN_SECONDS_MS) && locallyCachedUsers.length > 0) {
+      const THIRTY_SECONDS_MS = 30 * 1000;
+      // Cooldown for non-forced fetch: if within 30 seconds, return local cache
+      if (!force && (now - lastFetchTime < THIRTY_SECONDS_MS) && locallyCachedUsers.length > 0) {
         setLoading(false);
         return { users: locallyCachedUsers, updatedSomething: false };
       }
@@ -521,53 +522,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       }
       
       try {
-        // ONLY perform a full collection scan if explicitly forced with forceFull OR local cache is completely empty
-        if (forceFull || locallyCachedUsers.length === 0) {
-          const snap = await runWithNetwork(() => getDocs(collection(db, 'users')));
-          const initialMap = new Map<string, UserProfile>();
-          const initialMtimes: Record<string, any> = {};
-
-          snap.docs.forEach(docSnap => {
-            const raw = { ...docSnap.data(), uid: docSnap.id } as UserProfile;
-            const normalized = normalizeUserStatusAndExpiry(raw);
-            initialMap.set(docSnap.id, normalized);
-            initialMtimes[docSnap.id] = normalized.updatedAt || getUtcVersion();
-          });
-
-          let initialList = Array.from(initialMap.values());
-          // Safety guard: if query returns 0 docs but we already had locallyCachedUsers, preserve local cache!
-          if (initialList.length === 0 && locallyCachedUsers.length > 0) {
-            console.warn("[UsersContext] Server returned empty user list; preserving existing cache");
-            setLoading(false);
-            return { users: locallyCachedUsers, updatedSomething: false };
-          }
-
-          // Preserve any uncommitted local pending updates
-          const pendingStr = safeStorage.getItem('pending_user_updates');
-          if (pendingStr) {
-            try {
-              const pending = JSON.parse(pendingStr);
-              initialList = initialList.map(u => {
-                if (pending[u.uid]) {
-                  return normalizeUserStatusAndExpiry({ ...u, ...pending[u.uid] });
-                }
-                return u;
-              });
-            } catch (e) {}
-          }
-
-          if (initialList.length > 0) {
-            saveUsersCache(initialList, initialMtimes);
-            setUsers(initialList);
-          }
-          safeStorage.setItem('last_users_sync_timestamp', now.toString());
-          setLoading(false);
-          setError(null);
-          return { users: initialList.length > 0 ? initialList : locallyCachedUsers, updatedSomething: true };
-        }
-
-        // DELTA SYNC using chunk_meta (consumes only 1 read for chunk_meta + 1 per changed user)
-        // When force is true, bypasses all chunk_meta cooldowns to immediately fetch latest server versions
+        // ALWAYS use chunk_meta versions delta sync: only read chunk_meta (1 read), then fetch only updated users
         const versions = await getChunkMeta(force);
         const serverUsersVersion: Record<string, any> = (versions && typeof versions === 'object' && versions.users && typeof versions.users === 'object') ? versions.users : {};
 
@@ -581,12 +536,42 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         locallyCachedUsers.forEach(u => {
           if (u && u.uid) {
             currentUsersMap.set(u.uid, normalizeUserStatusAndExpiry(u));
+            // Ensure local version map has this user's known updatedAt if sync_user_mtimes lacked it
+            if (!localUsersVersion[u.uid] && u.updatedAt) {
+              localUsersVersion[u.uid] = u.updatedAt;
+            }
           }
         });
+
+        const currentMetaUsersStr = JSON.stringify(serverUsersVersion);
+        const lastCheckedMetaUsersStr = safeStorage.getItem('last_users_meta_snapshot');
+
+        // Check if server chunk_meta users manifest is unchanged and we have local cached users
+        if (!force && locallyCachedUsers.length > 0 && lastCheckedMetaUsersStr && lastCheckedMetaUsersStr === currentMetaUsersStr) {
+          let finalUsers = Array.from(currentUsersMap.values());
+          const pendingStr = safeStorage.getItem('pending_user_updates');
+          if (pendingStr) {
+            try {
+              const pending = JSON.parse(pendingStr);
+              finalUsers = finalUsers.map(u => {
+                if (pending[u.uid]) {
+                  return normalizeUserStatusAndExpiry({ ...u, ...pending[u.uid] });
+                }
+                return u;
+              });
+            } catch (e) {}
+          }
+          setUsers(finalUsers);
+          safeStorage.setItem('last_users_sync_timestamp', now.toString());
+          setLoading(false);
+          setError(null);
+          return { users: finalUsers, updatedSomething: false };
+        }
 
         const uidsToFetch = new Set<string>();
         let hadDeletions = false;
 
+        // Check which users have newer version on server or are missing locally
         for (const [uid, serverVer] of Object.entries(serverUsersVersion)) {
           if (!uid || typeof uid !== 'string' || uid.trim() === '' || uid.includes('/') || uid === 'null' || uid === 'undefined') continue;
           const cleanUid = uid.trim();
@@ -603,17 +588,23 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           }
 
           if (serverTime > 0) {
-            const localVer = localUsersVersion[cleanUid];
-            const localTime = parseVersionTime(localVer);
             const userInLocal = currentUsersMap.get(cleanUid);
+            const localVer = localUsersVersion[cleanUid];
+            const localMtime = parseVersionTime(localVer);
+            const userUpdatedAtTime = userInLocal ? parseVersionTime(userInLocal.updatedAt) : 0;
+            const effectiveLocalTime = Math.max(localMtime, userUpdatedAtTime);
 
-            if (!userInLocal || localVer === undefined || serverTime > localTime || (localVer !== serverVer && serverTime >= localTime)) {
+            // Fetch ONLY if not present in local cache OR server version is strictly newer than local doc!
+            if (!userInLocal || effectiveLocalTime === 0 || serverTime > effectiveLocalTime) {
               uidsToFetch.add(cleanUid);
+            } else {
+              // Local document is already matching or newer than server version -> Keep local doc!
+              localUsersVersion[cleanUid] = serverVer;
             }
           }
         }
 
-        // Check for orphaned/deleted users that exist in local cache but are absent from chunk_meta.users on server
+        // If local cache had users that are explicitly marked deleted in chunk_meta.users on server, remove them
         if (Object.keys(serverUsersVersion).length > 0) {
           for (const [cachedUid] of currentUsersMap) {
             const serverVer = serverUsersVersion[cachedUid];
@@ -621,14 +612,12 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
               currentUsersMap.delete(cachedUid);
               delete localUsersVersion[cachedUid];
               hadDeletions = true;
-            } else if (serverVer === undefined) {
-              // Absent from chunk_meta: add to uidsToFetch to verify against Firestore doc. If missing, it will be pruned below.
-              uidsToFetch.add(cachedUid);
             }
           }
         }
 
-        if (uidsToFetch.size === 0 && !hadDeletions) {
+        // If no user documents changed on server, return local cache immediately (0 user document reads!)
+        if (uidsToFetch.size === 0 && !hadDeletions && locallyCachedUsers.length > 0) {
           let finalUsers = Array.from(currentUsersMap.values());
           const pendingStr = safeStorage.getItem('pending_user_updates');
           if (pendingStr) {
@@ -643,6 +632,8 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
             } catch (e) {}
           }
 
+          safeStorage.setItem('last_users_meta_snapshot', currentMetaUsersStr);
+          saveUsersCache(finalUsers, localUsersVersion);
           setUsers(finalUsers);
           safeStorage.setItem('last_users_sync_timestamp', now.toString());
           setLoading(false);
@@ -650,7 +641,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           return { users: finalUsers, updatedSomething: false };
         }
 
-        // Fetch ONLY the delta changed users from Firestore
+        // Fetch ONLY the delta changed users from Firestore matching chunk_meta version
         const validUids = Array.from(uidsToFetch);
         if (validUids.length > 0) {
           const chunks: string[][] = [];
@@ -684,9 +675,11 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
             chunk.forEach(reqUid => {
               if (!foundUids.has(reqUid)) {
+                // If a user was in chunk_meta.users but does not exist in Firestore 'users':
+                // Record checked version so we do NOT loop and re-fetch this missing user ID
+                localUsersVersion[reqUid] = serverUsersVersion[reqUid] || 1;
                 if (currentUsersMap.has(reqUid)) {
                   currentUsersMap.delete(reqUid);
-                  delete localUsersVersion[reqUid];
                   hadDeletions = true;
                 }
               }
@@ -708,13 +701,14 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
           } catch (e) {}
         }
 
+        safeStorage.setItem('last_users_meta_snapshot', currentMetaUsersStr);
         saveUsersCache(finalUsers, localUsersVersion);
         setUsers(finalUsers);
         safeStorage.setItem('last_users_sync_timestamp', now.toString());
         setLoading(false);
         setError(null);
 
-        return { users: finalUsers, updatedSomething: true };
+        return { users: finalUsers, updatedSomething: validUids.length > 0 || hadDeletions };
       } catch (err: any) {
         console.error('Error fetching users:', err);
         setError(err.message || 'Failed to fetch users');
