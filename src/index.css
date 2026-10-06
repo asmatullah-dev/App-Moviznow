@@ -35,7 +35,6 @@
 
 @layer base {
   :root {
-    color-scheme: light;
     --background: #ffffff;
     --foreground: #09090b;
     --card: #ffffff;
@@ -46,7 +45,6 @@
   }
 
   .dark {
-    color-scheme: dark;
     --background: #09090b;
     --foreground: #fafafa;
     --card: #09090b;
@@ -55,30 +53,6 @@
     --muted: #27272a;
     --muted-foreground: #a1a1aa;
   }
-}
-
-/* Ensure native select dropdown options, optgroups, inputs and labels respect theme */
-select option,
-select optgroup {
-  background-color: #ffffff;
-  color: #09090b;
-}
-
-.dark select option,
-.dark select optgroup,
-.dark select,
-.dark input,
-.dark textarea,
-.dark input[type="date"],
-.dark input[type="time"],
-.dark input[type="datetime-local"] {
-  color-scheme: dark;
-  background-color: #18181b;
-  color: #fafafa;
-}
-
-.dark label {
-  color: #f4f4f5;
 }
 
 .urdu-font {
@@ -182,5 +156,3 @@ body {
     transform: none !important;
   }
 }
-
-

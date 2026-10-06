@@ -682,8 +682,8 @@ export default function Membership() {
               </p>
 
               {/* Explicit VIP Guarantee Callout */}
-              <div className="bg-emerald-50 dark:bg-transparent dark:bg-gradient-to-r dark:from-emerald-500/10 dark:via-amber-500/15 dark:to-emerald-500/10 border border-emerald-500/30 dark:border-emerald-500/40 rounded-2xl p-4 text-center max-w-2xl mx-auto shadow-lg backdrop-blur-md">
-                <p className="text-xs sm:text-sm font-extrabold text-emerald-800 dark:text-emerald-300 flex items-center justify-center gap-2">
+              <div className="bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-500/30 dark:border-emerald-500/40 rounded-2xl p-4 text-center max-w-2xl mx-auto shadow-lg backdrop-blur-md">
+                <p className="text-xs sm:text-sm font-extrabold text-emerald-800 dark:text-emerald-400 flex items-center justify-center gap-2">
                   <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                   <span>{t("VIP Guarantee: Unlimited High-Speed HD Streaming & Direct Downloads")}</span>
                 </p>
@@ -854,7 +854,7 @@ export default function Membership() {
             {/* 2 Years VIP Mega Banner */}
             <motion.div 
               whileHover={{ scale: 1.01 }}
-              className="bg-white/95 dark:bg-gradient-to-r dark:from-zinc-950 dark:via-purple-950/60 dark:to-zinc-950 border-2 border-purple-500/60 hover:border-purple-400 rounded-3xl p-6 sm:p-10 max-w-4xl mx-auto shadow-2xl shadow-purple-500/20 backdrop-blur-xl relative overflow-hidden mt-8"
+              className="bg-white/95 dark:bg-transparent dark:bg-gradient-to-r dark:from-zinc-950 dark:via-purple-950/60 dark:to-zinc-950 border-2 border-purple-500/60 hover:border-purple-400 rounded-3xl p-6 sm:p-10 max-w-4xl mx-auto shadow-2xl shadow-purple-500/20 backdrop-blur-xl relative overflow-hidden mt-8"
             >
               <div className="absolute top-0 right-0 bg-gradient-to-r from-rose-600 via-purple-600 to-amber-500 text-white text-[10px] sm:text-xs font-black uppercase px-4 py-1.5 rounded-bl-xl shadow-lg tracking-wider flex items-center gap-1.5">
                 <Crown className="w-3.5 h-3.5 fill-current" />
