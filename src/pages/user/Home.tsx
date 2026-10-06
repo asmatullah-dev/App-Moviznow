@@ -80,7 +80,6 @@ export default function Home({
     qualities,
     collections,
     loading,
-    checkForUpdates,
     quickRefreshCatalog,
   } = useContent();
   const { t, language } = useLanguage();
@@ -1439,16 +1438,11 @@ export default function Home({
               <button
                 onClick={() => {
                   vibrate(50);
-                  if ((window as any).triggerRefreshAppData) {
-                    (window as any).triggerRefreshAppData('manual');
-                  } else {
-                    checkForUpdates(true).catch(console.error);
-                  }
+                  clearFilters();
                 }}
                 className="px-6 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 font-bold border border-emerald-500/20 transition-all active:scale-95 flex items-center gap-2"
               >
-                <RefreshCw className="w-5 h-5" />
-                {t("Refresh Library")}
+                {t("Clear Filters")}
               </button>
             </div>
           ) : (

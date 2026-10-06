@@ -258,9 +258,6 @@ export default function MovieDetails() {
     loading: contentLoading,
     isOffline,
     getContent,
-    
-    
-    checkForUpdates,
   } = useContent();
   const adminContentContext = useAdminContent();
   const { contentList: adminContentList, getContent: getAdminContent } = adminContentContext;
@@ -277,7 +274,6 @@ export default function MovieDetails() {
   const { settings, refreshSettings } = useSettings();
   const [hasAttemptedGlobalRefresh, setHasAttemptedGlobalRefresh] =
     useState(false);
-  const [isManualRefreshing, setIsManualRefreshing] = useState(false);
   const [showOriginalSynopsis, setShowOriginalSynopsis] = useState(false);
 
   const content = useMemo(() => {
@@ -1802,43 +1798,12 @@ export default function MovieDetails() {
     };
   }, []);
 
-  const isLibraryEmpty = contentList.length === 0;
-
-  useEffect(() => {
-    if (isOffline || contentLoading) return;
-
-    // When movie details page is opened and library is empty, load content automatically and show toast
-    if (isLibraryEmpty && !hasAttemptedGlobalRefresh) {
-      setHasAttemptedGlobalRefresh(true);
-      if ((window as any).triggerRefreshAppData) {
-        (window as any).triggerRefreshAppData('app_open');
-      } else {
-        checkForUpdates(true).catch((e) =>
-          console.error("Error auto-loading catalog on empty library:", e)
-        );
-        refreshProfile(false).catch((e) =>
-          console.error("Error refreshing profile:", e)
-        );
-      }
-    } else if (!isLibraryEmpty && !hasAttemptedGlobalRefresh) {
-      // Library is NOT empty: mark as attempted so we don't auto update or show global search loader
-      setHasAttemptedGlobalRefresh(true);
-    }
-  }, [
-    contentLoading,
-    isLibraryEmpty,
-    hasAttemptedGlobalRefresh,
-    isOffline,
-    checkForUpdates,
-    refreshProfile,
-  ]);
-
   const isAuthorized = mergedContent
     ? canManageContent(profile, user) || mergedContent.status !== "draft"
     : false;
 
   if (!mergedContent || !isAuthorized) {
-    if (contentLoading || loading || isManualRefreshing) {
+    if (contentLoading || loading) {
       return <MovieDetailsSkeleton onBack={handleGoBack} />;
     }
     return (
@@ -1854,41 +1819,9 @@ export default function MovieDetails() {
           </div>
           
           <div className="pt-4 flex flex-col gap-3">
-            <button
-              onClick={async () => {
-                vibrate(50);
-                setIsManualRefreshing(true);
-                try {
-                  if ((window as any).triggerSyncUserData) {
-                    await (window as any).triggerSyncUserData('manual');
-                  }
-                  if ((window as any).triggerRefreshAppData) {
-                    await (window as any).triggerRefreshAppData('manual');
-                  } else {
-                    await Promise.all([
-                      checkForUpdates(true),
-                      refreshProfile(true, 'manual'),
-                      refreshSettings(true)
-                    ]);
-                  }
-                  // Give a small delay for state to propagate
-                  await new Promise(resolve => setTimeout(resolve, 800));
-                } catch (e) {
-                  console.error("Manual refresh failed", e);
-                } finally {
-                  setIsManualRefreshing(false);
-                }
-              }}
-              disabled={isSyncing || isManualRefreshing}
-              className="flex items-center justify-center gap-2 w-full px-6 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 disabled:bg-zinc-200 dark:disabled:bg-zinc-800 disabled:text-zinc-400 text-white font-semibold transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
-            >
-              <RefreshCw className={clsx("w-5 h-5", (isSyncing || isManualRefreshing) && "animate-spin")} />
-              {(isSyncing || isManualRefreshing) ? t("Refreshing...") : t("Refresh App Data")}
-            </button>
-            
             <Link
               to="/"
-              className="text-sm font-medium text-zinc-500 hover:text-emerald-500 transition-colors"
+              className="inline-flex items-center justify-center gap-2 w-full px-6 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-600 text-white font-semibold transition-all active:scale-95 shadow-lg shadow-emerald-500/20"
             >
               {t('Go back to Home')}
             </Link>
@@ -2527,6 +2460,11 @@ export default function MovieDetails() {
         JSON.stringify(updatedReports),
       );
       safeStorage.setItem("needs_user_sync", "true");
+
+      // Report link triggers refresh app data manager, which refreshes and then syncs
+      if (typeof (window as any).triggerRefreshAppData === "function") {
+        (window as any).triggerRefreshAppData("report_link");
+      }
 
       setAlertConfig({
         isOpen: true,

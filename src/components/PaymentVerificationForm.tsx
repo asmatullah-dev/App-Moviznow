@@ -358,12 +358,9 @@ export default function PaymentVerificationForm({
         throw new Error(result.error || 'Failed to process order');
       }
 
-      // Refresh auth profile to sync new membership status / active content
-      if ((window as any).triggerSyncUserData) {
-        await (window as any).triggerSyncUserData('order_confirmed');
-      }
+      // Trigger unified refresh and sync to refresh app data and sync order confirmation
       if ((window as any).triggerRefreshAppData) {
-        await (window as any).triggerRefreshAppData('manual');
+        await (window as any).triggerRefreshAppData('order_confirmed');
       } else {
         await refreshProfile(true);
       }

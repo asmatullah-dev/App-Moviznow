@@ -206,8 +206,30 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, []);
 
   useEffect(() => {
-    fetchNotifications();
-  }, [fetchNotifications]);
+    // Synchronously filter existing locally cached notifications for the current user/guest without ANY Firestore connection!
+    try {
+      const cached = safeStorage.getItem('cached_notifications_data');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) {
+          const currentProfileUid = profile?.uid;
+          const currentUserUid = user?.uid;
+          let filtered = parsed.filter(n => {
+            if (n.targetAudience === 'registered' && (!currentProfileUid && !currentUserUid)) return false;
+            if (n.targetAudience === 'guests' && (currentProfileUid || currentUserUid)) return false;
+            const isTargeted = n.targetUserId || (n.targetUserIds && n.targetUserIds.length > 0);
+            if (isTargeted) {
+              if (!currentProfileUid) return false;
+              return n.targetUserId === currentProfileUid || n.targetUserIds?.includes(currentProfileUid);
+            }
+            return true;
+          });
+          setNotifications(filtered);
+        }
+      }
+    } catch (e) {}
+    setLoading(false);
+  }, [user?.uid, profile?.uid]);
 
   const refreshNotifications = useCallback(async () => {
     await fetchNotifications(true);

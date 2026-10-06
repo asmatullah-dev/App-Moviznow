@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { safeStorage } from "../../utils/safeStorage";
 import { useUsers } from "../../contexts/UsersContext";
 import { isValidGmailAddress } from "../../utils/emailValidation";
 import { getUserDisplayName } from "../../utils/userUtils";
@@ -69,7 +70,16 @@ export default function Notifications() {
     loading: notificationsLoading 
   } = useNotifications();
   const [activeTab, setActiveTab] = useState<'history' | 'templates'>('history');
-  const [templates, setTemplates] = useState<NotificationTemplate[]>([]);
+  const [templates, setTemplates] = useState<NotificationTemplate[]>(() => {
+    try {
+      const cached = safeStorage.getItem('cached_notification_templates');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -154,6 +164,16 @@ export default function Notifications() {
 
   useEffect(() => {
     let isMounted = true;
+    const cached = safeStorage.getItem('cached_notification_templates');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return; // Use locally cached templates, 0 Firestore reads!
+        }
+      } catch (e) {}
+    }
+
     const fetchTemplates = async () => {
       try {
         const q = query(
@@ -164,6 +184,7 @@ export default function Notifications() {
         if (isMounted) {
           const data = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as NotificationTemplate);
           setTemplates(data);
+          safeStorage.setItem('cached_notification_templates', JSON.stringify(data));
         }
       } catch (error) {
         console.error("Error fetching notification templates:", error);
@@ -215,7 +236,11 @@ export default function Notifications() {
     setProcessing(prev => ({ ...prev, deleteTemplate: true }));
     try {
       await deleteDoc(doc(db, "notification_templates", deleteTemplateId));
-      setTemplates(prev => prev.filter(t => t.id !== deleteTemplateId));
+      setTemplates(prev => {
+        const next = prev.filter(t => t.id !== deleteTemplateId);
+        safeStorage.setItem('cached_notification_templates', JSON.stringify(next));
+        return next;
+      });
     } catch (error) {
       console.error("Error deleting template:", error);
     } finally {
@@ -232,13 +257,21 @@ export default function Notifications() {
         await updateDoc(doc(db, "notification_templates", editingTemplate.id), {
           ...templateForm
         });
-        setTemplates(prev => prev.map(t => t.id === editingTemplate.id ? { ...t, ...templateForm } : t));
+        setTemplates(prev => {
+          const next = prev.map(t => t.id === editingTemplate.id ? { ...t, ...templateForm } : t);
+          safeStorage.setItem('cached_notification_templates', JSON.stringify(next));
+          return next;
+        });
       } else {
         const docRef = await addDoc(collection(db, "notification_templates"), {
           ...templateForm,
           createdAt: new Date().toISOString()
         });
-        setTemplates(prev => [{ id: docRef.id, ...templateForm, createdAt: new Date().toISOString() }, ...prev]);
+        setTemplates(prev => {
+          const next = [{ id: docRef.id, ...templateForm, createdAt: new Date().toISOString() }, ...prev];
+          safeStorage.setItem('cached_notification_templates', JSON.stringify(next));
+          return next;
+        });
       }
       setIsTemplateModalOpen(false);
       setTemplateForm({ name: '', title: '', body: '', buttonLabel: '', buttonUrl: '' });

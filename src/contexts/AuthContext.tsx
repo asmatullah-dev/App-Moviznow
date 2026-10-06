@@ -1787,6 +1787,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setProfile(normCachedP);
               persistProfileCache(normCachedP);
               hasValidCachedProfile = true;
+
+              // Ensure 10-hour sync timestamp is initialized so app open does not trigger network calls
+              const syncKey = `last_user_refresh_and_sync_time_${currentUser.uid}`;
+              const legacySyncKey = `last_unified_10h_refresh_sync_time_v2_${currentUser.uid}`;
+              if (!localStorage.getItem(syncKey) && !localStorage.getItem(legacySyncKey)) {
+                const nowStr = Date.now().toString();
+                localStorage.setItem(syncKey, nowStr);
+                localStorage.setItem(legacySyncKey, nowStr);
+              }
             }
           } catch (e) {}
         }
@@ -1796,10 +1805,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const twelveHours = 12 * 60 * 60 * 1000;
         const lastSessionStart = localStorage.getItem(sessionKey);
 
-        // Always try to refresh user profile from Firestore on app startup/auth state to sync latest status/dates
-        refreshProfile(false, "auto").catch((err) => {
-          console.warn("Initial profile sync failed:", err);
-        });
+        // Only refresh user profile on app open if local profile cache was completely missing (e.g. brand new install)
+        // Normal users with existing profile cache rely on offline local cache and the 10-hour background scheduler!
+        if (!hasValidCachedProfile) {
+          refreshProfile(false, "auto").catch((err) => {
+            console.warn("Initial profile sync failed:", err);
+          });
+        }
 
         // Auto-merge guest FCM token to logged in user account
         syncGuestFcmToUser(currentUser.uid, currentUser.email || undefined).catch(() => {});

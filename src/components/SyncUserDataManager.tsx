@@ -11,45 +11,7 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   if (!currentUserUid) return false;
 
   const nowTime = Date.now();
-  const lastSyncKey = `last_user_refresh_and_sync_time_${currentUserUid}`;
-
-  const isManualTrigger = reason === 'manual' || reason === 'catalog_button' || reason === 'user_profile_button';
-  const lastSyncStr = localStorage.getItem(lastSyncKey);
-  const lastSyncTime = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
-  const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
-
-  if (!isManualTrigger && (nowTime - lastSyncTime < TEN_HOURS_MS)) {
-    // Skip network pipeline if 10-hour window has not elapsed.
-    return true;
-  }
-
   const userRef = doc(db, 'users', currentUserUid);
-
-  // STEP 1: REFRESH FIRST - Check server version and update local user profile if newer
-  try {
-    const versions = await getChunkMeta(false).catch(() => null);
-    const serverUsersVersion = versions?.users || {};
-    const serverVer = serverUsersVersion[currentUserUid];
-    const localVer = safeStorage.getItem(`profile_version_${currentUserUid}`);
-
-    if (serverVer && serverVer !== localVer) {
-      const userSnap = await runWithNetwork(() => getDoc(userRef));
-      if (userSnap.exists()) {
-        const freshData = { ...userSnap.data(), uid: currentUserUid } as UserProfile;
-        const normalized = normalizeUserStatusAndExpiry(freshData);
-        safeStorage.setItem('profile_cache', JSON.stringify(normalized));
-        safeStorage.setItem(`profile_version_${currentUserUid}`, serverVer);
-        try { window.localStorage.setItem('profile_cache', JSON.stringify(normalized)); } catch (e) {}
-        window.dispatchEvent(new CustomEvent('user_profile_updated', { detail: normalized }));
-      }
-    }
-  } catch (refreshErr) {
-    console.warn('[SyncUserDataManager] Refresh step failed:', refreshErr);
-    // Abort pipeline immediately: DO NOT save 10-hour timestamp on failure!
-    safeStorage.setItem('needs_user_sync', 'true');
-    return false;
-  }
-
   const nowUtc = getUtcVersion();
 
   // Flush accumulated time & sessions locally into profile cache before sync
@@ -106,7 +68,7 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
     safeStorage.getItem('needs_user_sync') === 'true'
   );
 
-  // STEP 2: SYNC SECOND - Push local pending updates if any exist
+  // STEP 2: SYNC - Push local pending updates if any exist
   if (hasPending) {
     const updatesToPush: Record<string, any> = {};
 
@@ -241,90 +203,33 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
     }
   }
 
-  // STEP 3: BOTH REFRESH AND SYNC SUCCEEDED (OR NO PENDING SYNC WAS NEEDED)
-  // Save 10-hour timestamp only after 100% successful execution!
+  // STEP 3: BOTH REFRESH (COMPLETED BEFORE THIS CALL) AND SYNC SUCCEEDED
+  // SyncUserDataManager is responsible for saving the 10-hour timestamp after successfully syncing
   const nowMs = nowTime.toString();
-  localStorage.setItem(lastSyncKey, nowMs);
+  localStorage.setItem(`last_user_refresh_and_sync_time_${currentUserUid}`, nowMs);
   localStorage.setItem(`last_unified_10h_refresh_sync_time_v2_${currentUserUid}`, nowMs);
-  console.log(`[SyncUserDataManager] Combined Refresh & Sync pipeline completed successfully. Reason: ${reason}`);
+  localStorage.setItem(`last_user_sync_time_v2_${currentUserUid}`, nowMs);
 
+  console.log(`[SyncUserDataManager] Sync step completed & 10-hour timestamp saved successfully. Reason: ${reason}`);
   return true;
 }
 
 export function SyncUserDataManager() {
-  const { user, profile } = useAuth();
-  const lastSyncAttemptRef = useRef<number>(0);
-
-  const triggerSync = useCallback(async (reason: string = 'auto') => {
-    if (!user?.uid) return;
-    
-    const now = Date.now();
-    if (now - lastSyncAttemptRef.current < 5000) return;
-    lastSyncAttemptRef.current = now;
-
-    await executeSyncUserData(user.uid, profile, reason);
-  }, [user?.uid, profile]);
-
-  // Check on mount and every 1 hour if 10-hour window has arrived
-  useEffect(() => {
-    if (!user?.uid) return;
-
-    const check10hWindow = () => {
-      const lastSyncKey = `last_user_refresh_and_sync_time_${user.uid}`;
-      const lastSyncStr = localStorage.getItem(lastSyncKey);
-      const lastSyncTime = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
-      const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
-
-      const needsSync = safeStorage.getItem('needs_user_sync') === 'true';
-      const isDue = (Date.now() - lastSyncTime >= TEN_HOURS_MS);
-
-      if ((isDue || needsSync) && navigator.onLine) {
-        triggerSync('auto_10h');
-      }
-    };
-
-    check10hWindow();
-    const interval = setInterval(check10hWindow, 60 * 60 * 1000); // 1 hour check
-
-    return () => clearInterval(interval);
-  }, [user?.uid, triggerSync]);
-
-  // Re-check on app resume/visibility change if 10-hour window has arrived
-  useEffect(() => {
-    if (!user?.uid) return;
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine) {
-        const lastSyncKey = `last_user_refresh_and_sync_time_${user.uid}`;
-        const lastSyncStr = localStorage.getItem(lastSyncKey);
-        const lastSyncTime = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
-        const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
-
-        if (Date.now() - lastSyncTime >= TEN_HOURS_MS) {
-          triggerSync('auto_10h_resume');
-        }
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [user?.uid, triggerSync]);
-
-  // Listen for custom trigger requests (e.g. manual profile sync button)
+  // Listen for custom trigger requests and delegate to central refresh & sync manager
   useEffect(() => {
     const handleSyncRequest = (e: Event) => {
       const customEvent = e as CustomEvent;
       const reason = customEvent.detail?.reason || 'event_trigger';
-      triggerSync(reason);
+      if (typeof (window as any).triggerRefreshAppData === 'function') {
+        (window as any).triggerRefreshAppData(reason);
+      }
     };
 
     window.addEventListener('trigger_sync_user_data_immediate', handleSyncRequest);
     return () => {
       window.removeEventListener('trigger_sync_user_data_immediate', handleSyncRequest);
     };
-  }, [triggerSync]);
+  }, []);
 
   return null;
 }

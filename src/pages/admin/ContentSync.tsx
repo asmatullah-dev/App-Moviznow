@@ -94,15 +94,6 @@ export default function ContentSync() {
         let targets = settings?.serviceAccounts?.targets || [];
         let sKey = settings?.serviceAccounts?.sourceKey || '';
 
-        if (!targets.length && !sKey) {
-          const settingsDoc = await getDoc(doc(sourceDb, 'settings', 'app_settings'));
-          if (settingsDoc.exists()) {
-            const data = settingsDoc.data();
-            targets = data?.serviceAccounts?.targets || [];
-            sKey = data?.serviceAccounts?.sourceKey || '';
-          }
-        }
-
         setSourceKey(sKey);
         setAvailableTargets(targets);
         if (targets.length > 0) {

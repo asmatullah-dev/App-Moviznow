@@ -166,8 +166,8 @@ export default function Reviews() {
 
       triggerConfetti();
 
-      if ((window as any).triggerSyncUserData) {
-        (window as any).triggerSyncUserData('review_made');
+      if ((window as any).triggerRefreshAppData) {
+        (window as any).triggerRefreshAppData('review_made');
       }
 
       setText('');

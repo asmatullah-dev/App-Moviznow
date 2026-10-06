@@ -15,7 +15,8 @@ export function RefreshAppDataManager() {
   const executeUnifiedRefreshAndSync = useCallback(async (reason: string = 'manual'): Promise<boolean> => {
     if (isRefreshingRef.current) return false;
 
-    const isManualTrigger = reason === 'catalog_button' || reason === 'user_profile_button' || reason === 'manual' || reason === 'header_button';
+    const isAutoTrigger = reason === '10_hour_sync' || reason === 'auto_10h' || reason === 'auto';
+    const isManualTrigger = !isAutoTrigger;
 
     // For guest users (unauthenticated), skip sync completely as guests have no Firestore connection
     if (!user) {
@@ -40,7 +41,7 @@ export function RefreshAppDataManager() {
       return false;
     }
 
-    if (!isManualTrigger) {
+    if (isAutoTrigger) {
       const lastUnifiedStr = localStorage.getItem(storageKey) || localStorage.getItem(legacyStorageKey);
       const lastUnifiedTime = lastUnifiedStr ? parseInt(lastUnifiedStr, 10) : 0;
       const now = Date.now();
@@ -73,18 +74,19 @@ export function RefreshAppDataManager() {
       // =========================================================================
       const versions: Record<string, any> = await getChunkMeta(isManualTrigger);
 
-      // 1. Check settings version: only fetch when chunk meta version of settings changed
+      // 1. Check settings version: fetch when version mismatch or missing local cache
       const serverSettingsVer = versions.settings || 0;
       const localSettingsVer = safeStorage.getItem('cached_settings_version') || '0';
       const serverSettingsTime = parseVersionTime(serverSettingsVer);
       const localSettingsTime = parseVersionTime(localSettingsVer);
-      if ((serverSettingsTime > 0 && serverSettingsTime > localSettingsTime) || !safeStorage.getItem('cached_app_settings')) {
+      const isSettingsMismatch = (serverSettingsTime > 0 && serverSettingsTime !== localSettingsTime) || !safeStorage.getItem('cached_app_settings');
+      if (isSettingsMismatch) {
         await refreshSettings(isManualTrigger).catch((err) => {
           console.warn('[RefreshAppDataManager] Settings refresh failed:', err);
         });
       }
 
-      // 2. Check notifications version
+      // 2. Check notifications version: fetch when version mismatch or missing local cache
       if (user?.uid) {
         const serverNotifVer = (versions.notifications && typeof versions.notifications === 'object')
           ? versions.notifications.updatedAt || versions.notifications.version || 0
@@ -92,14 +94,15 @@ export function RefreshAppDataManager() {
         const localNotifVer = safeStorage.getItem('cached_notifications_version') || '0';
         const serverNotifTime = parseVersionTime(serverNotifVer);
         const localNotifTime = parseVersionTime(localNotifVer);
-        if (serverNotifTime > 0 && serverNotifTime > localNotifTime) {
+        const isNotifMismatch = (serverNotifTime > 0 && serverNotifTime !== localNotifTime) || !safeStorage.getItem('cached_notifications_data');
+        if (isNotifMismatch) {
           await refreshNotifications().catch((err) => {
             console.warn('[RefreshAppDataManager] Notifications refresh failed:', err);
           });
         }
       }
 
-      // 3. Check user profile version and refresh user profile
+      // 3. Check user profile version: fetch when version mismatch or missing local cache
       if (user?.uid) {
         const chunkUsersMeta = versions.users || {};
         const serverUserVer = chunkUsersMeta[user.uid];
@@ -108,8 +111,9 @@ export function RefreshAppDataManager() {
         const localUserTime = parseVersionTime(localUserVer);
         
         const isExplicitlyDeleted = serverUserVer === -1 || (typeof serverUserVer === 'object' && (serverUserVer as any)?.deleted === true) || (versions as any)?.[`users.${user.uid}`] === -1;
+        const isUserMismatch = isExplicitlyDeleted || isManualTrigger || (serverUserTime > 0 && serverUserTime !== localUserTime) || !safeStorage.getItem('profile_cache');
 
-        if (isExplicitlyDeleted || isManualTrigger || (serverUserTime > 0 && serverUserTime > localUserTime) || !safeStorage.getItem('profile_cache')) {
+        if (isUserMismatch) {
           const profileFetched = await refreshProfile(true, isManualTrigger ? 'manual' : 'auto').catch((err) => {
             console.error('[RefreshAppDataManager] Profile refresh failed:', err);
             return null;
@@ -258,7 +262,18 @@ export function RefreshAppDataManager() {
       const now = Date.now();
       const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 
-      if (!lastUnifiedTime || (now - lastUnifiedTime >= TEN_HOURS_MS)) {
+      if (!lastUnifiedTime) {
+        if (safeStorage.getItem('profile_cache')) {
+          const nowStr = now.toString();
+          localStorage.setItem(storageKey, nowStr);
+          localStorage.setItem(legacyStorageKey, nowStr);
+          return;
+        }
+        executeUnifiedRef.current('10_hour_sync');
+        return;
+      }
+
+      if (now - lastUnifiedTime >= TEN_HOURS_MS) {
         executeUnifiedRef.current('10_hour_sync');
       }
     };

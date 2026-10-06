@@ -179,15 +179,6 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   }, []);
 
   useEffect(() => {
-    refreshSettings();
-
-    // Refresh when user transitions from guest to authenticated
-    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
-      if (currentUser) {
-        refreshSettings();
-      }
-    });
-
     const handleSettingsUpdated = (e: any) => {
       if (e?.detail) {
         setSettings(e.detail);
@@ -200,10 +191,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
     window.addEventListener('settings_updated', handleSettingsUpdated);
     return () => {
-      unsubscribeAuth();
       window.removeEventListener('settings_updated', handleSettingsUpdated);
     };
-  }, [refreshSettings]);
+  }, []);
 
   return (
     <SettingsContext.Provider value={{ settings, loading, refreshSettings }}>

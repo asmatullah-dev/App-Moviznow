@@ -435,6 +435,7 @@ export default function AdminSettings() {
         const parsed = JSON.parse(cachedStr);
         setSettings(prev => ({ ...prev, ...parsed }));
         setLoading(false);
+        return; // Avoid unsolicited Firestore read on tab mount
       }
     } catch (e) {}
 

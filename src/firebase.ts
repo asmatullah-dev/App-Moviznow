@@ -44,10 +44,13 @@ if (typeof window !== 'undefined') {
   enableNetwork(db).catch(err => console.warn('Failed to enable Firestore network:', err));
 }
 
+import { ServerMonitor } from './utils/ServerMonitor';
+
 /**
- * Pass-through wrapper for async operations.
+ * Pass-through wrapper for async operations with ServerMonitor logging.
  */
-export async function runWithNetwork<T>(fn: () => Promise<T>): Promise<T> {
+export async function runWithNetwork<T>(fn: () => Promise<T>, callerName: string = 'Unknown', targetPath: string = 'FirestoreOperation'): Promise<T> {
+  ServerMonitor.logFirestoreCall(callerName, 'CONNECT', targetPath);
   return fn();
 }
 
