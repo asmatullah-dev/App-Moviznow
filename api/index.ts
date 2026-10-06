@@ -3966,7 +3966,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     }
   });
 
-  // Helper to purge old FCM tokens for a user so that only 1 active device receives push notifications
+  // Helper to update FCM token for a user without unnecessary reads
   async function cleanupOldUserFcmTokens(
     firestore: admin.firestore.Firestore,
     userId: string,
@@ -3974,32 +3974,13 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
   ) {
     if (!userId || userId === "anonymous") return [];
 
-    const oldTokens: string[] = [];
-
     try {
       if (currentToken === "DUMMY_NONE") {
-        // User logout or deletion: do NOT re-create the user doc or scan all chunks
-        return oldTokens;
+        return [];
       }
 
-      // Check user document for existing previous token
+      // Update user document in Firestore directly with single write (0 document reads!)
       const userDocRef = firestore.collection("users").doc(userId);
-      const userSnap = await userDocRef.get();
-      if (userSnap.exists) {
-        const userData = userSnap.data() || {};
-        const previousToken = userData.fcmToken;
-        if (previousToken && previousToken !== currentToken && admin.apps.length > 0) {
-          oldTokens.push(previousToken);
-          try {
-            await admin.messaging().unsubscribeFromTopic(previousToken, "all_users");
-          } catch (e) {}
-          try {
-            await admin.messaging().unsubscribeFromTopic(previousToken, `user_${userId}`);
-          } catch (e) {}
-        }
-      }
-
-      // Update user document in Firestore with single active fcmToken
       await userDocRef
         .set(
           {
@@ -4010,10 +3991,9 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         )
         .catch(() => {});
     } catch (err) {
-      console.warn(`[FCM Token Cleanup Error] user ${userId}:`, err);
+      console.warn(`[FCM Token Update Warning] user ${userId}:`, err);
     }
-
-    return oldTokens;
+    return [];
   }
 
   // Subscribe to FCM topic & enforce single device token per user or guest
@@ -4138,153 +4118,62 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         let totalSuccess = 0;
         let totalFailure = 0;
 
-        // 1. Direct Token Multicast (guarantees delivery to registered device tokens in Firestore)
-        if (db) {
+        // Topic-based FCM Messaging (reaches all devices instantly with 0 Firestore document reads!)
+        if (admin.apps.length > 0) {
           try {
-            const tokensSnap = await db.collection("fcm_tokens").get();
-            let matchedDocs = tokensSnap.docs;
-
+            let targetTopic = "all_users";
             if (targetAudience === 'guests') {
-              matchedDocs = matchedDocs.filter(d => {
-                const data = d.data();
-                return data.isGuest === true || data.userId === 'guest' || data.userId === 'anonymous';
-              });
+              targetTopic = "guest_users";
             } else if (targetAudience === 'registered') {
-              matchedDocs = matchedDocs.filter(d => {
-                const data = d.data();
-                return data.isGuest !== true && data.userId && data.userId !== 'guest' && data.userId !== 'anonymous';
-              });
-            } else if (targetAudience === 'specific' || (Array.isArray(targetUserIds) && targetUserIds.length > 0)) {
-              matchedDocs = matchedDocs.filter(d => targetUserIds && targetUserIds.includes(d.data().userId));
+              targetTopic = "registered_users";
             }
 
-            const activeTokensList: string[] = matchedDocs
-              .map(d => d.data().token)
-              .filter((t): t is string => typeof t === "string" && t.length > 0);
-
-            // Also include valid user fcmTokens for all or registered audience
-            if (targetAudience === 'all' || targetAudience === 'registered' || !targetAudience) {
-              try {
-                const usersSnap = await db.collection("users").where("fcmToken", "!=", null).limit(1000).get();
-                for (const uDoc of usersSnap.docs) {
-                  const uData = uDoc.data();
-                  if (uData.fcmToken && typeof uData.fcmToken === 'string') {
-                    const isFcmAllowed =
-                      uData.notificationPreferences?.fcm?.enabled !== false &&
-                      uData.notification !== "no" &&
-                      !uData.isFcmDisabled;
-                    if (isFcmAllowed) {
-                      activeTokensList.push(uData.fcmToken);
-                    }
-                  }
-                }
-              } catch (e) {}
-            }
-
-            const activeTokens = Array.from(new Set(activeTokensList));
-
-            if (activeTokens.length > 0) {
-              console.log(`[FCM Multicast] Dispatching to ${activeTokens.length} tokens (Audience: ${targetAudience || 'all'})...`);
-              for (let i = 0; i < activeTokens.length; i += 500) {
-                const batchTokens = activeTokens.slice(i, i + 500);
-                const multicastPayload: any = {
-                  tokens: batchTokens,
-                  notification: {
-                    title,
-                    body,
-                    imageUrl: imageUrl || undefined,
-                  },
-                  data: {
-                    title,
-                    body,
-                    imageUrl: imageUrl || "",
-                    url: targetUrl,
-                    link: targetUrl,
-                    click_action: targetUrl,
-                  },
-                  webpush: {
-                    fcmOptions: {
-                      link: targetUrl,
-                    },
+            if ((targetAudience === 'specific' || (!targetAudience && Array.isArray(targetUserIds))) && targetUserIds && targetUserIds.length > 0) {
+              // Direct target user topics: user_${uid} (0 Firestore reads!)
+              for (const uid of targetUserIds) {
+                try {
+                  const message: any = {
                     notification: {
                       title,
                       body,
-                      icon: imageUrl || "/launcher.svg",
-                      badge: "/launcher.svg",
-                      image: imageUrl || undefined,
-                      data: {
-                        url: targetUrl,
+                      imageUrl: imageUrl || undefined,
+                    },
+                    data: {
+                      title,
+                      body,
+                      imageUrl: imageUrl || "",
+                      url: targetUrl,
+                      link: targetUrl,
+                      click_action: targetUrl,
+                    },
+                    webpush: {
+                      fcmOptions: {
                         link: targetUrl,
-                        click_action: targetUrl,
+                      },
+                      notification: {
+                        title,
+                        body,
+                        icon: imageUrl || "/launcher.svg",
+                        badge: "/launcher.svg",
+                        image: imageUrl || undefined,
+                        data: {
+                          url: targetUrl,
+                          link: targetUrl,
+                          click_action: targetUrl,
+                        },
                       },
                     },
-                  },
-                };
-
-                const batchRes = await admin.messaging().sendEachForMulticast(multicastPayload);
-                totalSuccess += batchRes.successCount;
-                totalFailure += batchRes.failureCount;
-
-                // Clean up expired/unregistered tokens
-                if (batchRes.failureCount > 0) {
-                  batchRes.responses.forEach((resp, idx) => {
-                    if (!resp.success && resp.error) {
-                      const errCode = resp.error.code;
-                      if (
-                        errCode === "messaging/invalid-registration-token" ||
-                        errCode === "messaging/registration-token-not-registered"
-                      ) {
-                        const expiredToken = batchTokens[idx];
-                        const docToDelete = matchedDocs.find(d => d.data().token === expiredToken);
-                        if (docToDelete) {
-                          docToDelete.ref.delete().catch(() => {});
-                        }
-                      }
-                    }
-                  });
-                }
-              }
-            }
-          } catch (multicastErr: any) {
-            console.warn("[FCM Multicast Direct Send Warning]:", multicastErr?.message || multicastErr);
-          }
-        }
-
-        // 2. Topic Messaging Fallback / Broadcast
-        try {
-          let targetTopic = "all_users";
-          if (targetAudience === 'guests') {
-            targetTopic = "guest_users";
-          } else if (targetAudience === 'registered') {
-            targetTopic = "registered_users";
-          }
-
-          if ((targetAudience === 'specific' || (!targetAudience && Array.isArray(targetUserIds))) && targetUserIds && targetUserIds.length > 0) {
-            let activeUserIds = targetUserIds;
-            if (db) {
-              const filteredList: string[] = [];
-              for (const uid of targetUserIds) {
-                try {
-                  const uDoc = await db.collection("users").doc(uid).get();
-                  if (uDoc.exists) {
-                    const uData = uDoc.data() || {};
-                    const isFcmAllowed =
-                      uData.notificationPreferences?.fcm?.enabled !== false &&
-                      uData.notification !== "no" &&
-                      !uData.isFcmDisabled;
-                    if (isFcmAllowed) filteredList.push(uid);
-                  } else {
-                    filteredList.push(uid);
-                  }
+                    topic: `user_${uid}`,
+                  };
+                  await admin.messaging().send(message);
+                  totalSuccess++;
                 } catch (e) {
-                  filteredList.push(uid);
+                  totalFailure++;
                 }
               }
-              activeUserIds = filteredList;
-            }
-
-            if (activeUserIds.length > 0) {
-              const messages: any[] = activeUserIds.map((uid: string) => ({
+            } else {
+              // Broadcast topic (reaches all devices subscribed to topic with 0 Firestore reads)
+              const message: any = {
                 notification: {
                   title,
                   body,
@@ -4315,69 +4204,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                     },
                   },
                 },
-                topic: `user_${uid}`,
-              }));
+                topic: targetTopic,
+              };
 
-              for (let i = 0; i < messages.length; i += 500) {
-                const batch = messages.slice(i, i + 500);
-                const response = await admin.messaging().sendEach(batch);
-                totalSuccess += response.successCount;
-                totalFailure += response.failureCount;
-              }
+              const response = await admin.messaging().send(message);
+              console.log(`[FCM Topic Broadcast] Delivered to topic ${targetTopic}:`, response);
+              totalSuccess++;
             }
-          } else {
-            const message: any = {
-              notification: {
-                title,
-                body,
-                imageUrl: imageUrl || undefined,
-              },
-              data: {
-                title,
-                body,
-                imageUrl: imageUrl || "",
-                url: targetUrl,
-                link: targetUrl,
-                click_action: targetUrl,
-              },
-              webpush: {
-                fcmOptions: {
-                  link: targetUrl,
-                },
-                notification: {
-                  title,
-                  body,
-                  icon: imageUrl || "/launcher.svg",
-                  badge: "/launcher.svg",
-                  image: imageUrl || undefined,
-                  data: {
-                    url: targetUrl,
-                    link: targetUrl,
-                    click_action: targetUrl,
-                  },
-                },
-              },
-              topic: targetTopic,
-            };
-
-            const topicsToBroadcast = (targetAudience === 'all' || !targetAudience)
-              ? ["all_users", "guest_users"]
-              : [targetTopic];
-
-            for (const currentTopic of topicsToBroadcast) {
-              try {
-                const response = await admin.messaging().send({
-                  ...message,
-                  topic: currentTopic,
-                });
-                if (response) totalSuccess += 1;
-              } catch (tErr: any) {
-                console.warn(`[FCM Topic ${currentTopic} Send Warning]:`, tErr?.message || tErr);
-              }
-            }
+          } catch (topicErr: any) {
+            console.warn("[FCM Topic Send Warning]:", topicErr?.message || topicErr);
           }
-        } catch (topicErr: any) {
-          console.warn("[FCM Topic Send Warning]:", topicErr?.message || topicErr);
         }
 
         res.json({ success: true, successCount: totalSuccess, failureCount: totalFailure });

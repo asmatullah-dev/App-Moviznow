@@ -44,13 +44,10 @@ if (typeof window !== 'undefined') {
   enableNetwork(db).catch(err => console.warn('Failed to enable Firestore network:', err));
 }
 
-import { ServerMonitor } from './utils/ServerMonitor';
-
 /**
- * Pass-through wrapper for async operations with ServerMonitor logging.
+ * Pass-through wrapper for async operations.
  */
-export async function runWithNetwork<T>(fn: () => Promise<T>, callerName: string = 'Unknown', targetPath: string = 'FirestoreOperation'): Promise<T> {
-  ServerMonitor.logFirestoreCall(callerName, 'CONNECT', targetPath);
+export async function runWithNetwork<T>(fn: () => Promise<T>): Promise<T> {
   return fn();
 }
 
@@ -138,48 +135,32 @@ export const getGuestDeviceId = (): string => {
 export const syncGuestFcmToUser = async (userId: string, userEmail?: string) => {
   if (typeof window === 'undefined') return;
   try {
-    const activeToken = safeStorage.getItem('active_fcm_token') || safeStorage.getItem('guest_fcm_token');
+    const guestToken = safeStorage.getItem('guest_fcm_token');
+    // Fast exit: if no guest token waiting to be merged, do 0 requests and 0 reads/writes
+    if (!guestToken) {
+      return;
+    }
     const guestId = safeStorage.getItem('guest_device_id');
     
-    if (activeToken) {
-      const tokenDocRef = doc(db, 'fcm_tokens', activeToken.replace(/[\/\s]/g, '_'));
-      
-      // 1. Notify backend to transition FCM topic subscriptions and persist to Firestore
-      let apiSuccess = false;
-      try {
-        const res = await fetch('/api/notifications/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            token: activeToken,
-            userId: userId,
-            isGuest: false,
-            previousGuestId: guestId || undefined
-          })
-        });
-        if (res.ok) apiSuccess = true;
-      } catch (e) {}
+    // 1. Notify backend to transition FCM topic subscriptions
+    try {
+      await fetch('/api/notifications/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          token: guestToken,
+          userId: userId,
+          isGuest: false,
+          previousGuestId: guestId || undefined
+        })
+      });
+    } catch (e) {}
 
-      // 2. Direct Firestore update only as fallback if backend API was unreachable
-      if (!apiSuccess) {
-        try {
-          await runWithNetwork(() => setDoc(tokenDocRef, {
-            token: activeToken,
-            userId: userId,
-            isGuest: false,
-            guestId: null,
-            userEmail: userEmail || null,
-            updatedAt: new Date().toISOString()
-          }, { merge: true }));
-        } catch (e) {}
-      }
-
-      // Clear guest-specific flags
-      safeStorage.removeItem('guest_fcm_token');
-      safeStorage.removeItem('guest_fcm_registered');
-      const CACHE_KEY = `fcm_token_v4_last_update_${userId}`;
-      safeStorage.setItem(CACHE_KEY, JSON.stringify({ token: activeToken, timestamp: Date.now(), userId, isGuest: false }));
-    }
+    // Clear guest-specific flags immediately so this never runs again
+    safeStorage.removeItem('guest_fcm_token');
+    safeStorage.removeItem('guest_fcm_registered');
+    const CACHE_KEY = `fcm_token_v4_last_update_${userId}`;
+    safeStorage.setItem(CACHE_KEY, JSON.stringify({ token: guestToken, timestamp: Date.now(), userId, isGuest: false }));
   } catch (err) {
     console.warn("Error syncing guest FCM to logged in user:", err);
   }
