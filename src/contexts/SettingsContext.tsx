@@ -98,6 +98,19 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
       const hasCachedSettings = !!(safeStorage.getItem('cached_app_settings') || localStorage.getItem('cached_app_settings'));
 
+      // Throttling: On app open / automatic load, if we already have cached settings,
+      // load them instantly and make EXACTLY 0 Firestore or chunk_meta requests!
+      if (!force && hasCachedSettings) {
+        const cached = safeStorage.getItem('cached_app_settings') || localStorage.getItem('cached_app_settings');
+        if (cached) {
+          try {
+            setSettings(JSON.parse(cached));
+            setLoading(false);
+            return;
+          } catch (e) {}
+        }
+      }
+
       // Check chunk_meta version. Bypasses 15s cooldown if force is true.
       const meta = await getChunkMeta(force);
       const serverSettingsVer = meta?.settings;

@@ -70,7 +70,7 @@ export default function About() {
           <div className="grid md:grid-cols-3 gap-6">
             <motion.div 
               whileHover={{ y: -6 }}
-              className="bg-white/90 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200/80 dark:border-zinc-800/90 hover:border-emerald-500/50 rounded-3xl p-6 sm:p-8 text-center space-y-4 shadow-lg dark:shadow-xl backdrop-blur-xl transition-all"
+              className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200/80 dark:border-zinc-800/90 hover:border-emerald-500/50 rounded-3xl p-6 sm:p-8 text-center space-y-4 shadow-lg dark:shadow-xl backdrop-blur-xl transition-all"
             >
               <div className="w-16 h-16 bg-gradient-to-br from-emerald-500/15 to-teal-500/15 dark:from-emerald-500/20 dark:to-teal-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 rounded-2xl flex items-center justify-center mx-auto shadow-md">
                 <Film className="w-8 h-8" />
@@ -83,7 +83,7 @@ export default function About() {
 
             <motion.div 
               whileHover={{ y: -6 }}
-              className="bg-white/90 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200/80 dark:border-zinc-800/90 hover:border-rose-500/50 rounded-3xl p-6 sm:p-8 text-center space-y-4 shadow-lg dark:shadow-xl backdrop-blur-xl transition-all"
+              className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200/80 dark:border-zinc-800/90 hover:border-rose-500/50 rounded-3xl p-6 sm:p-8 text-center space-y-4 shadow-lg dark:shadow-xl backdrop-blur-xl transition-all"
             >
               <div className="w-16 h-16 bg-gradient-to-br from-rose-500/15 to-purple-500/15 dark:from-rose-500/20 dark:to-purple-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 rounded-2xl flex items-center justify-center mx-auto shadow-md">
                 <ShieldCheck className="w-8 h-8" />
@@ -96,7 +96,7 @@ export default function About() {
 
             <motion.div 
               whileHover={{ y: -6 }}
-              className="bg-white/90 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200/80 dark:border-zinc-800/90 hover:border-amber-500/50 rounded-3xl p-6 sm:p-8 text-center space-y-4 shadow-lg dark:shadow-xl backdrop-blur-xl transition-all"
+              className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200/80 dark:border-zinc-800/90 hover:border-amber-500/50 rounded-3xl p-6 sm:p-8 text-center space-y-4 shadow-lg dark:shadow-xl backdrop-blur-xl transition-all"
             >
               <div className="w-16 h-16 bg-gradient-to-br from-amber-500/15 to-orange-500/15 dark:from-amber-500/20 dark:to-orange-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 rounded-2xl flex items-center justify-center mx-auto shadow-md">
                 <Zap className="w-8 h-8" />
@@ -113,7 +113,7 @@ export default function About() {
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
-            className="bg-white/95 dark:bg-gradient-to-br dark:from-zinc-900/95 dark:via-zinc-950/95 dark:to-zinc-900/95 border border-zinc-200/80 dark:border-zinc-800/90 rounded-3xl p-6 sm:p-10 shadow-xl dark:shadow-2xl backdrop-blur-xl relative overflow-hidden space-y-6"
+            className="bg-gradient-to-br from-white/95 via-zinc-50/90 to-emerald-50/10 dark:from-zinc-900/95 dark:via-zinc-950/95 dark:to-zinc-900/95 border border-zinc-200/80 dark:border-zinc-800/90 rounded-3xl p-6 sm:p-10 shadow-xl dark:shadow-2xl backdrop-blur-xl relative overflow-hidden space-y-6"
           >
             <div className="flex items-center gap-3 border-b border-zinc-200 dark:border-zinc-800 pb-4">
               <div className="w-11 h-11 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-inner">
@@ -164,7 +164,7 @@ export default function About() {
             </div>
 
             <div className="grid sm:grid-cols-2 gap-4">
-              <div className="bg-white/90 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/90 border border-zinc-200/80 dark:border-zinc-800/90 rounded-2xl p-5 flex items-start gap-4 shadow-sm">
+              <div className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/90 border border-zinc-200/80 dark:border-zinc-800/90 rounded-2xl p-5 flex items-start gap-4 shadow-sm">
                 <CheckCircle2 className="w-6 h-6 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                 <div>
                   <h4 className="font-extrabold text-sm text-zinc-900 dark:text-white mb-1">{t("Original HD Quality")}</h4>
@@ -172,7 +172,7 @@ export default function About() {
                 </div>
               </div>
 
-              <div className="bg-white/90 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/90 border border-zinc-200/80 dark:border-zinc-800/90 rounded-2xl p-5 flex items-start gap-4 shadow-sm">
+              <div className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/90 border border-zinc-200/80 dark:border-zinc-800/90 rounded-2xl p-5 flex items-start gap-4 shadow-sm">
                 <CheckCircle2 className="w-6 h-6 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                 <div>
                   <h4 className="font-extrabold text-sm text-zinc-900 dark:text-white mb-1">{t("Instant WhatsApp Delivery")}</h4>
@@ -180,7 +180,7 @@ export default function About() {
                 </div>
               </div>
 
-              <div className="bg-white/90 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/90 border border-zinc-200/80 dark:border-zinc-800/90 rounded-2xl p-5 flex items-start gap-4 shadow-sm">
+              <div className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/90 border border-zinc-200/80 dark:border-zinc-800/90 rounded-2xl p-5 flex items-start gap-4 shadow-sm">
                 <CheckCircle2 className="w-6 h-6 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                 <div>
                   <h4 className="font-extrabold text-sm text-zinc-900 dark:text-white mb-1">{t("Easy Payment Options")}</h4>
@@ -188,7 +188,7 @@ export default function About() {
                 </div>
               </div>
 
-              <div className="bg-white/90 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/90 border border-zinc-200/80 dark:border-zinc-800/90 rounded-2xl p-5 flex items-start gap-4 shadow-sm">
+              <div className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/90 border border-zinc-200/80 dark:border-zinc-800/90 rounded-2xl p-5 flex items-start gap-4 shadow-sm">
                 <CheckCircle2 className="w-6 h-6 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                 <div>
                   <h4 className="font-extrabold text-sm text-zinc-900 dark:text-white mb-1">{t("Dedicated Support")}</h4>

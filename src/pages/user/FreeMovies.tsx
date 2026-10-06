@@ -87,7 +87,7 @@ export default function FreeMovies() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
-            className="relative overflow-hidden bg-white/95 via-zinc-50/90 to-emerald-50/40 dark:from-zinc-900/90 dark:via-zinc-950/95 dark:to-zinc-900/90 border border-emerald-500/30 rounded-3xl p-6 sm:p-12 shadow-xl dark:shadow-2xl backdrop-blur-2xl text-center space-y-6"
+            className="relative overflow-hidden bg-gradient-to-br from-white/95 via-zinc-50/90 to-emerald-50/40 dark:from-zinc-900/95 dark:via-zinc-950/95 dark:to-zinc-900/95 border border-emerald-500/30 rounded-3xl p-6 sm:p-12 shadow-xl dark:shadow-2xl backdrop-blur-2xl text-center space-y-6"
           >
             {/* Glowing Accent Border Lines */}
             <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-emerald-400 to-transparent opacity-80" />
@@ -168,7 +168,7 @@ export default function FreeMovies() {
                 <motion.div
                   key={idx}
                   whileHover={{ y: -4 }}
-                  className="bg-white/95 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/90 border border-zinc-200/80 dark:border-zinc-800/90 hover:border-emerald-500/40 rounded-2xl p-5 space-y-3 relative overflow-hidden shadow-md dark:shadow-lg backdrop-blur-md"
+                  className="bg-white/95 dark:bg-transparent dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/90 border border-zinc-200/80 dark:border-zinc-800/90 hover:border-emerald-500/40 rounded-2xl p-5 space-y-3 relative overflow-hidden shadow-md dark:shadow-lg backdrop-blur-md"
                 >
                   <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white font-black text-xs flex items-center justify-center shadow-sm">
                     {step.num}
@@ -193,7 +193,7 @@ export default function FreeMovies() {
 
             <div className="grid md:grid-cols-2 gap-6">
               {/* Piracy Sites Card (Red Danger Theme) */}
-              <div className="bg-rose-50/70 dark:bg-gradient-to-b dark:from-rose-950/20 dark:via-zinc-900/90 dark:to-zinc-950/90 border border-rose-200 dark:border-rose-500/30 rounded-3xl p-6 sm:p-8 space-y-6 shadow-md dark:shadow-xl backdrop-blur-md relative overflow-hidden">
+              <div className="bg-rose-50/70 dark:bg-transparent dark:bg-gradient-to-b dark:from-rose-950/20 dark:via-zinc-900/90 dark:to-zinc-950/90 border border-rose-200 dark:border-rose-500/30 rounded-3xl p-6 sm:p-8 space-y-6 shadow-md dark:shadow-xl backdrop-blur-md relative overflow-hidden">
                 <div className="flex items-center gap-3 border-b border-rose-200 dark:border-rose-500/20 pb-4">
                   <div className="w-11 h-11 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-500 dark:text-rose-400 shadow-inner">
                     <ShieldAlert className="w-6 h-6" />
@@ -231,7 +231,7 @@ export default function FreeMovies() {
               </div>
 
               {/* MovizNow Safe Alternative (Emerald Theme) */}
-              <div className="bg-emerald-50/70 dark:bg-gradient-to-b dark:from-emerald-950/30 dark:via-zinc-900/90 dark:to-zinc-950/90 border border-emerald-200 dark:border-emerald-500/40 rounded-3xl p-6 sm:p-8 space-y-6 shadow-md dark:shadow-xl backdrop-blur-md relative overflow-hidden">
+              <div className="bg-emerald-50/70 dark:bg-transparent dark:bg-gradient-to-b dark:from-emerald-950/30 dark:via-zinc-900/90 dark:to-zinc-950/90 border border-emerald-200 dark:border-emerald-500/40 rounded-3xl p-6 sm:p-8 space-y-6 shadow-md dark:shadow-xl backdrop-blur-md relative overflow-hidden">
                 <div className="absolute top-0 right-0 bg-gradient-to-l from-emerald-500 to-teal-500 text-white text-[10px] font-black uppercase tracking-wider px-4 py-1.5 rounded-bl-xl shadow-md flex items-center gap-1">
                   <Star className="w-3 h-3 fill-current" />
                   <span>{t("Recommended")}</span>
@@ -312,7 +312,7 @@ export default function FreeMovies() {
           )}
 
           {/* Bottom WhatsApp Sticky Callout */}
-          <div className="bg-white/95 dark:bg-gradient-to-r dark:from-emerald-950/60 dark:via-teal-950/60 dark:to-zinc-900/90 border border-emerald-200 dark:border-emerald-500/30 rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-xl dark:shadow-2xl backdrop-blur-xl">
+          <div className="bg-white/95 dark:bg-transparent dark:bg-gradient-to-r dark:from-emerald-950/60 dark:via-teal-950/60 dark:to-zinc-900/90 border border-emerald-200 dark:border-emerald-500/30 rounded-3xl p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-xl dark:shadow-2xl backdrop-blur-xl">
             <div className="space-y-1 text-center sm:text-left">
               <h3 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white">{t("Ready to watch your movie?")}</h3>
               <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-300">{t("Send us the title on WhatsApp and get instant delivery.")}</p>

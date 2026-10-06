@@ -525,6 +525,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const now = Date.now();
+      const storageKey = `last_user_refresh_and_sync_time_${currentUser.uid}`;
+      const legacyStorageKey = `last_unified_10h_refresh_sync_time_v2_${currentUser.uid}`;
+      const lastSyncStr = localStorage.getItem(storageKey) || localStorage.getItem(legacyStorageKey);
+      const lastSyncTime = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
+      const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
+      const is10HourSyncPassed = !lastSyncTime || (now - lastSyncTime >= TEN_HOURS_MS);
+
+      // Throttling: If the 10-hour sync window has NOT passed yet AND we are in automatic loading mode,
+      // IMMEDIATELY load from local profile cache without making ANY Firestore connection or reading chunk_meta!
+      if (reason === "auto" && !is10HourSyncPassed && !force) {
+        const cachedProfileStr = safeStorage.getItem("profile_cache");
+        if (cachedProfileStr) {
+          try {
+            const cachedP = JSON.parse(cachedProfileStr);
+            const normLocal = normalizeUserStatusAndExpiry(cachedP);
+            setProfile(normLocal);
+            setLoading(false);
+            return true; // Return immediately with exactly 0 read operations!
+          } catch (e) {}
+        }
+      }
+
       // Throttle automatic refreshes to once every 15 seconds per tab
       if (reason === "auto" && now - lastRefreshTimeRef.current < 15000 && !force) {
         return false;

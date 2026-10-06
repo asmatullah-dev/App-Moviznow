@@ -60,7 +60,7 @@ export default function Contact() {
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="relative overflow-hidden bg-white/95 via-zinc-50/90 to-emerald-50/40 dark:from-zinc-900/90 dark:via-zinc-950/95 dark:to-zinc-900/90 border border-[#25D366]/30 rounded-3xl p-6 sm:p-12 shadow-xl dark:shadow-2xl backdrop-blur-2xl text-center space-y-5"
+            className="relative overflow-hidden bg-gradient-to-br from-white/95 via-zinc-50/90 to-emerald-50/40 dark:from-zinc-900/90 dark:via-zinc-950/95 dark:to-zinc-900/90 border border-[#25D366]/30 rounded-3xl p-6 sm:p-12 shadow-xl dark:shadow-2xl backdrop-blur-2xl text-center space-y-5"
           >
             <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-[#25D366] to-transparent opacity-80" />
 

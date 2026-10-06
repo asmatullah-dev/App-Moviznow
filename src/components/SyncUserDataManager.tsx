@@ -243,7 +243,9 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
 
   // STEP 3: BOTH REFRESH AND SYNC SUCCEEDED (OR NO PENDING SYNC WAS NEEDED)
   // Save 10-hour timestamp only after 100% successful execution!
-  localStorage.setItem(lastSyncKey, nowTime.toString());
+  const nowMs = nowTime.toString();
+  localStorage.setItem(lastSyncKey, nowMs);
+  localStorage.setItem(`last_unified_10h_refresh_sync_time_v2_${currentUserUid}`, nowMs);
   console.log(`[SyncUserDataManager] Combined Refresh & Sync pipeline completed successfully. Reason: ${reason}`);
 
   return true;

@@ -15,6 +15,27 @@ import ConfirmModal from '../../components/ConfirmModal';
 import AlertModal from '../../components/AlertModal';
 import { AppSettings, BankAccount } from '../../types';
 
+// Helper to determine if a hex color is light or white
+function isLightColor(colorStr?: string): boolean {
+  if (!colorStr) return false;
+  const c = colorStr.trim().toLowerCase();
+  if (c === '#fff' || c === '#ffffff' || c === 'white') return true;
+  if (c.startsWith('#') && (c.length === 4 || c.length === 7)) {
+    let hex = c.slice(1);
+    if (hex.length === 3) {
+      hex = hex.split('').map(x => x + x).join('');
+    }
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
+      const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+      return yiq >= 180;
+    }
+  }
+  return false;
+}
+
 export default function AdminSettings() {
   const { profile } = useAuth();
   const { refreshSettings } = useSettings();
@@ -1006,23 +1027,31 @@ export default function AdminSettings() {
                 </button>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {settings.bankAccounts.map((bank) => (
-                  <div key={bank.id} className="p-4 bg-zinc-50 dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 space-y-3 relative group">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div 
-                          style={{ 
-                            backgroundColor: bank.labelColor || `${bank.color}1a`,
-                            borderColor: bank.labelColor ? 'transparent' : `${bank.color}33`,
-                            color: bank.textColor || (bank.labelColor ? '#ffffff' : bank.color)
-                          }}
-                          className="px-4 py-2 rounded-xl border text-xs font-bold uppercase tracking-wider flex items-center gap-3"
-                        >
-                          {bank.iconUrl && (
-                            <img src={bank.iconUrl} alt="" className="w-4 h-4 object-contain" referrerPolicy="no-referrer" />
-                          )}
-                          Preview: {bank.name}
-                        </div>
+                {settings.bankAccounts.map((bank) => {
+                  const baseBg = bank.labelColor || bank.color || '#10b981';
+                  const isBgLight = isLightColor(baseBg);
+                  let previewText = bank.textColor;
+                  if (!previewText || (isBgLight && isLightColor(previewText))) {
+                    previewText = isBgLight ? '#000000' : '#ffffff';
+                  }
+
+                  return (
+                    <div key={bank.id} className="p-4 bg-zinc-50 dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 space-y-3 relative group">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div 
+                            style={{ 
+                              backgroundColor: baseBg,
+                              borderColor: 'transparent',
+                              color: previewText
+                            }}
+                            className="px-4 py-2 rounded-xl border text-xs font-bold uppercase tracking-wider flex items-center gap-3"
+                          >
+                            {bank.iconUrl && (
+                              <img src={bank.iconUrl} alt="" className="w-4 h-4 object-contain" referrerPolicy="no-referrer" />
+                            )}
+                            Preview: {bank.name}
+                          </div>
                         {bank.allowAutoApproval !== false ? (
                           <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                             <Zap className="w-3 h-3 fill-emerald-500 text-emerald-500" /> Auto
@@ -1136,7 +1165,8 @@ export default function AdminSettings() {
                       </div>
                     </div>
                   </div>
-                ))}
+                );
+              })}
               </div>
             </div>
 

@@ -190,7 +190,7 @@ export const getChunkMeta = async (forceRefresh = false): Promise<Record<string,
   }
 
   // Fetch from server: either first load (no saved meta) or 15s cooldown has expired or forceRefresh requested
-  // Race with 2500ms timeout so slow internet or Firestore stalls never block startup
+  // Race with 6000ms timeout so slow internet or Firestore stalls never block startup
   const networkDocPromise = runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')))
     .then(snap => snap.exists() ? (snap.data() || {}) : {});
 
@@ -199,10 +199,10 @@ export const getChunkMeta = async (forceRefresh = false): Promise<Record<string,
     const timer = setTimeout(() => {
       if (!settled) {
         settled = true;
-        console.warn("[chunkMeta] Server fetch exceeded 2500ms, immediately returning saved cache");
+        // Silent local fallback - no loud warning in developer console
         resolve(savedMeta || {});
       }
-    }, 2500);
+    }, 6000);
 
     networkDocPromise
       .then(data => {

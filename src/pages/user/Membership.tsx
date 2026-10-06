@@ -206,13 +206,13 @@ export default function Membership() {
                     let cardStyle = 'bg-zinc-50/80 dark:bg-zinc-950/60 border-zinc-200 dark:border-zinc-800/80 hover:border-zinc-300 dark:hover:border-zinc-700';
                     if (isSelected) {
                       if (is2Y) {
-                        cardStyle = 'bg-rose-50/80 dark:bg-gradient-to-r dark:from-rose-950/50 dark:via-purple-950/60 dark:to-amber-950/40 border-purple-500 ring-2 ring-purple-500/40 shadow-md dark:shadow-xl dark:shadow-purple-500/20';
+                        cardStyle = 'bg-rose-50/80 dark:bg-transparent dark:bg-gradient-to-r dark:from-rose-950/50 dark:via-purple-950/60 dark:to-amber-950/40 border-purple-500 ring-2 ring-purple-500/40 shadow-md dark:shadow-xl dark:shadow-purple-500/20';
                       } else if (is1Y) {
-                        cardStyle = 'bg-amber-50/80 dark:bg-gradient-to-r dark:from-amber-950/50 dark:via-orange-950/40 dark:to-amber-950/30 border-amber-500 ring-2 ring-amber-500/40 shadow-md dark:shadow-lg dark:shadow-amber-500/20';
+                        cardStyle = 'bg-amber-50/80 dark:bg-transparent dark:bg-gradient-to-r dark:from-amber-950/50 dark:via-orange-950/40 dark:to-amber-950/30 border-amber-500 ring-2 ring-amber-500/40 shadow-md dark:shadow-lg dark:shadow-amber-500/20';
                       } else if (selectedTier === 'basic') {
-                        cardStyle = 'bg-sky-50/80 dark:bg-gradient-to-r dark:from-sky-950/50 dark:via-blue-950/40 dark:to-sky-950/20 border-sky-500 dark:border-emerald-500 ring-2 ring-sky-500/40 shadow-md dark:shadow-emerald-500/20';
+                        cardStyle = 'bg-sky-50/80 dark:bg-transparent dark:bg-gradient-to-r dark:from-sky-950/50 dark:via-blue-950/40 dark:to-sky-950/20 border-sky-500 dark:border-emerald-500 ring-2 ring-sky-500/40 shadow-md dark:shadow-emerald-500/20';
                       } else {
-                        cardStyle = 'bg-amber-50/80 dark:bg-gradient-to-r dark:from-emerald-950/50 dark:via-teal-950/40 dark:to-emerald-950/30 border-amber-500 dark:border-emerald-500 ring-2 ring-amber-500/40 shadow-md dark:shadow-emerald-500/20';
+                        cardStyle = 'bg-amber-50/80 dark:bg-transparent dark:bg-gradient-to-r dark:from-emerald-950/50 dark:via-teal-950/40 dark:to-emerald-950/30 border-amber-500 dark:border-emerald-500 ring-2 ring-amber-500/40 shadow-md dark:shadow-emerald-500/20';
                       }
                     }
 
@@ -425,7 +425,7 @@ export default function Membership() {
               {/* Basic 1 Month */}
               <motion.div 
                 whileHover={{ y: -6 }}
-                className="bg-white/90 dark:bg-gradient-to-b dark:from-sky-950/40 dark:via-zinc-900/90 dark:to-zinc-950/95 border border-sky-500/30 hover:border-sky-400 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative"
+                className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-sky-950/40 dark:via-zinc-900/90 dark:to-zinc-950/95 border border-sky-500/30 hover:border-sky-400 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative"
               >
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -458,7 +458,7 @@ export default function Membership() {
               {/* Basic 3 Months */}
               <motion.div 
                 whileHover={{ y: -6 }}
-                className="bg-white/90 dark:bg-gradient-to-b dark:from-sky-950/40 dark:via-zinc-900/90 dark:to-zinc-950/95 border border-sky-500/30 hover:border-sky-400 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative overflow-hidden"
+                className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-sky-950/40 dark:via-zinc-900/90 dark:to-zinc-950/95 border border-sky-500/30 hover:border-sky-400 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 bg-sky-500 text-white text-[10px] font-black uppercase px-3.5 py-1 rounded-bl-xl shadow-md">
                   {t("Save 7%")}
@@ -497,7 +497,7 @@ export default function Membership() {
               {/* Basic 6 Months */}
               <motion.div 
                 whileHover={{ y: -6 }}
-                className="bg-white/90 dark:bg-gradient-to-b dark:from-sky-950/40 dark:via-zinc-900/90 dark:to-zinc-950/95 border border-sky-500/30 hover:border-sky-400 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative overflow-hidden"
+                className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-sky-950/40 dark:via-zinc-900/90 dark:to-zinc-950/95 border border-sky-500/30 hover:border-sky-400 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 bg-sky-500 text-white text-[10px] font-black uppercase px-3.5 py-1 rounded-bl-xl shadow-md">
                   {t("Save 13%")}
@@ -536,7 +536,7 @@ export default function Membership() {
               {/* Basic 1 Year - FEATURED BEST VALUE */}
               <motion.div 
                 whileHover={{ y: -6 }}
-                className="bg-white/95 dark:bg-gradient-to-b dark:from-sky-950/60 dark:via-zinc-900/90 dark:to-zinc-950/95 border-2 border-sky-500 dark:border-sky-400 rounded-3xl p-6 flex flex-col justify-between shadow-2xl shadow-sky-500/20 backdrop-blur-xl relative overflow-hidden"
+                className="bg-white/95 dark:bg-transparent dark:bg-gradient-to-b dark:from-sky-950/60 dark:via-zinc-900/90 dark:to-zinc-950/95 border-2 border-sky-500 dark:border-sky-400 rounded-3xl p-6 flex flex-col justify-between shadow-2xl shadow-sky-500/20 backdrop-blur-xl relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 bg-gradient-to-r from-sky-500 to-blue-600 text-white text-[10px] font-black uppercase px-3.5 py-1 rounded-bl-xl shadow-md">
                   🔥 {t("Best Value • Save 17%")}
@@ -593,7 +593,7 @@ export default function Membership() {
               {/* Single Movie Card */}
               <motion.div 
                 whileHover={{ y: -5 }}
-                className="bg-white/90 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200 dark:border-zinc-800/90 hover:border-emerald-500/50 rounded-3xl p-6 sm:p-8 flex flex-col justify-between shadow-xl backdrop-blur-xl transition-all relative overflow-hidden group"
+                className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200 dark:border-zinc-800/90 hover:border-emerald-500/50 rounded-3xl p-6 sm:p-8 flex flex-col justify-between shadow-xl backdrop-blur-xl transition-all relative overflow-hidden group"
               >
                 <div>
                   <div className="flex items-center justify-between mb-4">
@@ -630,7 +630,7 @@ export default function Membership() {
               {/* Web Series Season Card */}
               <motion.div 
                 whileHover={{ y: -5 }}
-                className="bg-white/90 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200 dark:border-zinc-800/90 hover:border-purple-500/50 rounded-3xl p-6 sm:p-8 flex flex-col justify-between shadow-xl backdrop-blur-xl transition-all relative overflow-hidden group"
+                className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200 dark:border-zinc-800/90 hover:border-purple-500/50 rounded-3xl p-6 sm:p-8 flex flex-col justify-between shadow-xl backdrop-blur-xl transition-all relative overflow-hidden group"
               >
                 <div>
                   <div className="flex items-center justify-between mb-4">
@@ -682,7 +682,7 @@ export default function Membership() {
               </p>
 
               {/* Explicit VIP Guarantee Callout */}
-              <div className="bg-emerald-50 dark:bg-gradient-to-r dark:from-emerald-500/10 dark:via-amber-500/15 dark:to-emerald-500/10 border border-emerald-500/30 dark:border-emerald-500/40 rounded-2xl p-4 text-center max-w-2xl mx-auto shadow-lg backdrop-blur-md">
+              <div className="bg-emerald-50 dark:bg-transparent dark:bg-gradient-to-r dark:from-emerald-500/10 dark:via-amber-500/15 dark:to-emerald-500/10 border border-emerald-500/30 dark:border-emerald-500/40 rounded-2xl p-4 text-center max-w-2xl mx-auto shadow-lg backdrop-blur-md">
                 <p className="text-xs sm:text-sm font-extrabold text-emerald-800 dark:text-emerald-300 flex items-center justify-center gap-2">
                   <ShieldCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
                   <span>{t("VIP Guarantee: Unlimited High-Speed HD Streaming & Direct Downloads")}</span>
@@ -694,7 +694,7 @@ export default function Membership() {
               {/* 1 Month VIP */}
               <motion.div 
                 whileHover={{ y: -6 }}
-                className="bg-white/90 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative"
+                className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative"
               >
                 <div>
                   <div className="flex items-center justify-between mb-2">
@@ -728,7 +728,7 @@ export default function Membership() {
               {/* 3 Months VIP */}
               <motion.div 
                 whileHover={{ y: -6 }}
-                className="bg-white/90 dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative overflow-hidden"
+                className="bg-white/90 dark:bg-transparent dark:bg-gradient-to-b dark:from-zinc-900/90 dark:to-zinc-950/95 border border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/40 rounded-3xl p-6 flex flex-col justify-between shadow-xl backdrop-blur-xl relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 bg-emerald-500 text-white text-[10px] font-black uppercase px-3.5 py-1 rounded-bl-xl shadow-md">
                   {t("Save 17%")}
@@ -768,7 +768,7 @@ export default function Membership() {
               {/* 6 Months VIP - FEATURED HIGHLIGHT */}
               <motion.div 
                 whileHover={{ y: -8 }}
-                className="bg-white/95 dark:bg-gradient-to-b dark:from-emerald-950/50 dark:via-zinc-900/95 dark:to-zinc-950/95 border-2 border-emerald-500 rounded-3xl p-6 flex flex-col justify-between shadow-2xl shadow-emerald-500/20 backdrop-blur-xl relative overflow-hidden transform lg:-translate-y-3"
+                className="bg-white/95 dark:bg-transparent dark:bg-gradient-to-b dark:from-emerald-950/50 dark:via-zinc-900/95 dark:to-zinc-950/95 border-2 border-emerald-500 rounded-3xl p-6 flex flex-col justify-between shadow-2xl shadow-emerald-500/20 backdrop-blur-xl relative overflow-hidden transform lg:-translate-y-3"
               >
                 <div className="absolute top-0 inset-x-0 bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-500 text-white text-[10px] font-black uppercase py-1.5 text-center tracking-wider shadow-sm flex items-center justify-center gap-1">
                   <Zap className="w-3 h-3 fill-current" />
@@ -809,7 +809,7 @@ export default function Membership() {
               {/* 1 Year VIP */}
               <motion.div 
                 whileHover={{ y: -6 }}
-                className="bg-white/95 dark:bg-gradient-to-b dark:from-amber-950/20 dark:via-zinc-900/90 dark:to-zinc-950/95 border-2 border-amber-500/50 hover:border-amber-400 rounded-3xl p-6 flex flex-col justify-between shadow-2xl shadow-amber-500/10 backdrop-blur-xl relative overflow-hidden"
+                className="bg-white/95 dark:bg-transparent dark:bg-gradient-to-b dark:from-amber-950/20 dark:via-zinc-900/90 dark:to-zinc-950/95 border-2 border-amber-500/50 hover:border-amber-400 rounded-3xl p-6 flex flex-col justify-between shadow-2xl shadow-amber-500/10 backdrop-blur-xl relative overflow-hidden"
               >
                 <div className="absolute top-0 right-0 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[10px] sm:text-xs font-black uppercase px-4 py-1.5 rounded-bl-xl shadow-lg tracking-wider flex items-center gap-1">
                   <span>🔥 {t("Most Popular • Save 28%")}</span>
@@ -895,7 +895,7 @@ export default function Membership() {
           </div>
 
           {/* Feature Badges Grid */}
-          <div className="bg-white/80 dark:bg-gradient-to-r dark:from-zinc-900/90 dark:via-zinc-950/90 dark:to-zinc-900/90 rounded-3xl p-6 border border-zinc-200/80 dark:border-zinc-800/90 grid grid-cols-2 md:grid-cols-4 gap-4 text-center shadow-md dark:shadow-inner mt-8">
+          <div className="bg-white/80 dark:bg-transparent dark:bg-gradient-to-r dark:from-zinc-900/90 dark:via-zinc-950/90 dark:to-zinc-900/90 rounded-3xl p-6 border border-zinc-200/80 dark:border-zinc-800/90 grid grid-cols-2 md:grid-cols-4 gap-4 text-center shadow-md dark:shadow-inner mt-8">
             <div className="p-3">
               <Film className="w-6 h-6 text-emerald-500 dark:text-emerald-400 mx-auto mb-2" />
               <p className="font-extrabold text-sm text-zinc-900 dark:text-white">{t("Daily 6–7 Movies")}</p>

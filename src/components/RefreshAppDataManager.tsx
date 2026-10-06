@@ -12,15 +12,18 @@ export function RefreshAppDataManager() {
   const { refreshNotifications } = useNotifications();
   const isRefreshingRef = useRef(false);
 
-  const executeUnifiedRefreshAndSync = useCallback(async (reason: string = 'manual') => {
-    if (isRefreshingRef.current) return;
+  const executeUnifiedRefreshAndSync = useCallback(async (reason: string = 'manual'): Promise<boolean> => {
+    if (isRefreshingRef.current) return false;
 
     const isManualTrigger = reason === 'catalog_button' || reason === 'user_profile_button' || reason === 'manual' || reason === 'header_button';
 
     // For guest users (unauthenticated), skip sync completely as guests have no Firestore connection
     if (!user) {
-      return;
+      return false;
     }
+
+    const storageKey = `last_user_refresh_and_sync_time_${user.uid}`;
+    const legacyStorageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
 
     if (!navigator.onLine) {
       if (reason !== 'app_open' && reason !== '10_hour_sync') {
@@ -34,19 +37,18 @@ export function RefreshAppDataManager() {
           }
         }));
       }
-      return;
+      return false;
     }
 
     if (!isManualTrigger) {
-      const storageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
-      const lastUnifiedStr = localStorage.getItem(storageKey);
+      const lastUnifiedStr = localStorage.getItem(storageKey) || localStorage.getItem(legacyStorageKey);
       const lastUnifiedTime = lastUnifiedStr ? parseInt(lastUnifiedStr, 10) : 0;
       const now = Date.now();
       const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 
       if (lastUnifiedTime && (now - lastUnifiedTime < TEN_HOURS_MS)) {
         // Skip connecting to Firestore automatically if 10 hours have not passed
-        return;
+        return true;
       }
     }
 
@@ -66,21 +68,20 @@ export function RefreshAppDataManager() {
     }
 
     try {
-      // ==========================================
-      // STEP 1: REFRESH APP DATA FIRST (Settings, Notifications, and Profile only, NO Content chunks or reviews)
-      // ==========================================
+      // =========================================================================
+      // STEP 1: REFRESH APP DATA FIRST (Settings, Notifications, and User Profile)
+      // =========================================================================
       const versions: Record<string, any> = await getChunkMeta(isManualTrigger);
 
-      let otherUpdated = false;
-
-      // 1. Check settings version: only fetch when chunk meta version of settings changed detected
+      // 1. Check settings version: only fetch when chunk meta version of settings changed
       const serverSettingsVer = versions.settings || 0;
       const localSettingsVer = safeStorage.getItem('cached_settings_version') || '0';
       const serverSettingsTime = parseVersionTime(serverSettingsVer);
       const localSettingsTime = parseVersionTime(localSettingsVer);
       if ((serverSettingsTime > 0 && serverSettingsTime > localSettingsTime) || !safeStorage.getItem('cached_app_settings')) {
-        await refreshSettings(isManualTrigger).catch(() => {});
-        otherUpdated = true;
+        await refreshSettings(isManualTrigger).catch((err) => {
+          console.warn('[RefreshAppDataManager] Settings refresh failed:', err);
+        });
       }
 
       // 2. Check notifications version
@@ -92,27 +93,28 @@ export function RefreshAppDataManager() {
         const serverNotifTime = parseVersionTime(serverNotifVer);
         const localNotifTime = parseVersionTime(localNotifVer);
         if (serverNotifTime > 0 && serverNotifTime > localNotifTime) {
-          await refreshNotifications().catch(() => {});
-          otherUpdated = true;
+          await refreshNotifications().catch((err) => {
+            console.warn('[RefreshAppDataManager] Notifications refresh failed:', err);
+          });
         }
       }
 
-      // 3. Check self user version and refresh user profile
+      // 3. Check user profile version and refresh user profile
       if (user?.uid) {
         const chunkUsersMeta = versions.users || {};
         const serverUserVer = chunkUsersMeta[user.uid];
         const localUserVer = safeStorage.getItem(`profile_version_${user.uid}`) || '0';
         const serverUserTime = parseVersionTime(serverUserVer || 0);
         const localUserTime = parseVersionTime(localUserVer);
-        // Only treat as deleted if explicitly marked -1 or { deleted: true } on server.
-        // Ordinary users not in chunkUsersMeta are completely normal.
+        
         const isExplicitlyDeleted = serverUserVer === -1 || (typeof serverUserVer === 'object' && (serverUserVer as any)?.deleted === true) || (versions as any)?.[`users.${user.uid}`] === -1;
 
-        if (isExplicitlyDeleted || isManualTrigger || (serverUserTime > 0 && serverUserTime > localUserTime)) {
+        if (isExplicitlyDeleted || isManualTrigger || (serverUserTime > 0 && serverUserTime > localUserTime) || !safeStorage.getItem('profile_cache')) {
           const profileFetched = await refreshProfile(true, isManualTrigger ? 'manual' : 'auto').catch((err) => {
-            console.error("Profile refresh failed:", err);
+            console.error('[RefreshAppDataManager] Profile refresh failed:', err);
             return null;
           });
+
           if (profileFetched === false && isExplicitlyDeleted) {
             window.dispatchEvent(new CustomEvent('sync_status', {
               detail: {
@@ -121,37 +123,58 @@ export function RefreshAppDataManager() {
               }
             }));
             isRefreshingRef.current = false;
-            return;
+            return false;
           }
-          if (profileFetched === null && isManualTrigger) {
-            window.dispatchEvent(new CustomEvent('sync_status', {
-              detail: {
-                status: 'error',
-                message: 'Profile refresh failed. Please retry.'
-              }
-            }));
-            isRefreshingRef.current = false;
-            return;
+
+          if (profileFetched === null) {
+            // Profile refresh failed with network error -> abort pipeline without saving timestamp!
+            console.warn('[RefreshAppDataManager] Profile refresh encountered an error. Aborting before sync.');
+            if (isManualTrigger) {
+              window.dispatchEvent(new CustomEvent('sync_status', {
+                detail: {
+                  status: 'error',
+                  message: 'Profile refresh failed. Please retry.'
+                }
+              }));
+            }
+            return false;
           }
-          otherUpdated = true;
         }
       }
 
-      // ==========================================
-      // STEP 2: SYNC PENDING USER CHANGES AFTER SUCCESSFUL REFRESH (Sessions, Time, Click History, Content History)
-      // ==========================================
+      // =========================================================================
+      // STEP 2: SYNC PENDING USER CHANGES SECOND (Favorites, Watch Later, Watched, Orders, Requests)
+      // =========================================================================
       if (user?.uid) {
         const syncSuccess = await executeSyncUserData(user.uid, profile, reason);
         if (!syncSuccess) {
-          console.warn("Unified Step 2: Syncing pending changes failed/returned false, but proceeding.");
+          console.warn('[RefreshAppDataManager] Step 2 Sync failed or returned false. Aborting without saving timestamp.');
+          if (isManualTrigger) {
+            window.dispatchEvent(new CustomEvent('sync_status', {
+              detail: {
+                status: 'error',
+                isInitialLoad: false,
+                isManual: true,
+                scope: 'app',
+                message: 'Sync failed. Please retry.'
+              }
+            }));
+          }
+          return false;
         }
-
-        // Save unified last successful refresh & sync timestamp
-        const storageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
-        localStorage.setItem(storageKey, Date.now().toString());
       }
 
-      // Dispatch single unified completion toast
+      // =========================================================================
+      // STEP 3: BOTH REFRESH AND SYNC COMPLETED SUCCESSFULLY -> SAVE 10-HOUR TIMESTAMP
+      // =========================================================================
+      const nowTimestamp = Date.now().toString();
+      localStorage.setItem(storageKey, nowTimestamp);
+      localStorage.setItem(legacyStorageKey, nowTimestamp);
+      localStorage.setItem(`last_user_sync_time_v2_${user.uid}`, nowTimestamp);
+
+      console.log(`[RefreshAppDataManager] Refresh & Sync successfully completed for ${user.uid}. Next 10-hour window scheduled.`);
+
+      // Dispatch single unified completion toast for manual trigger
       if (isManualTrigger) {
         window.dispatchEvent(new CustomEvent('sync_status', {
           detail: {
@@ -160,10 +183,12 @@ export function RefreshAppDataManager() {
             isManual: true,
             scope: 'app',
             updatedCount: 0,
-            message: 'Refresh successfully'
+            message: 'Refresh & Sync completed'
           }
         }));
       }
+
+      return true;
     } catch (err: any) {
       console.error('Error during Unified Refresh & Sync:', err);
 
@@ -178,6 +203,7 @@ export function RefreshAppDataManager() {
           }
         }));
       }
+      return false;
     } finally {
       (window as any).__isAppDataSyncing = false;
       isRefreshingRef.current = false;
@@ -220,13 +246,14 @@ export function RefreshAppDataManager() {
     };
   }, []);
 
-  // 10-Hour Unified Refresh & Sync Checker (checked on App Open / mount & resume)
+  // 10-Hour Unified Refresh & Sync Checker (checked periodically, never on app open/mount or visibility resume)
   useEffect(() => {
     if (!user?.uid) return;
 
     const check10HourUnified = () => {
-      const storageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
-      const lastUnifiedStr = localStorage.getItem(storageKey);
+      const storageKey = `last_user_refresh_and_sync_time_${user.uid}`;
+      const legacyStorageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
+      const lastUnifiedStr = localStorage.getItem(storageKey) || localStorage.getItem(legacyStorageKey);
       const lastUnifiedTime = lastUnifiedStr ? parseInt(lastUnifiedStr, 10) : 0;
       const now = Date.now();
       const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
@@ -236,21 +263,13 @@ export function RefreshAppDataManager() {
       }
     };
 
-    // Check 1 second after mount
-    const timer = setTimeout(() => {
+    // Periodic check every 1 hour (purely local time comparison, 0 Firestore calls unless 10h has arrived)
+    const interval = setInterval(() => {
       check10HourUnified();
-    }, 1000);
+    }, 60 * 60 * 1000);
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        check10HourUnified();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => {
-      clearTimeout(timer);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      clearInterval(interval);
     };
   }, [user?.uid]);
 

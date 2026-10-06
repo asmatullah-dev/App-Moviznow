@@ -10,6 +10,27 @@ interface PaymentMethodsProps {
   onSelectBank?: (bank: BankAccount) => void;
 }
 
+// Helper to determine if a hex color is light or white
+function isLightColor(colorStr?: string): boolean {
+  if (!colorStr) return false;
+  const c = colorStr.trim().toLowerCase();
+  if (c === '#fff' || c === '#ffffff' || c === 'white') return true;
+  if (c.startsWith('#') && (c.length === 4 || c.length === 7)) {
+    let hex = c.slice(1);
+    if (hex.length === 3) {
+      hex = hex.split('').map(x => x + x).join('');
+    }
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    if (!isNaN(r) && !isNaN(g) && !isNaN(b)) {
+      const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+      return yiq >= 180;
+    }
+  }
+  return false;
+}
+
 export default function PaymentMethods({ 
   copied, 
   onCopy,
@@ -55,17 +76,33 @@ export default function PaymentMethods({
         {settings.bankAccounts?.map((bank) => {
           const isSelected = bank.id === currentBankId;
           const isAuto = bank.allowAutoApproval !== false;
+
+          const baseBgColor = bank.labelColor || bank.color || '#10b981';
+          const isBgLight = isLightColor(baseBgColor);
+
+          // Calculate contrasting text color
+          let textColor = bank.textColor;
+          if (!textColor || (isBgLight && isLightColor(textColor))) {
+            textColor = isBgLight ? '#000000' : '#ffffff';
+          } else if (!isBgLight && !isLightColor(textColor) && textColor === '#000000') {
+            textColor = '#ffffff';
+          }
+
           return (
             <button 
               key={bank.id}
               type="button"
               onClick={() => handleSelect(bank)}
               style={{ 
-                backgroundColor: isSelected ? (bank.textColor || '#ffffff') : (bank.labelColor || bank.color),
-                borderColor: isSelected ? (bank.labelColor || bank.color) : 'transparent',
-                color: isSelected ? (bank.labelColor || bank.color) : (bank.textColor || '#ffffff')
+                backgroundColor: baseBgColor,
+                borderColor: isSelected ? '#10b981' : 'transparent',
+                color: textColor
               }}
-              className={`flex items-center justify-between px-4 py-3 rounded-2xl border text-sm font-bold shadow-sm transition-all active:scale-95 cursor-pointer ${isSelected ? 'ring-2 ring-emerald-500 ring-offset-2 dark:ring-offset-black scale-[1.02]' : 'opacity-90 hover:opacity-100'}`}
+              className={`flex items-center justify-between px-4 py-3 rounded-2xl border text-sm font-bold shadow-sm transition-all active:scale-95 cursor-pointer ${
+                isSelected 
+                  ? 'ring-2 ring-emerald-500 ring-offset-2 dark:ring-offset-zinc-950 scale-[1.02] opacity-100 shadow-md shadow-emerald-500/20' 
+                  : 'opacity-85 hover:opacity-100'
+              }`}
             >
               <div className="flex items-center gap-2 truncate">
                 {bank.iconUrl && (
@@ -76,14 +113,18 @@ export default function PaymentMethods({
               {isAuto ? (
                 <span 
                   title="Auto Approval Supported" 
-                  className={`text-[10px] font-black px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-0.5 ${isSelected ? 'bg-black/10 dark:bg-white/10' : 'bg-white/20'}`}
+                  className={`text-[10px] font-black px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-0.5 ${
+                    isBgLight ? 'bg-black/15 text-black' : 'bg-white/20 text-white'
+                  }`}
                 >
                   <Zap className="w-2.5 h-2.5 fill-current" /> Auto
                 </span>
               ) : (
                 <span 
                   title="Manual Approval Method" 
-                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-0.5 ${isSelected ? 'bg-black/10 dark:bg-white/10' : 'bg-black/20'}`}
+                  className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md shrink-0 flex items-center gap-0.5 ${
+                    isBgLight ? 'bg-black/15 text-black' : 'bg-black/30 text-white'
+                  }`}
                 >
                   Manual
                 </span>

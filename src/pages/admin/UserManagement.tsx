@@ -1976,10 +1976,10 @@ export default function UserManagement() {
                     className="bg-transparent border-none text-xs focus:outline-none text-emerald-500 font-medium cursor-pointer"
                   >
                     <option value="">Bulk Actions</option>
-                    <optgroup label="Google Contacts" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
+                    <optgroup label="Google Contacts" className="text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-900">
                       <option value="sync_contacts">Sync Contacts to Google Contacts ({selectedUsers.length})</option>
                     </optgroup>
-                    <optgroup label="Change Status" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
+                    <optgroup label="Change Status" className="text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-900">
                       <option value="active">Set Active</option>
                       <option value="pending">Set Pending</option>
                       <option value="expired">Set Expired</option>
@@ -1987,7 +1987,7 @@ export default function UserManagement() {
                         <option value="suspended">Suspend</option>
                       )}
                     </optgroup>
-                    <optgroup label="Change Role" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
+                    <optgroup label="Change Role" className="text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-900">
                       <option value="role_user">Set Role: User</option>
                       <option value="role_basic">Set Role: Basic</option>
                       <option value="role_vip">Set Role: VIP</option>
@@ -2002,7 +2002,7 @@ export default function UserManagement() {
                         </>
                       )}
                     </optgroup>
-                    <optgroup label="Danger Zone" className="text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-900">
+                    <optgroup label="Danger Zone" className="text-zinc-700 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-900">
                       {selectedUsers.length === 2 && (profile?.role === 'admin' || profile?.role === 'owner') && (
                         <option value="merge">Merge Users</option>
                       )}
@@ -2431,6 +2431,21 @@ export default function UserManagement() {
                       {Object.keys(selectedUser).length}
                     </span>
                   </button>
+                  {selectedUser.role !== 'owner' && (
+                    <button
+                      type="button"
+                      onClick={() => { setShowAllFields(false); handleEdit(selectedUser); }}
+                      className={clsx(
+                        "px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer",
+                        isEditingOverlay
+                          ? "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-xs font-bold"
+                          : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
+                      )}
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+                  )}
                 </div>
               </div>
               <button onClick={() => { setSelectedUser(null); setIsEditingOverlay(false); setShowAllFields(false); setEditingId(null); }} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors cursor-pointer">

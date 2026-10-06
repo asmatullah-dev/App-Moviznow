@@ -297,7 +297,6 @@ export default function App() {
                     <SyncErrorOverlay />
                     <OfflineBanner />
                     <SyncBanner />
-                    <SyncUserDataManager />
                     <RefreshAppDataManager />
                     <SystemNotificationWrapper />
                     <NotificationPermissionPrompt />

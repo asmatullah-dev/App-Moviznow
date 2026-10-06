@@ -259,7 +259,7 @@ export default function TopUp() {
                   let cardStyle = 'bg-zinc-50/80 dark:bg-zinc-950/60 border-zinc-200/80 dark:border-zinc-800/80 hover:border-zinc-300 dark:hover:border-zinc-700';
                   if (isSelected) {
                     if (is2Y) {
-                      cardStyle = 'bg-gradient-to-r from-rose-950/50 via-purple-950/60 to-amber-950/40 border-purple-500 ring-2 ring-purple-500/40 shadow-xl shadow-purple-500/20';
+                      cardStyle = 'bg-gradient-to-r from-rose-50 via-purple-50 to-amber-50 dark:from-rose-950/50 dark:via-purple-950/60 dark:to-amber-950/40 border-purple-500 ring-2 ring-purple-500/40 shadow-xl shadow-purple-500/20';
                     } else if (is1Y) {
                       cardStyle = 'bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/15 dark:from-amber-950/50 dark:via-orange-950/40 dark:to-amber-950/30 border-amber-500 ring-2 ring-amber-500/40 shadow-lg shadow-amber-500/20';
                     } else {

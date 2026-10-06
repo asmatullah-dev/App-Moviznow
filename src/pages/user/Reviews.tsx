@@ -230,7 +230,7 @@ export default function Reviews() {
         <main className="max-w-4xl mx-auto px-4 pt-6 pb-16 w-full space-y-8">
           
           {/* Hero Ratings Header */}
-          <div className="relative overflow-hidden bg-white/95 via-zinc-50/90 to-rose-50/30 dark:from-zinc-900/90 dark:via-zinc-950/90 dark:to-zinc-900/90 border border-zinc-200/80 dark:border-rose-500/20 rounded-3xl p-6 sm:p-8 shadow-xl dark:shadow-2xl backdrop-blur-xl">
+          <div className="relative overflow-hidden bg-gradient-to-br from-white/95 via-zinc-50/90 to-rose-50/30 dark:from-zinc-900/90 dark:via-zinc-950/90 dark:to-zinc-900/90 border border-zinc-200/80 dark:border-rose-500/20 rounded-3xl p-6 sm:p-8 shadow-xl dark:shadow-2xl backdrop-blur-xl">
             <div className="flex flex-col md:flex-row items-center justify-between gap-8 relative z-10">
               
               {/* Left Column: Title & Subtitle */}
@@ -291,7 +291,7 @@ export default function Reviews() {
                             style={{ width: `${pct}%` }} 
                           />
                         </div>
-                        <span className="text-[10px] text-zinc-500 w-6 text-right font-mono">{count}</span>
+                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400 w-6 text-right font-mono">{count}</span>
                       </div>
                     );
                   })}
@@ -474,7 +474,7 @@ export default function Reviews() {
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <Loader2 className="w-8 h-8 animate-spin text-rose-500" />
-              <span className="text-xs font-bold text-zinc-500">{t("Loading...")}</span>
+              <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400">{t("Loading...")}</span>
             </div>
           ) : (
             <div className="space-y-4">

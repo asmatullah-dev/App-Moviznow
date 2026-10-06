@@ -58,6 +58,31 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const cachedData = safeStorage.getItem('cached_notifications_data');
       const cachedVersion = safeStorage.getItem('cached_notifications_version');
 
+      // Throttling: On app open / automatic load, if we have cached notifications,
+      // load them instantly and make EXACTLY 0 Firestore or chunk_meta requests!
+      if (!force && cachedData) {
+        try {
+          const parsed = JSON.parse(cachedData);
+          if (Array.isArray(parsed)) {
+            const currentProfileUid = profileUidRef.current;
+            const currentUserUid = userUidRef.current;
+            let filtered = parsed.filter(n => {
+              if (n.targetAudience === 'registered' && (!currentProfileUid && !currentUserUid)) return false;
+              if (n.targetAudience === 'guests' && (currentProfileUid || currentUserUid)) return false;
+              const isTargeted = n.targetUserId || (n.targetUserIds && n.targetUserIds.length > 0);
+              if (isTargeted) {
+                if (!currentProfileUid) return false;
+                return n.targetUserId === currentProfileUid || n.targetUserIds?.includes(currentProfileUid);
+              }
+              return true;
+            });
+            setNotifications(filtered);
+            setLoading(false);
+            return;
+          }
+        } catch (e) {}
+      }
+
       // 1. If we have cached data and within 24 hours, check chunk_meta version
       let meta: any = null;
       try {
