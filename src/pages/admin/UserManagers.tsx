@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { db } from '../../firebase';
-import { writeBatch, doc} from 'firebase/firestore';
 import { UserProfile, Role } from '../../types';
 import { Users, ChevronRight, Search, X, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -11,10 +9,9 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import Button from '../../components/Button';
 import { useUsers } from '../../contexts/UsersContext';
 import { getUserDisplayName } from '../../utils/userUtils';
-import { updateChunkMetaLocalCache, getUtcVersion } from '../../utils/chunkMeta';
 
 export default function UserManagers() {
-  const { users: allUsers, loading: usersLoading, finalizeUserChanges, hasPendingChanges, updateUserFields } = useUsers();
+  const { users: allUsers, loading: usersLoading, updateMultipleUserFields } = useUsers();
 
   const [managers, setManagers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(false);
@@ -40,41 +37,33 @@ export default function UserManagers() {
     if (!managerToRemove) return;
     setProcessing(prev => ({ ...prev, remove: true }));
     try {
-      const batch = writeBatch(db);
       const managerUser = allUsers.find(u => u.uid === managerToRemove);
       
       const newRole = managerUser?.role === 'user_manager' || managerUser?.role === 'manager' 
         ? 'user' 
         : managerUser?.role || 'user';
 
-      batch.update(doc(db, 'users', managerToRemove), { 
-        isUserManager: false,
-        role: newRole
-      });
+      const updates: Record<string, Partial<UserProfile>> = {
+        [managerToRemove]: {
+          isUserManager: false,
+          role: newRole
+        }
+      };
 
       // Expire all managed users
       const managedUsers = allUsers.filter(u => u.managedBy === managerToRemove);
-      const nowTime = getUtcVersion();
-      const metaUsersUpdate: Record<string, any> = { [managerToRemove]: nowTime };
-
       managedUsers.forEach(userData => {
         if (userData.status !== 'pending') {
-          batch.update(doc(db, 'users', userData.uid), {
+          updates[userData.uid] = {
             status: 'expired',
             previousStatus: userData.status || 'active'
-          });
-          metaUsersUpdate[userData.uid] = nowTime;
+          };
         }
       });
 
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: metaUsersUpdate }, { merge: true });
-
-      await batch.commit();
-
-      try {
-        updateChunkMetaLocalCache({ users: metaUsersUpdate });
-      } catch (e) {}
+      updateMultipleUserFields(updates);
       setManagers(prev => prev.filter(m => m.uid !== managerToRemove));
+      setManagerToRemove(null);
     } catch (error) {
       console.error('Error removing manager:', error);
     } finally {

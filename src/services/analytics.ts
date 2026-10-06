@@ -31,29 +31,21 @@ export const logEvent = async (
     // Ignore parse error
   }
 
-  // Update click history locally
+  // Update click history locally in profile cache
   if (type === 'content_click' || type === 'link_click') {
     const title = data?.contentTitle;
     const contentId = data?.contentId || "unknown";
     if (title) {
         try {
-            const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
-            let pendingAll = JSON.parse(pendingStr);
-            pendingAll[userId] = pendingAll[userId] || {};
-            
-            let rawHistory: any[] = pendingAll[userId].clickHistory;
-            if (!rawHistory) {
-                const cachedProfile = safeStorage.getItem('profile_cache');
-                if (cachedProfile) {
-                    const profile = JSON.parse(cachedProfile);
-                    rawHistory = profile.clickHistory || [];
-                } else {
-                    rawHistory = [];
-                }
+            let clickHistory: { id: string; label: string }[] = [];
+            const cachedProfileStr = safeStorage.getItem('profile_cache');
+            if (cachedProfileStr) {
+                const profile = JSON.parse(cachedProfileStr);
+                clickHistory = profile.clickHistory || [];
             }
             
             // Normalize the history to be objects { id, label }
-            let clickHistory: { id: string; label: string }[] = rawHistory.map(entry => {
+            clickHistory = clickHistory.map(entry => {
                if (typeof entry === 'string') {
                    return { id: "unknown", label: entry };
                }
@@ -65,11 +57,10 @@ export const logEvent = async (
             
             if (contentIndex !== -1) {
                 let entry = clickHistory[contentIndex];
-                // Ensure id is set correctly if it was unknown
                 if (entry.id === "unknown") entry.id = contentId;
                 
                 const prefix = `${title} - `;
-                const remainder = entry.label.substring(prefix.length); // e.g. "2 times" or "S1E2 - 1 time" or "S1E2, S1E3"
+                const remainder = entry.label.substring(prefix.length);
                 
                 if (type === 'content_click') {
                     if (remainder.match(/^\d+ times?$/)) {
@@ -109,10 +100,11 @@ export const logEvent = async (
             
             clickHistory = clickHistory.slice(0, 5);
             
-            pendingAll[userId].clickHistory = clickHistory;
-            safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
-            // Do NOT mark needs_user_sync = 'true' on every click to prevent excessive Firestore writes.
-            // Clicks remain in local pending storage and sync once in 24 hours during daily sync.
+            if (cachedProfileStr) {
+                const profile = JSON.parse(cachedProfileStr);
+                profile.clickHistory = clickHistory;
+                safeStorage.setItem('profile_cache', JSON.stringify(profile));
+            }
         } catch (e) {
              console.error("Failed to update click history", e);
         }

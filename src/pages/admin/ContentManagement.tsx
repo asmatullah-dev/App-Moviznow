@@ -31,8 +31,7 @@ import {
 } from "firebase/firestore";
 import { useAuth } from "../../contexts/AuthContext";
 import { isValidGmailAddress } from "../../utils/emailValidation";
-import { isContentDataEqual } from "../../contexts/ContentContext";
-import { useAdminContent } from "../../contexts/AdminContentContext";
+import { useAdminContent, isContentDataEqual } from "../../contexts/AdminContentContext";
 import { useNotifications } from "../../contexts/NotificationContext";
 import { useUsers } from "../../contexts/UsersContext";
 import { isEpisodeRange } from "../../utils/linkScanner";
@@ -375,6 +374,9 @@ const ContentCard = memo(
     handleAddToSpecialCollection,
     handleMerge,
   }: ContentCardProps) => {
+    const { updateContentFields } = useAdminContent();
+    const [isQuickQualityOpen, setIsQuickQualityOpen] = useState(false);
+
     const missingLabels = useMemo(
       () => getMissingLabels(content, profile),
       [content, profile, getMissingLabels],
@@ -463,14 +465,26 @@ const ContentCard = memo(
           )}
           {missingLabels.length > 0 && (
             <div className="absolute bottom-1 left-1 right-1 flex flex-row flex-wrap items-end gap-0.5 pointer-events-none opacity-80 group-hover:opacity-100 transition-opacity max-h-[80%] overflow-hidden">
-              {missingLabels.map((lbl, idx) => (
-                <div
-                  key={idx}
-                  className="bg-red-600/90 backdrop-blur-sm text-white px-1.5 py-[1px] rounded text-[9px] font-bold uppercase tracking-wider shadow-sm truncate max-w-full"
-                >
-                  {lbl}
-                </div>
-              ))}
+              {missingLabels.map((lbl, idx) => {
+                const isQualityMissing = lbl === "Missing Print Quality";
+                return (
+                  <div
+                    key={idx}
+                    onClick={isQualityMissing ? (e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setIsQuickQualityOpen(!isQuickQualityOpen);
+                    } : undefined}
+                    className={clsx(
+                      "backdrop-blur-sm text-white px-1.5 py-[1px] rounded text-[9px] font-bold uppercase tracking-wider shadow-sm truncate max-w-full",
+                      isQualityMissing ? "bg-amber-600/95 hover:bg-amber-500 cursor-pointer pointer-events-auto" : "bg-red-600/90"
+                    )}
+                    title={isQualityMissing ? "Click to set print quality" : undefined}
+                  >
+                    {lbl}
+                  </div>
+                );
+              })}
             </div>
           )}
           <div className="absolute top-1 right-1 flex flex-col gap-1 items-end">
@@ -499,7 +513,48 @@ const ContentCard = memo(
                   </div>
                 );
               }
-              return null;
+              return (
+                <div className="relative pointer-events-auto">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      e.preventDefault();
+                      setIsQuickQualityOpen(!isQuickQualityOpen);
+                    }}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-500/90 hover:bg-amber-600 text-white shadow-sm flex items-center gap-0.5 cursor-pointer transition-colors"
+                    title="Click to select print quality"
+                  >
+                    Set Quality
+                  </button>
+                  {isQuickQualityOpen && (
+                    <div
+                      className="absolute right-0 top-full mt-1 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl py-1 z-50 min-w-[130px] max-h-48 overflow-y-auto"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="px-2 py-1 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider border-b border-zinc-100 dark:border-zinc-700">
+                        Select Quality
+                      </div>
+                      {qualities.map((q) => (
+                        <button
+                          key={q.id}
+                          type="button"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setIsQuickQualityOpen(false);
+                            await updateContentFields([{ id: content.id, fields: { qualityId: q.id }, chunkId: content.chunkId }]);
+                          }}
+                          className="w-full text-left px-2.5 py-1 text-xs text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-1.5 transition-colors"
+                        >
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: q.color || '#10b981' }} />
+                          <span className="truncate">{q.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
             })()}
             <OttBadge platform={content.ottPlatform || (content as any).ott_platform} />
             {content.status === "draft" && (

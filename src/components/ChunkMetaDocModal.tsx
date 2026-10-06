@@ -79,7 +79,6 @@ export const ChunkMetaDocModal: React.FC<ChunkMetaDocModalProps> = ({
   const [nestedSearchTerms, setNestedSearchTerms] = useState<Record<string, string>>({});
 
   // Loading & Saving states
-  const [isFetchingLive, setIsFetchingLive] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [fetchNotice, setFetchNotice] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -122,42 +121,6 @@ export const ChunkMetaDocModal: React.FC<ChunkMetaDocModalProps> = ({
       setJsonError(null);
     }
   }, [isJsonMode, data, deletedKeys]);
-
-  // Fetch directly from live Firestore /chunk_meta/versions
-  const handleFetchLiveFromFirestore = async (showLoadingSpinner: boolean = true) => {
-    if (showLoadingSpinner) setIsFetchingLive(true);
-    setFetchNotice(null);
-    setErrorNotice(null);
-    try {
-      const metaRef = doc(db, 'chunk_meta', 'versions');
-      const snap = await runWithNetwork(() => getDoc(metaRef));
-      if (snap.exists()) {
-        const liveDoc = snap.data() || {};
-        setData({ ...liveDoc });
-        setOriginalData({ ...liveDoc });
-        setDeletedKeys(new Set());
-        setEditingKey(null);
-        setConfirmDeleteKey(null);
-
-        // Cache locally for offline/quick reference
-        try {
-          safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(liveDoc));
-          safeStorage.setItem('chunk_meta_versions', JSON.stringify(liveDoc));
-          safeStorage.setItem('cached_chunk_meta_doc', JSON.stringify(liveDoc));
-        } catch (e) {}
-
-        setFetchNotice(`Successfully loaded ${Object.keys(liveDoc).length} live fields from Firestore (chunk_meta/versions).`);
-      } else {
-        setFetchNotice('Document chunk_meta/versions not found on Firestore server; displaying locally cached fields.');
-      }
-    } catch (err: any) {
-      console.error("Error fetching live chunk_meta doc:", err);
-      setErrorNotice(`Firestore read notice: ${err?.message || 'Using local saved data'}`);
-    } finally {
-      setIsFetchingLive(false);
-      setTimeout(() => setFetchNotice(null), 5000);
-    }
-  };
 
   // Determine changed fields count
   const changesCount = useMemo(() => {
@@ -559,16 +522,6 @@ export const ChunkMetaDocModal: React.FC<ChunkMetaDocModalProps> = ({
                 </div>
 
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <Button
-                    onClick={() => handleFetchLiveFromFirestore(true)}
-                    disabled={isFetchingLive}
-                    variant="secondary"
-                    className="text-xs py-1.5 px-3 h-auto"
-                    icon={<RefreshCw className={`w-3.5 h-3.5 ${isFetchingLive ? 'animate-spin' : ''}`} />}
-                  >
-                    {isFetchingLive ? 'Fetching...' : 'Fetch Live from Firestore'}
-                  </Button>
-
                   <Button
                     onClick={() => {
                       try {

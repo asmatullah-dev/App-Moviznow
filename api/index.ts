@@ -93,7 +93,7 @@ import { translateRouter } from "./_translate.js";
 import { emailRouter } from "./_email.js";
 import { tmdbRouter } from "./_tmdb.js";
 import { ordersRouter } from "./_orders.js";
-import { checkAndSendExpiryNotifications, sendMembershipUpdateNotification, sendOrderApprovedNotification } from "./_expiryService.js";
+import { checkAndSendExpiryNotifications, sendMembershipUpdateNotification, sendOrderApprovedNotification, sendUserStatusEmail } from "./_expiryService.js";
 
 export function isCloudflareHtml(status: number, htmlStr: string): boolean {
   if (status === 403 || status === 503) return true;
@@ -4438,6 +4438,31 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       } catch (error: any) {
         console.error("Error sending membership update notification:", error);
         res.status(500).json({ error: error.message || "Failed to send membership update notification" });
+      }
+    },
+  );
+
+  // Send User Status Email directly to their stored Gmail address (Active or Expired)
+  app.post(
+    ["/api/notifications/send-user-status-email", "/notifications/send-user-status-email"],
+    async (req, res) => {
+      try {
+        const { userId, userEmail, userDisplayName, status, expiryDate, role } = req.body || {};
+        if (!userId && !userEmail) {
+          return res.status(400).json({ error: "Missing required field: userId or userEmail" });
+        }
+        const result = await sendUserStatusEmail({
+          userId,
+          userEmail,
+          userDisplayName,
+          status,
+          expiryDate,
+          role,
+        });
+        res.json(result);
+      } catch (error: any) {
+        console.error("Error sending user status email:", error);
+        res.status(500).json({ error: error.message || "Failed to send user status email" });
       }
     },
   );

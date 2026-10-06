@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, query, orderBy, doc, updateDoc, getDoc, setDoc, arrayUnion, deleteDoc, writeBatch } from 'firebase/firestore';
+import { doc, updateDoc, setDoc, arrayUnion } from 'firebase/firestore';
 import { Order, UserProfile } from '../../types';
-import { Check, X, Clock, Search, Filter, Eye, Loader2, Trash2, Zap, Sparkles, CheckCircle2, AlertCircle, Image as ImageIcon, ExternalLink, ShieldCheck, Mail } from 'lucide-react';
+import { Check, X, Clock, Search, Filter, Eye, Loader2, Trash2, Zap, Sparkles, CheckCircle2, AlertCircle, Image as ImageIcon, ExternalLink, ShieldCheck, Mail, Upload, RefreshCw } from 'lucide-react';
 import { format } from 'date-fns';
 import { clsx } from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -25,13 +25,15 @@ const PHONES_CACHE_KEY = 'admin_user_phones_cache';
 
 export default function OrdersManagement() {
   const { profile } = useAuth();
-  const { users: allUsers, updateUserFields, finalizeUserChanges } = useUsers();
+  const { users: allUsers, updateUserFields, finalizeUserChanges, hasPendingChanges, refreshUsers } = useUsers();
   const { settings } = useSettings();
   const [orders, setOrders] = useState<Order[]>(() => {
     const cached = safeStorage.getItem(CACHE_KEY);
     return cached ? JSON.parse(cached).map((o: any) => normalizeOrder(o)) : [];
   });
   const [loading, setLoading] = useState(orders.length === 0);
+  const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
+  const [isSyncingUsers, setIsSyncingUsers] = useState(false);
   const [filter, setFilter] = useState<string>(() => sessionStorage.getItem('orders_mgmt_filter') || 'all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [search, setSearch] = useState(() => sessionStorage.getItem('orders_mgmt_search') || '');
@@ -221,7 +223,6 @@ export default function OrdersManagement() {
       updates.orders = updatedOrders;
 
       updateUserFields(order.userId, updates);
-      await finalizeUserChanges(true);
 
       // Send Order Approved Notification
       fetch('/api/notifications/notify-order-approved', {
@@ -273,7 +274,6 @@ export default function OrdersManagement() {
 
       const updatedOrders = orderUser.orders!.map(o => o.id === orderId ? toMinimalOrder({ ...normalizeOrder(o), status: 'declined' }) : toMinimalOrder(o));
       updateUserFields(orderUser.uid, { orders: updatedOrders });
-      await finalizeUserChanges(true);
       if (selectedOrder?.id === orderId) {
         setSelectedOrder({ ...selectedOrder, status: 'declined' });
       }
@@ -292,7 +292,6 @@ export default function OrdersManagement() {
 
       const updatedOrders = orderUser.orders!.filter(o => o.id !== orderId).map(o => toMinimalOrder(o));
       updateUserFields(orderUser.uid, { orders: updatedOrders });
-      await finalizeUserChanges(true);
       if (selectedOrder?.id === orderId) {
         setSelectedOrder(null);
       }
@@ -468,6 +467,29 @@ export default function OrdersManagement() {
               <option value="trial">Trial</option>
               <option value="selected_content">Selected Content</option>
             </select>
+
+            <div className="relative inline-flex items-center">
+              {hasPendingChanges && (
+                <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5 z-10 pointer-events-none">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                </span>
+              )}
+              <button
+                className={clsx(
+                  "p-2 rounded-xl font-medium flex items-center justify-center transition-colors text-white shadow-sm",
+                  hasPendingChanges
+                    ? "bg-orange-600 hover:bg-orange-700"
+                    : "bg-zinc-600 hover:bg-zinc-700",
+                )}
+                onClick={() => setIsSyncConfirmOpen(true)}
+                title={hasPendingChanges ? "Sync pending changes to Firestore" : "Upload changes"}
+                aria-label="Upload Changes to Server"
+                disabled={isSyncingUsers}
+              >
+                {isSyncingUsers ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -979,6 +1001,27 @@ export default function OrdersManagement() {
         onConfirm={confirmModal.onConfirm}
         onCancel={() => setConfirmModal({ ...confirmModal, isOpen: false })}
         confirmText={confirmModal.confirmText}
+      />
+
+      <ConfirmModal
+        isOpen={isSyncConfirmOpen}
+        title="Sync Pending Changes"
+        message="Are you sure you want to upload all pending order and user changes to Firestore? All changes will be safely committed in minimal operations."
+        confirmText="Upload & Sync"
+        onConfirm={async () => {
+          setIsSyncingUsers(true);
+          try {
+            await finalizeUserChanges(true);
+            setIsSyncConfirmOpen(false);
+          } catch (err: any) {
+            console.error('Sync failed:', err);
+            setIsSyncConfirmOpen(false);
+          } finally {
+            setIsSyncingUsers(false);
+          }
+        }}
+        onCancel={() => setIsSyncConfirmOpen(false)}
+        loading={isSyncingUsers}
       />
     </motion.div>
   );

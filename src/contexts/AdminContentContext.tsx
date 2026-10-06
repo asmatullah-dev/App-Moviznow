@@ -93,6 +93,7 @@ export function isContentDataEqual(existing: any, updated: any): boolean {
     "releaseDate",
     "runtime",
     "imdbRating",
+    "imdbLink",
     "country",
     "ottPlatform",
     "movieLinks",
@@ -101,7 +102,14 @@ export function isContentDataEqual(existing: any, updated: any): boolean {
     "fullSeasonMkv",
     "genreIds",
     "languageIds",
-    "qualityIds",
+    "qualityId",
+    "subtitles",
+    "trailerUrl",
+    "trailerTitle",
+    "trailerYoutubeTitle",
+    "trailerSeasonNumber",
+    "trailers",
+    "isUpcoming",
     "order",
     "comment",
     "cast",
@@ -949,11 +957,21 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       const chunksToFetch: string[] = [];
       const serverChunkIds = new Set<string>();
 
+      const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
+      const pendingChunkIds = new Set(JSON.parse(pendingStr));
+      const pendingItemsMapStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
+      let pendingItemsMap: Record<string, any> = {};
+      try { pendingItemsMap = JSON.parse(pendingItemsMapStr); } catch(e) {}
+
       for (const [chunkId, versionMeta] of Object.entries(versions)) {
         if (['collections', 'notifications', 'lastGlobalUpdate', 'metadata', 'users', 'fcm_tokens', 'settings'].includes(chunkId)) continue;
         if (!chunkId.startsWith('movie_chunk_') && !chunkId.startsWith('series_chunk_')) continue;
 
         serverChunkIds.add(chunkId);
+
+        // If this chunk has pending local updates, skip fetching server doc to preserve uncommitted edits
+        if (pendingChunkIds.has(chunkId)) continue;
+
         const serverVersion = typeof versionMeta === 'object' ? (versionMeta as any).updatedAt : versionMeta;
         const localV = localMeta[chunkId];
         const localVersion = typeof localV === 'object' ? localV.updatedAt : localV;
@@ -967,12 +985,6 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
           chunksToFetch.push(chunkId);
         }
       }
-
-      const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
-      const pendingChunkIds = new Set(JSON.parse(pendingStr));
-      const pendingItemsMapStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
-      let pendingItemsMap: Record<string, any> = {};
-      try { pendingItemsMap = JSON.parse(pendingItemsMapStr); } catch(e) {}
 
       if (chunksToFetch.length > 0) {
         await Promise.all(chunksToFetch.map(async (chunkId) => {
@@ -1224,7 +1236,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   };
 
   const saveContentInternal = async (content: Content, localOnly = false) => {
-    const isAdminOrEditor = ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
+    const isAdminOrEditor = canManageContent(profile, user) || ['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '');
 
     const existing = contentList.find(c => c.id === content.id);
     const isNewItem = !existing;
@@ -1240,7 +1252,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       return;
     }
 
-    if (isNewItem && isAdminOrEditor) {
+    if (isNewItem) {
       const createdStr = safeStorage.getItem('admin_pending_created_items') || '[]';
       const createdSet = new Set(JSON.parse(createdStr));
       createdSet.add(content.id);
@@ -1286,7 +1298,6 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
                     delete items[content.id];
                     safeStorage.setItem(key, JSON.stringify(items));
                     // Mark this old chunk as needing sync too
-                    // Extract actual chunk ID from key (handling both legacy and new formats)
                     const cid = key.replace('admin_content_chunk_', '');
                     
                     const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
@@ -1319,20 +1330,20 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     localMeta[chunkId] = { updatedAt: utcNowSave, count: Object.keys(newChunkItems).length };
     safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
 
-    if (isAdminOrEditor) {
-        const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
-        const pendingIds = new Set(JSON.parse(pendingStr));
-        pendingIds.add(chunkId);
-        safeStorage.setItem('admin_pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
+    // ALWAYS mark chunk and item as pending in local storage
+    const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
+    const pendingIds = new Set(JSON.parse(pendingStr));
+    pendingIds.add(chunkId);
+    safeStorage.setItem('admin_pending_chunk_updates', JSON.stringify(Array.from(pendingIds)));
 
-        const pendingItemsStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
-        const pendingItemsMap = JSON.parse(pendingItemsStr);
-        if (!pendingItemsMap[chunkId]) pendingItemsMap[chunkId] = [];
-        if (!pendingItemsMap[chunkId].includes(content.id)) pendingItemsMap[chunkId].push(content.id);
-        safeStorage.setItem('admin_pending_item_updates', JSON.stringify(pendingItemsMap));
+    const pendingItemsStr = safeStorage.getItem('admin_pending_item_updates') || '{}';
+    const pendingItemsMap = JSON.parse(pendingItemsStr);
+    if (!pendingItemsMap[chunkId]) pendingItemsMap[chunkId] = [];
+    if (!pendingItemsMap[chunkId].includes(content.id)) pendingItemsMap[chunkId].push(content.id);
+    safeStorage.setItem('admin_pending_item_updates', JSON.stringify(pendingItemsMap));
 
-        setHasPendingChanges(checkHasPendingChanges());
-    }
+    setHasPendingChanges(true);
+
     setContentList(prev => {
         const idx = prev.findIndex(c => c.id === content.id);
         const newList = [...prev];
@@ -1343,10 +1354,6 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         window.dispatchEvent(new CustomEvent('content_updated_locally'));
         return sorted;
     });
-    if (!localOnly && !isAdminOrEditor) {
-        const { saveContentToChunk } = await import('../utils/chunkUtils');
-        await saveContentToChunk(content);
-    }
   };
 
   const updateOrder = async (updates: {id: string, order: number}[]) => {
@@ -1451,7 +1458,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     // Save metadata back
     safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
 
-    if (isAdminOrEditor && affectedChunkIds.size > 0) {
+    if (affectedChunkIds.size > 0) {
         const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
         const pendingIds = new Set(JSON.parse(pendingStr));
         affectedChunkIds.forEach(cid => pendingIds.add(cid));
@@ -1467,7 +1474,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         });
         safeStorage.setItem('admin_pending_item_updates', JSON.stringify(pendingItemsMap));
 
-        setHasPendingChanges(checkHasPendingChanges());
+        setHasPendingChanges(true);
     }
 
     setContentList(prev => {
@@ -1480,11 +1487,6 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         window.dispatchEvent(new CustomEvent('content_updated_locally'));
         return next;
     });
-
-    if (!isAdminOrEditor) {
-        const { updateContentFieldsInChunks } = await import('../utils/chunkUtils');
-        await updateContentFieldsInChunks(meaningfulUpdates);
-    }
   };
 
   const deleteMultipleContents = async (items: { id: string, chunkId?: string }[]) => {
@@ -1551,7 +1553,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
     safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
 
-    if (isAdminOrEditor && affectedChunkIds.size > 0) {
+    if (affectedChunkIds.size > 0) {
         const pendingStr = safeStorage.getItem('admin_pending_chunk_updates') || '[]';
         const pendingIds = new Set(JSON.parse(pendingStr));
         affectedChunkIds.forEach(cid => pendingIds.add(cid));
@@ -1566,6 +1568,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             });
         });
         safeStorage.setItem('admin_pending_item_updates', JSON.stringify(pendingItemsMap));
+        setHasPendingChanges(true);
     }
 
     // Immediately remove from contentList state & admin_content_cache
@@ -1582,16 +1585,6 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         safeStorage.removeItem('admin_pending_chunk_updates');
         safeStorage.removeItem('admin_pending_item_updates');
         safeStorage.removeItem('admin_pending_created_items');
-    }
-
-    // Directly delete from Firestore chunks for non-admin/editor users (admins and editors use pending changes)
-    if (!isAdminOrEditor) {
-        try {
-            const { deleteContentsFromChunks } = await import('../utils/chunkUtils');
-            await deleteContentsFromChunks(items);
-        } catch(e) {
-            console.error("Error deleting from Firestore chunks:", e);
-        }
     }
   };
 

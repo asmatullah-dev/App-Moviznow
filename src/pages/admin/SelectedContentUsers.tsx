@@ -1,7 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db } from '../../firebase';
-import { collection, doc, updateDoc, writeBatch, query} from 'firebase/firestore';
 import { UserProfile, Content, Role, Status } from '../../types';
 import { Settings, X, Check, Search } from 'lucide-react';
 import AlertModal from '../../components/AlertModal';
@@ -35,22 +33,7 @@ export default function SelectedContentUsers() {
     if (!selectedUser) return;
     try {
       const assignedContent = Array.from(assignedIds);
-      const nowTime = getUtcVersion();
-      const batch = writeBatch(db);
-      batch.update(doc(db, 'users', selectedUser.uid), {
-        assignedContent: assignedContent,
-      });
-      batch.set(doc(db, 'chunk_meta', 'versions'), {
-        users: {
-          [selectedUser.uid]: nowTime
-        }
-      }, { merge: true });
-      await batch.commit();
-
-      try {
-        updateChunkMetaLocalCache({ users: { [selectedUser.uid]: nowTime } });
-      } catch (e) {}
-
+      updateUserFields(selectedUser.uid, { assignedContent });
       setUsers(prev => prev.map(u => u.uid === selectedUser.uid ? { ...u, assignedContent } : u));
       safeStorage.removeItem(`pending_access_${selectedUser.uid}`);
       setSelectedUser(null);
@@ -67,22 +50,7 @@ export default function SelectedContentUsers() {
       if (pendingAccess) {
         try {
           const assignedContent = JSON.parse(pendingAccess);
-          const nowTime = getUtcVersion();
-          const batch = writeBatch(db);
-          batch.update(doc(db, 'users', selectedUser.uid), {
-            assignedContent: assignedContent,
-          });
-          batch.set(doc(db, 'chunk_meta', 'versions'), {
-            users: {
-              [selectedUser.uid]: nowTime
-            }
-          }, { merge: true });
-          await batch.commit();
-
-          try {
-            updateChunkMetaLocalCache({ users: { [selectedUser.uid]: nowTime } });
-          } catch (e) {}
-
+          updateUserFields(selectedUser.uid, { assignedContent });
           setUsers(prev => prev.map(u => u.uid === selectedUser.uid ? { ...u, assignedContent } : u));
           safeStorage.removeItem(`pending_access_${selectedUser.uid}`);
         } catch (error) {

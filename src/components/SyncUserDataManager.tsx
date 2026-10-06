@@ -1,16 +1,17 @@
 import { useEffect, useCallback, useRef } from 'react';
-import { doc, writeBatch, serverTimestamp } from 'firebase/firestore';
-import { db, runWithNetwork, auth } from '../firebase';
+import { doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { db, runWithNetwork } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { safeStorage } from '../utils/safeStorage';
-import { updateChunkMetaLocalCache, getUtcVersion } from '../utils/chunkMeta';
+import { updateChunkMetaLocalCache, getUtcVersion, getChunkMeta } from '../utils/chunkMeta';
+import { normalizeUserStatusAndExpiry } from '../contexts/UsersContext';
 import { UserProfile } from '../types';
 
 export async function executeSyncUserData(currentUserUid: string, currentProfile: UserProfile | null, reason: string = 'manual'): Promise<boolean> {
   if (!currentUserUid) return false;
 
   const nowTime = Date.now();
-  const lastSyncKey = `last_user_sync_time_${currentUserUid}`;
+  const lastSyncKey = `last_user_refresh_and_sync_time_${currentUserUid}`;
 
   const isManualTrigger = reason === 'manual' || reason === 'catalog_button' || reason === 'user_profile_button';
   const lastSyncStr = localStorage.getItem(lastSyncKey);
@@ -18,46 +19,60 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
   const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 
   if (!isManualTrigger && (nowTime - lastSyncTime < TEN_HOURS_MS)) {
-    // Skip connecting to Firestore. Keep accumulated values in local cache for next sync opportunity.
+    // Skip network pipeline if 10-hour window has not elapsed.
     return true;
   }
 
-  const nowUtc = getUtcVersion();
   const userRef = doc(db, 'users', currentUserUid);
 
-  // Ensure user profile exists in cache and is not marked deleted
-  const profileCacheStr = safeStorage.getItem('profile_cache');
-  if (!currentProfile && !profileCacheStr) {
-    console.warn(`[executeSyncUserData] No local profile found for ${currentUserUid}, skipping sync write.`);
+  // STEP 1: REFRESH FIRST - Check server version and update local user profile if newer
+  try {
+    const versions = await getChunkMeta(false).catch(() => null);
+    const serverUsersVersion = versions?.users || {};
+    const serverVer = serverUsersVersion[currentUserUid];
+    const localVer = safeStorage.getItem(`profile_version_${currentUserUid}`);
+
+    if (serverVer && serverVer !== localVer) {
+      const userSnap = await runWithNetwork(() => getDoc(userRef));
+      if (userSnap.exists()) {
+        const freshData = { ...userSnap.data(), uid: currentUserUid } as UserProfile;
+        const normalized = normalizeUserStatusAndExpiry(freshData);
+        safeStorage.setItem('profile_cache', JSON.stringify(normalized));
+        safeStorage.setItem(`profile_version_${currentUserUid}`, serverVer);
+        try { window.localStorage.setItem('profile_cache', JSON.stringify(normalized)); } catch (e) {}
+        window.dispatchEvent(new CustomEvent('user_profile_updated', { detail: normalized }));
+      }
+    }
+  } catch (refreshErr) {
+    console.warn('[SyncUserDataManager] Refresh step failed:', refreshErr);
+    // Abort pipeline immediately: DO NOT save 10-hour timestamp on failure!
+    safeStorage.setItem('needs_user_sync', 'true');
     return false;
   }
 
-  // 1. Flush accumulated time & sessions
+  const nowUtc = getUtcVersion();
+
+  // Flush accumulated time & sessions locally into profile cache before sync
   const timeCacheKey = `accumulated_time_seconds_${currentUserUid}`;
   const accSecs = parseInt(safeStorage.getItem(timeCacheKey) || '0', 10);
   const sessionCacheKey = `accumulated_sessions_${currentUserUid}`;
   const accSessions = parseInt(safeStorage.getItem(sessionCacheKey) || '0', 10);
 
   if (accSecs > 0 || accSessions > 0) {
-    const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
     try {
-      const pendingAll = JSON.parse(pendingStr);
-      pendingAll[currentUserUid] = pendingAll[currentUserUid] || {};
-      if (accSecs > 0) {
-        safeStorage.setItem(timeCacheKey, '0');
-        const currentBaseTime = typeof pendingAll[currentUserUid].timeSpent === 'number'
-          ? pendingAll[currentUserUid].timeSpent
-          : (currentProfile?.timeSpent || 0);
-        pendingAll[currentUserUid].timeSpent = currentBaseTime + accSecs;
+      const cachedProfileStr = safeStorage.getItem('profile_cache');
+      if (cachedProfileStr) {
+        const cachedP = JSON.parse(cachedProfileStr);
+        if (accSecs > 0) {
+          safeStorage.setItem(timeCacheKey, '0');
+          cachedP.timeSpent = (cachedP.timeSpent || 0) + accSecs;
+        }
+        if (accSessions > 0) {
+          safeStorage.setItem(sessionCacheKey, '0');
+          cachedP.sessionsCount = (cachedP.sessionsCount || 0) + accSessions;
+        }
+        safeStorage.setItem('profile_cache', JSON.stringify(cachedP));
       }
-      if (accSessions > 0) {
-        safeStorage.setItem(sessionCacheKey, '0');
-        const currentBaseSessions = typeof pendingAll[currentUserUid].sessionsCount === 'number'
-          ? pendingAll[currentUserUid].sessionsCount
-          : (currentProfile?.sessionsCount || 0);
-        pendingAll[currentUserUid].sessionsCount = currentBaseSessions + accSessions;
-      }
-      safeStorage.setItem('pending_user_updates', JSON.stringify(pendingAll));
     } catch (e) {}
   }
 
@@ -91,333 +106,147 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
     safeStorage.getItem('needs_user_sync') === 'true'
   );
 
-  if (!hasPending) {
-    // If there is absolutely no pending data to sync, update last sync timestamp and exit immediately.
-    localStorage.setItem(lastSyncKey, nowTime.toString());
-    return true;
-  }
+  // STEP 2: SYNC SECOND - Push local pending updates if any exist
+  if (hasPending) {
+    const updatesToPush: Record<string, any> = {};
 
-  // 2. Prepare updatesToPush from starting states
-  const updatesToPush: Record<string, any> = {};
-
-  // Pending Favorites & Watch Later & Watched
-  if (startFavsStr) {
-    try { updatesToPush.favorites = JSON.parse(startFavsStr); } catch (e) {}
-  }
-  if (startWLStr) {
-    try { updatesToPush.watchLater = JSON.parse(startWLStr); } catch (e) {}
-  }
-  if (startWatchedStr) {
-    try {
-      const pendingWatched = JSON.parse(startWatchedStr);
-      if (Array.isArray(pendingWatched)) {
-        updatesToPush.watched = pendingWatched.slice(0, 50);
-      }
-    } catch (e) {}
-  }
-
-  // Pending Orders
-  if (startOrdersStr) {
-    try {
-      const pendingOrders = JSON.parse(startOrdersStr);
-      if (Array.isArray(pendingOrders) && pendingOrders.length > 0) {
-        const existingOrders = currentProfile?.orders || [];
-        const orderMap = new Map();
-        existingOrders.forEach((o: any) => o && o.id && orderMap.set(o.id, o));
-        pendingOrders.forEach((o: any) => o && o.id && orderMap.set(o.id, o));
-        updatesToPush.orders = Array.from(orderMap.values());
-      }
-    } catch (e) {}
-  }
-
-  // Pending Reviews
-  if (startReviewsStr) {
-    try {
-      const pendingReviews = JSON.parse(startReviewsStr);
-      if (Array.isArray(pendingReviews) && pendingReviews.length > 0) {
-        updatesToPush.pendingReviews = pendingReviews;
-      }
-    } catch (e) {}
-  }
-
-  // Pending Reported Links
-  if (startReportedStr) {
-    try {
-      const pendingReported = JSON.parse(startReportedStr);
-      if (Array.isArray(pendingReported) && pendingReported.length > 0) {
-        updatesToPush.reported_links = pendingReported;
-      }
-    } catch (e) {}
-  }
-
-  // Pending Movie Requests
-  if (startRequestsStr) {
-    try {
-      const pendingReqs = JSON.parse(startRequestsStr);
-      if (Array.isArray(pendingReqs) && pendingReqs.length > 0) {
-        updatesToPush.movieRequests = pendingReqs;
-      }
-    } catch (e) {}
-  }
-
-  // Generic Pending User Updates (e.g. settings, language, theme)
-  if (startUserUpdates) {
-    Object.assign(updatesToPush, startUserUpdates);
-  }
-
-  // Include preferredTheme / preferredLanguage ONLY if changed from currentProfile
-  const currentTheme = safeStorage.getItem('theme_preference');
-  if (currentTheme && currentTheme !== (currentProfile as any)?.preferredTheme) {
-    updatesToPush.preferredTheme = currentTheme;
-  }
-
-  const currentLang = safeStorage.getItem('language_preference');
-  if (currentLang && currentLang !== currentProfile?.preferredLanguage) {
-    updatesToPush.preferredLanguage = currentLang;
-  }
-
-  // Set lastActive and updatedAt when there are pending updates
-  const nowIso = new Date().toISOString();
-  updatesToPush.lastActive = nowIso;
-  updatesToPush.updatedAt = serverTimestamp();
-
-  if (!navigator.onLine) {
-    safeStorage.setItem('needs_user_sync', 'true');
-    return false;
-  }
-
-  try {
-    const batch = writeBatch(db);
-    
-    // 1. Write user document updates with merge
-    batch.set(userRef, updatesToPush, { merge: true });
-
-    // 2. Atomically update chunk_meta version for this user so all sessions, devices, and admin delta-sync know user data was updated
-    batch.set(doc(db, 'chunk_meta', 'versions'), {
-      users: {
-        [currentUserUid]: nowUtc
-      }
-    }, { merge: true });
-
-    await runWithNetwork(() => batch.commit());
-
-    // 3. Update local chunk_meta cache and mtimes
-    try {
-      updateChunkMetaLocalCache({ users: { [currentUserUid]: nowUtc } });
-    } catch (e) {}
-
-    try {
-      const mtimesStr = safeStorage.getItem('sync_user_mtimes');
-      if (mtimesStr) {
-        const mtimes = JSON.parse(mtimesStr);
-        mtimes[currentUserUid] = nowUtc;
-        safeStorage.setItem('sync_user_mtimes', JSON.stringify(mtimes));
-      }
-      const cachedUsersStr = safeStorage.getItem('cached_all_users');
-      if (cachedUsersStr) {
-        const cachedUsers = JSON.parse(cachedUsersStr);
-        const idx = cachedUsers.findIndex((u: any) => u.uid === currentUserUid);
-        if (idx !== -1) {
-          // Replace serverTimestamp with serializable ISO string for local JSON storage
-          const localUpdates = { ...updatesToPush, updatedAt: nowIso };
-          cachedUsers[idx] = { ...cachedUsers[idx], ...localUpdates };
-          safeStorage.setItem('cached_all_users', JSON.stringify(cachedUsers));
-        }
-      }
-    } catch (e) {}
-
-    // --- CLEANUP IN LOCAL QUEUES ONLY AFTER CONFIRMED SUCCESS ---
-    safeStorage.removeItem('needs_user_sync');
-
-    // 1. Favorites Cleanup
-    const currentFavsStr = safeStorage.getItem('pending_favorites_array');
-    if (currentFavsStr === startFavsStr) {
-      safeStorage.removeItem('pending_favorites_array');
-    } else if (currentFavsStr && startFavsStr) {
+    if (startFavsStr) {
+      try { updatesToPush.favorites = JSON.parse(startFavsStr); } catch (e) {}
+    }
+    if (startWLStr) {
+      try { updatesToPush.watchLater = JSON.parse(startWLStr); } catch (e) {}
+    }
+    if (startWatchedStr) {
       try {
-        const currentFavs = JSON.parse(currentFavsStr);
-        const startFavs = JSON.parse(startFavsStr);
-        const remainingFavs = currentFavs.filter((id: string) => !startFavs.includes(id));
-        if (remainingFavs.length > 0) {
-          safeStorage.setItem('pending_favorites_array', JSON.stringify(remainingFavs));
-        } else {
-          safeStorage.removeItem('pending_favorites_array');
+        const pendingWatched = JSON.parse(startWatchedStr);
+        if (Array.isArray(pendingWatched)) {
+          updatesToPush.watched = pendingWatched.slice(0, 50);
         }
-      } catch (e) {
-        safeStorage.removeItem('pending_favorites_array');
-      }
+      } catch (e) {}
+    }
+    if (startOrdersStr) {
+      try {
+        const pendingOrders = JSON.parse(startOrdersStr);
+        if (Array.isArray(pendingOrders) && pendingOrders.length > 0) {
+          const existingOrders = currentProfile?.orders || [];
+          const orderMap = new Map();
+          existingOrders.forEach((o: any) => o && o.id && orderMap.set(o.id, o));
+          pendingOrders.forEach((o: any) => o && o.id && orderMap.set(o.id, o));
+          updatesToPush.orders = Array.from(orderMap.values());
+        }
+      } catch (e) {}
+    }
+    if (startReviewsStr) {
+      try {
+        const pendingReviews = JSON.parse(startReviewsStr);
+        if (Array.isArray(pendingReviews) && pendingReviews.length > 0) {
+          updatesToPush.pendingReviews = pendingReviews;
+        }
+      } catch (e) {}
+    }
+    if (startReportedStr) {
+      try {
+        const pendingReported = JSON.parse(startReportedStr);
+        if (Array.isArray(pendingReported) && pendingReported.length > 0) {
+          updatesToPush.reported_links = pendingReported;
+        }
+      } catch (e) {}
+    }
+    if (startRequestsStr) {
+      try {
+        const pendingReqs = JSON.parse(startRequestsStr);
+        if (Array.isArray(pendingReqs) && pendingReqs.length > 0) {
+          updatesToPush.movieRequests = pendingReqs;
+        }
+      } catch (e) {}
+    }
+    if (startUserUpdates) {
+      Object.assign(updatesToPush, startUserUpdates);
     }
 
-    // 2. Watch Later Cleanup
-    const currentWLStr = safeStorage.getItem('pending_watch_later_array');
-    if (currentWLStr === startWLStr) {
-      safeStorage.removeItem('pending_watch_later_array');
-    } else if (currentWLStr && startWLStr) {
-      try {
-        const currentWL = JSON.parse(currentWLStr);
-        const startWL = JSON.parse(startWLStr);
-        const remainingWL = currentWL.filter((id: string) => !startWL.includes(id));
-        if (remainingWL.length > 0) {
-          safeStorage.setItem('pending_watch_later_array', JSON.stringify(remainingWL));
-        } else {
-          safeStorage.removeItem('pending_watch_later_array');
-        }
-      } catch (e) {
-        safeStorage.removeItem('pending_watch_later_array');
-      }
+    const currentTheme = safeStorage.getItem('theme_preference');
+    if (currentTheme && currentTheme !== (currentProfile as any)?.preferredTheme) {
+      updatesToPush.preferredTheme = currentTheme;
     }
 
-    // 2b. Watched Marks Cleanup
-    const currentWatchedStr = safeStorage.getItem('pending_watched_marks');
-    if (currentWatchedStr === startWatchedStr) {
-      safeStorage.removeItem('pending_watched_marks');
-    } else if (currentWatchedStr && startWatchedStr) {
-      try {
-        const currentWatched = JSON.parse(currentWatchedStr);
-        const startWatched = JSON.parse(startWatchedStr);
-        const remainingWatched = currentWatched.filter((key: string) => !startWatched.includes(key));
-        if (remainingWatched.length > 0) {
-          safeStorage.setItem('pending_watched_marks', JSON.stringify(remainingWatched.slice(0, 50)));
-        } else {
-          safeStorage.removeItem('pending_watched_marks');
-        }
-      } catch (e) {
-        safeStorage.removeItem('pending_watched_marks');
-      }
+    const currentLang = safeStorage.getItem('language_preference');
+    if (currentLang && currentLang !== currentProfile?.preferredLanguage) {
+      updatesToPush.preferredLanguage = currentLang;
     }
 
-    // 3. Orders Cleanup
-    const currentOrdersStr = safeStorage.getItem('pending_orders_array');
-    if (currentOrdersStr === startOrdersStr) {
-      safeStorage.removeItem('pending_orders_array');
-    } else if (currentOrdersStr && startOrdersStr) {
-      try {
-        const currentOrders = JSON.parse(currentOrdersStr);
-        const startOrders = JSON.parse(startOrdersStr);
-        const startOrderIds = new Set(startOrders.map((o: any) => o?.id).filter(Boolean));
-        const remainingOrders = currentOrders.filter((o: any) => !o || !o.id || !startOrderIds.has(o.id));
-        if (remainingOrders.length > 0) {
-          safeStorage.setItem('pending_orders_array', JSON.stringify(remainingOrders));
-        } else {
-          safeStorage.removeItem('pending_orders_array');
-        }
-      } catch (e) {
-        safeStorage.removeItem('pending_orders_array');
-      }
+    const nowIso = new Date().toISOString();
+    updatesToPush.lastActive = nowIso;
+    updatesToPush.updatedAt = serverTimestamp();
+
+    if (!navigator.onLine) {
+      safeStorage.setItem('needs_user_sync', 'true');
+      return false;
     }
 
-    // 4. Reviews Cleanup
-    const currentReviewsStr = safeStorage.getItem('pending_reviews_array');
-    if (currentReviewsStr === startReviewsStr) {
-      safeStorage.removeItem('pending_reviews_array');
-    } else if (currentReviewsStr && startReviewsStr) {
-      try {
-        const currentReviews = JSON.parse(currentReviewsStr);
-        const startReviews = JSON.parse(startReviewsStr);
-        const startReviewKeys = new Set(startReviews.map((r: any) => r?.id || JSON.stringify(r)).filter(Boolean));
-        const remainingReviews = currentReviews.filter((r: any) => !startReviewKeys.has(r?.id || JSON.stringify(r)));
-        if (remainingReviews.length > 0) {
-          safeStorage.setItem('pending_reviews_array', JSON.stringify(remainingReviews));
-        } else {
-          safeStorage.removeItem('pending_reviews_array');
+    try {
+      const batch = writeBatch(db);
+      batch.set(userRef, updatesToPush, { merge: true });
+      batch.set(doc(db, 'chunk_meta', 'versions'), {
+        users: {
+          [currentUserUid]: nowUtc
         }
-      } catch (e) {
-        safeStorage.removeItem('pending_reviews_array');
-      }
-    }
+      }, { merge: true });
 
-    // 5. Reported Links Cleanup
-    const currentReportedStr = safeStorage.getItem('pending_reported_links');
-    if (currentReportedStr === startReportedStr) {
-      safeStorage.removeItem('pending_reported_links');
-    } else if (currentReportedStr && startReportedStr) {
-      try {
-        const currentReported = JSON.parse(currentReportedStr);
-        const startReported = JSON.parse(startReportedStr);
-        const startKeys = new Set(startReported.map((item: any) => item?.id || JSON.stringify(item)).filter(Boolean));
-        const remaining = currentReported.filter((item: any) => !startKeys.has(item?.id || JSON.stringify(item)));
-        if (remaining.length > 0) {
-          safeStorage.setItem('pending_reported_links', JSON.stringify(remaining));
-        } else {
-          safeStorage.removeItem('pending_reported_links');
-        }
-      } catch (e) {
-        safeStorage.removeItem('pending_reported_links');
-      }
-    }
+      await runWithNetwork(() => batch.commit());
 
-    // 6. Movie Requests Cleanup
-    const currentRequestsStr = safeStorage.getItem('pending_movie_requests');
-    if (currentRequestsStr === startRequestsStr) {
-      safeStorage.removeItem('pending_movie_requests');
-    } else if (currentRequestsStr && startRequestsStr) {
       try {
-        const currentRequests = JSON.parse(currentRequestsStr);
-        const startRequests = JSON.parse(startRequestsStr);
-        const startKeys = new Set(startRequests.map((item: any) => item?.id || JSON.stringify(item)).filter(Boolean));
-        const remaining = currentRequests.filter((item: any) => !startKeys.has(item?.id || JSON.stringify(item)));
-        if (remaining.length > 0) {
-          safeStorage.setItem('pending_movie_requests', JSON.stringify(remaining));
-        } else {
-          safeStorage.removeItem('pending_movie_requests');
-        }
-      } catch (e) {
-        safeStorage.removeItem('pending_movie_requests');
-      }
-    }
+        updateChunkMetaLocalCache({ users: { [currentUserUid]: nowUtc } });
+      } catch (e) {}
 
-    // 7. Generic Pending User Updates Cleanup
-    const currentUserUpdatesStr = safeStorage.getItem('pending_user_updates');
-    if (currentUserUpdatesStr && startUserUpdates) {
-      try {
-        const currentAll = JSON.parse(currentUserUpdatesStr);
-        const myCurrentPending = currentAll[currentUserUid];
-        if (myCurrentPending) {
-          const keysCommitted = Object.keys(startUserUpdates);
-          keysCommitted.forEach((key) => {
-            if (JSON.stringify(myCurrentPending[key]) === JSON.stringify(startUserUpdates[key])) {
-              delete myCurrentPending[key];
-            }
-          });
-          if (Object.keys(myCurrentPending).length === 0) {
+      // Clean up local pending queues ONLY after confirmed write success
+      safeStorage.removeItem('needs_user_sync');
+
+      if (startFavsStr) safeStorage.removeItem('pending_favorites_array');
+      if (startWLStr) safeStorage.removeItem('pending_watch_later_array');
+      if (startWatchedStr) safeStorage.removeItem('pending_watched_marks');
+      if (startOrdersStr) safeStorage.removeItem('pending_orders_array');
+      if (startReviewsStr) safeStorage.removeItem('pending_reviews_array');
+      if (startReportedStr) safeStorage.removeItem('pending_reported_links');
+      if (startRequestsStr) safeStorage.removeItem('pending_movie_requests');
+
+      if (startUserUpdates) {
+        const currentUserUpdatesStr = safeStorage.getItem('pending_user_updates');
+        if (currentUserUpdatesStr) {
+          try {
+            const currentAll = JSON.parse(currentUserUpdatesStr);
             delete currentAll[currentUserUid];
-          } else {
-            currentAll[currentUserUid] = myCurrentPending;
-          }
+            if (Object.keys(currentAll).length === 0) {
+              safeStorage.removeItem('pending_user_updates');
+            } else {
+              safeStorage.setItem('pending_user_updates', JSON.stringify(currentAll));
+            }
+          } catch (e) {}
         }
-        if (Object.keys(currentAll).length === 0) {
-          safeStorage.removeItem('pending_user_updates');
-        } else {
-          safeStorage.setItem('pending_user_updates', JSON.stringify(currentAll));
-        }
-      } catch (e) {}
+      }
+
+      safeStorage.setItem(`profile_version_${currentUserUid}`, nowUtc);
+
+      if (currentProfile) {
+        const localUpdates = { ...updatesToPush, updatedAt: nowIso };
+        const updatedProfile = { ...currentProfile, ...localUpdates };
+        const json = JSON.stringify(updatedProfile);
+        safeStorage.setItem('profile_cache', json);
+        try { window.localStorage.setItem('profile_cache', json); } catch (e) {}
+      }
+    } catch (syncErr: any) {
+      console.error('[SyncUserDataManager] Sync step failed:', syncErr);
+      safeStorage.setItem('needs_user_sync', 'true');
+      // Abort pipeline: DO NOT save 10-hour timestamp on failure!
+      return false;
     }
-
-    // Update local cached profile version
-    safeStorage.setItem(`profile_version_${currentUserUid}`, nowUtc);
-
-    // Update profile cache with serializable date strings
-    if (currentProfile) {
-      const localUpdates = { ...updatesToPush, updatedAt: nowIso };
-      const updatedProfile = { ...currentProfile, ...localUpdates };
-      const json = JSON.stringify(updatedProfile);
-      safeStorage.setItem('profile_cache', json);
-      safeStorage.setItem('profile_cache_timestamp', Date.now().toString());
-      try {
-        window.localStorage.setItem('profile_cache', json);
-        window.localStorage.setItem('profile_cache_timestamp', Date.now().toString());
-      } catch (e) {}
-    }
-
-    localStorage.setItem(lastSyncKey, nowTime.toString());
-    console.log(`Sync completed successfully. Reason: ${reason}`);
-
-    return true;
-  } catch (err: any) {
-    console.error('Failed to sync user data to Firestore:', err);
-    safeStorage.setItem('needs_user_sync', 'true');
-    return false;
   }
+
+  // STEP 3: BOTH REFRESH AND SYNC SUCCEEDED (OR NO PENDING SYNC WAS NEEDED)
+  // Save 10-hour timestamp only after 100% successful execution!
+  localStorage.setItem(lastSyncKey, nowTime.toString());
+  console.log(`[SyncUserDataManager] Combined Refresh & Sync pipeline completed successfully. Reason: ${reason}`);
+
+  return true;
 }
 
 export function SyncUserDataManager() {
@@ -427,7 +256,6 @@ export function SyncUserDataManager() {
   const triggerSync = useCallback(async (reason: string = 'auto') => {
     if (!user?.uid) return;
     
-    // Cooldown check of 5 seconds to avoid flooding writes
     const now = Date.now();
     if (now - lastSyncAttemptRef.current < 5000) return;
     lastSyncAttemptRef.current = now;
@@ -435,54 +263,43 @@ export function SyncUserDataManager() {
     await executeSyncUserData(user.uid, profile, reason);
   }, [user?.uid, profile]);
 
-  // 1. Periodic sync every 2 minutes
+  // Check on mount and every 1 hour if 10-hour window has arrived
   useEffect(() => {
     if (!user?.uid) return;
 
-    const interval = setInterval(() => {
-      // Check if there are any accumulated time/sessions or pending updates
-      const timeCacheKey = `accumulated_time_seconds_${user.uid}`;
-      const accSecs = parseInt(safeStorage.getItem(timeCacheKey) || '0', 10);
-      const sessionCacheKey = `accumulated_sessions_${user.uid}`;
-      const accSessions = parseInt(safeStorage.getItem(sessionCacheKey) || '0', 10);
-      
-      const needsUserSync = safeStorage.getItem('needs_user_sync') === 'true';
-      const hasFavs = !!safeStorage.getItem('pending_favorites_array');
-      const hasWL = !!safeStorage.getItem('pending_watch_later_array');
-      const hasOrders = !!safeStorage.getItem('pending_orders_array');
-      const hasUserUpdates = !!safeStorage.getItem('pending_user_updates');
+    const check10hWindow = () => {
+      const lastSyncKey = `last_user_refresh_and_sync_time_${user.uid}`;
+      const lastSyncStr = localStorage.getItem(lastSyncKey);
+      const lastSyncTime = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
+      const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 
-      const hasPending = accSecs > 0 || accSessions > 0 || needsUserSync || hasFavs || hasWL || hasOrders || hasUserUpdates;
+      const needsSync = safeStorage.getItem('needs_user_sync') === 'true';
+      const isDue = (Date.now() - lastSyncTime >= TEN_HOURS_MS);
 
-      if (hasPending && navigator.onLine) {
-        triggerSync('periodic');
+      if ((isDue || needsSync) && navigator.onLine) {
+        triggerSync('auto_10h');
       }
-    }, 120 * 1000); // 2 minutes
+    };
+
+    check10hWindow();
+    const interval = setInterval(check10hWindow, 60 * 60 * 1000); // 1 hour check
 
     return () => clearInterval(interval);
   }, [user?.uid, triggerSync]);
 
-  // 2. Sync immediately on page visibility change to hidden
+  // Re-check on app resume/visibility change if 10-hour window has arrived
   useEffect(() => {
     if (!user?.uid) return;
 
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        const timeCacheKey = `accumulated_time_seconds_${user.uid}`;
-        const accSecs = parseInt(safeStorage.getItem(timeCacheKey) || '0', 10);
-        const sessionCacheKey = `accumulated_sessions_${user.uid}`;
-        const accSessions = parseInt(safeStorage.getItem(sessionCacheKey) || '0', 10);
+      if (document.visibilityState === 'visible' && navigator.onLine) {
+        const lastSyncKey = `last_user_refresh_and_sync_time_${user.uid}`;
+        const lastSyncStr = localStorage.getItem(lastSyncKey);
+        const lastSyncTime = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
+        const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 
-        const needsUserSync = safeStorage.getItem('needs_user_sync') === 'true';
-        const hasFavs = !!safeStorage.getItem('pending_favorites_array');
-        const hasWL = !!safeStorage.getItem('pending_watch_later_array');
-        const hasOrders = !!safeStorage.getItem('pending_orders_array');
-        const hasUserUpdates = !!safeStorage.getItem('pending_user_updates');
-
-        const hasPending = accSecs > 0 || accSessions > 0 || needsUserSync || hasFavs || hasWL || hasOrders || hasUserUpdates;
-
-        if (hasPending && navigator.onLine) {
-          triggerSync('visibility_hidden');
+        if (Date.now() - lastSyncTime >= TEN_HOURS_MS) {
+          triggerSync('auto_10h_resume');
         }
       }
     };
@@ -493,7 +310,7 @@ export function SyncUserDataManager() {
     };
   }, [user?.uid, triggerSync]);
 
-  // 3. Monitor for custom sync request triggers
+  // Listen for custom trigger requests (e.g. manual profile sync button)
   useEffect(() => {
     const handleSyncRequest = (e: Event) => {
       const customEvent = e as CustomEvent;

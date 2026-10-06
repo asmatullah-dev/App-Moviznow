@@ -1271,3 +1271,115 @@ export async function sendOrderApprovedNotification(params: OrderApprovedParams)
     return { success: false };
   }
 }
+
+/**
+ * Send an on-demand status email (Active or Expired) to a user's stored Gmail address
+ */
+export async function sendUserStatusEmail({
+  userId,
+  userEmail,
+  userDisplayName,
+  status,
+  expiryDate,
+  role,
+}: {
+  userId?: string;
+  userEmail?: string;
+  userDisplayName?: string;
+  status?: string;
+  expiryDate?: string;
+  role?: string;
+}) {
+  const firestore = getDb();
+  let email = (userEmail || "").trim();
+  let displayName = (userDisplayName || "").trim();
+  let currentStatus = status || "active";
+  let currentExpiryDate = expiryDate;
+  let userRole = role || "user";
+
+  if (userId && firestore && (!email || !currentExpiryDate || !status)) {
+    try {
+      const userDoc = await firestore.collection("users").doc(userId).get();
+      if (userDoc.exists) {
+        const data = userDoc.data() || {};
+        if (!email) email = (data.email || "").trim();
+        if (!displayName) displayName = data.displayName || email.split("@")[0] || "Member";
+        if (!currentExpiryDate) currentExpiryDate = data.expiryDate;
+        if (!status) currentStatus = data.status || "active";
+        if (!role) userRole = data.role || "user";
+      }
+    } catch (e) {
+      console.warn("Could not fetch user doc for status email:", e);
+    }
+  }
+
+  if (!email || !isValidGmailAddress(email)) {
+    return {
+      success: false,
+      error: `A valid Gmail address is required to send status emails. Provided: '${email || "None"}'`,
+    };
+  }
+
+  if (!displayName) {
+    displayName = email.split("@")[0] || "Member";
+  }
+
+  // Determine if status is active or expired
+  const isExpired = currentStatus === "expired" || (Boolean(currentExpiryDate) && currentExpiryDate !== "Lifetime" && new Date(currentExpiryDate!).getTime() < Date.now());
+  const finalStatus = isExpired ? "expired" : "active";
+
+  const emailConfig = await getEmailConfig();
+  const siteUrl = "https://MovizNow.com";
+
+  let html = "";
+  let subject = "";
+  let text = "";
+
+  if (finalStatus === "expired") {
+    html = generateExpiryEmailHtml({
+      displayName,
+      email,
+      expiryDateStr: currentExpiryDate || new Date().toISOString(),
+      siteUrl,
+    });
+    subject = "⚠️ MovizNow Membership Expired: Action Required";
+    text = `Hello ${displayName}, your MovizNow membership has expired on ${formatDateDisplay(currentExpiryDate)}. Please renew your plan at ${siteUrl}/membership`;
+  } else {
+    html = generateMembershipUpdateEmailHtml({
+      displayName,
+      email,
+      expiryDateStr: currentExpiryDate || "Lifetime",
+      siteUrl,
+      userRole,
+      userStatus: "active",
+    });
+    subject = "⭐ MovizNow Membership Status: Active Access";
+    text = `Hello ${displayName}, your MovizNow membership is Active! Expiry date: ${currentExpiryDate === "Lifetime" ? "Lifetime Access" : formatDateDisplay(currentExpiryDate)}. Enjoy unlimited streaming and downloads at ${siteUrl}`;
+  }
+
+  try {
+    await sendEmailMessage({
+      config: emailConfig,
+      to: email,
+      subject,
+      html,
+      text,
+      senderEmailOverride: finalStatus === "expired" ? "Alerts@MovizNow.com" : "Notify@MovizNow.com",
+      replyTo: "contactus@MovizNow.com",
+    });
+
+    return {
+      success: true,
+      email,
+      status: finalStatus,
+      message: `Status email (${finalStatus.toUpperCase()}) successfully sent to ${email}`,
+    };
+  } catch (err: any) {
+    console.error("Error sending user status email:", err);
+    return {
+      success: false,
+      error: err.message || "Failed to send status email",
+    };
+  }
+}
+

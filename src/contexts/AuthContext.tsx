@@ -890,20 +890,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         let accSecs = parseInt(safeStorage.getItem(cacheKey) || "0", 10);
         if (accSecs > 0) {
           safeStorage.setItem(cacheKey, "0");
-          const pendingStr =
-            safeStorage.getItem("pending_user_updates") || "{}";
           try {
-            let pendingAll = JSON.parse(pendingStr);
-            pendingAll[currentUser.uid] = pendingAll[currentUser.uid] || {};
-            let currentBase =
-              typeof pendingAll[currentUser.uid].timeSpent === "number"
-                ? pendingAll[currentUser.uid].timeSpent
-                : localProfile?.timeSpent || 0;
-            pendingAll[currentUser.uid].timeSpent = currentBase + accSecs;
-            safeStorage.setItem(
-              "pending_user_updates",
-              JSON.stringify(pendingAll),
-            );
+            const cachedStr = safeStorage.getItem("profile_cache");
+            if (cachedStr) {
+              const cachedP = JSON.parse(cachedStr);
+              cachedP.timeSpent = (cachedP.timeSpent || 0) + accSecs;
+              cachedP.lastActive = new Date().toISOString();
+              safeStorage.setItem("profile_cache", JSON.stringify(cachedP));
+            }
           } catch (e) {}
         }
 
@@ -1971,20 +1965,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const cacheKey = `accumulated_time_seconds_${uid}`;
         let accSeconds = parseInt(safeStorage.getItem(cacheKey) || "0", 10);
         if (accSeconds > 0) {
-          const pendingStr = safeStorage.getItem("pending_user_updates") || "{}";
           try {
-            let pendingAll = JSON.parse(pendingStr);
-            pendingAll[uid] = pendingAll[uid] || {};
-            let cachedP: any = null;
-            try {
-              const cachedStr = safeStorage.getItem("profile_cache");
-              if (cachedStr) cachedP = JSON.parse(cachedStr);
-            } catch (e) {}
-            const currentBase = typeof pendingAll[uid].timeSpent === "number"
-              ? pendingAll[uid].timeSpent
-              : (cachedP?.timeSpent || 0);
-            pendingAll[uid].timeSpent = Math.max(currentBase, (cachedP?.timeSpent || 0));
-            safeStorage.setItem("pending_user_updates", JSON.stringify(pendingAll));
+            const cachedStr = safeStorage.getItem("profile_cache");
+            if (cachedStr) {
+              const cachedP = JSON.parse(cachedStr);
+              cachedP.timeSpent = (cachedP.timeSpent || 0) + accSeconds;
+              safeStorage.setItem(cacheKey, "0");
+              safeStorage.setItem("profile_cache", JSON.stringify(cachedP));
+            }
           } catch (e) {}
         }
       }

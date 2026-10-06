@@ -117,8 +117,7 @@ export const UserDataFieldsView: React.FC<UserDataFieldsViewProps> = ({
   // Expanded object/array views
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
 
-  // Live Firestore fetch
-  const [isFetchingLive, setIsFetchingLive] = useState(false);
+  // Local feedback notices
   const [fetchNotice, setFetchNotice] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
@@ -139,32 +138,6 @@ export const UserDataFieldsView: React.FC<UserDataFieldsViewProps> = ({
       setJsonError(null);
     }
   }, [isJsonMode, data]);
-
-  // Fetch directly from live Firestore /users/{uid}
-  const handleFetchLiveFromFirestore = async () => {
-    setIsFetchingLive(true);
-    setFetchNotice(null);
-    setErrorNotice(null);
-    try {
-      const userRef = doc(db, 'users', user.uid);
-      const snap = await runWithNetwork(() => getDoc(userRef));
-      if (snap.exists()) {
-        const liveDoc = snap.data();
-        const merged = { ...data, ...liveDoc };
-        setData(merged);
-        setOriginalData({ ...merged });
-        setFetchNotice(`Successfully loaded ${Object.keys(liveDoc).length} live fields from Firestore (users/${user.uid}).`);
-      } else {
-        setFetchNotice(`Document users/${user.uid} not found on Firestore server; displaying locally cached fields.`);
-      }
-    } catch (err: any) {
-      console.error("Error fetching live Firestore doc:", err);
-      setErrorNotice(`Firestore read notice: ${err?.message || 'Using local saved data'}`);
-    } finally {
-      setIsFetchingLive(false);
-      setTimeout(() => setFetchNotice(null), 5000);
-    }
-  };
 
   // Determine changed fields count
   const changesCount = useMemo(() => {
@@ -477,16 +450,6 @@ export const UserDataFieldsView: React.FC<UserDataFieldsViewProps> = ({
                 Back to Details
               </Button>
             )}
-
-            <Button
-              onClick={handleFetchLiveFromFirestore}
-              disabled={isFetchingLive}
-              variant="secondary"
-              className="text-xs py-1.5 px-3 h-auto"
-              icon={<RefreshCw className={`w-3.5 h-3.5 ${isFetchingLive ? 'animate-spin' : ''}`} />}
-            >
-              {isFetchingLive ? 'Fetching...' : 'Fetch Live from Firestore'}
-            </Button>
 
             <Button
               onClick={() => setIsJsonMode(!isJsonMode)}

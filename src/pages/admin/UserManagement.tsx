@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { db } from '../../firebase';
 import { safeStorage } from '../../utils/safeStorage';
-import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment, onSnapshot } from 'firebase/firestore';
+import { collection, doc, updateDoc, getDoc, query, where, getDocs, writeBatch, deleteDoc, setDoc, limit, deleteField, increment } from 'firebase/firestore';
 import { UserProfile, Role, Status, AnalyticsEvent, Content } from '../../types';
-import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, ArrowLeft, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, AlertTriangle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy, Users, CheckCircle, ShieldCheck, Database } from 'lucide-react';
+import { Edit2, MessageCircle, X, Check, Search, ArrowUp, ArrowDown, Clock, Film, Trash2, Tv, Plus, Loader2, ArrowRight, ArrowLeft, UserPlus, Calendar, Heart, Bookmark, Save, Lock, Layers, Phone, AlertCircle, AlertTriangle, Bell, Mail, RefreshCw, Link2 as LinkIcon, Copy, Users, CheckCircle, ShieldCheck, Database, Upload } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -86,7 +86,13 @@ export default function UserManagement() {
   const [filterLanguage, setFilterLanguage] = useState<string>(() => sessionStorage.getItem('user_mgmt_lang') || 'all');
   const [filterStatus, setFilterStatus] = useState<Status | 'all'>(() => (sessionStorage.getItem('user_mgmt_status') as any) || 'all');
   const [filterWhitelist, setFilterWhitelist] = useState<'all' | 'whitelisted' | 'not_whitelisted'>('all');
-  const [whitelistedPhones, setWhitelistedPhones] = useState<string[]>([]);
+  const [whitelistedPhones, setWhitelistedPhones] = useState<string[]>(() => {
+    try {
+      const stored = safeStorage.getItem('cached_whitelisted_phones');
+      if (stored) return JSON.parse(stored);
+    } catch (e) {}
+    return [];
+  });
   const [hideAnonymousAndInvalid, setHideAnonymousAndInvalid] = useState(() => {
     const cached = sessionStorage.getItem('user_mgmt_hide_anonymous_invalid');
     return cached === null ? true : cached === 'true';
@@ -104,6 +110,8 @@ export default function UserManagement() {
   const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false);
   const [bulkDeleteValidUids, setBulkDeleteValidUids] = useState<string[]>([]);
+  const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false);
+  const [isSyncingUsers, setIsSyncingUsers] = useState(false);
 
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [copiedUid, setCopiedUid] = useState(false);
@@ -144,29 +152,9 @@ export default function UserManagement() {
   const [contactsSyncResult, setContactsSyncResult] = useState<{ title: string; message: string } | null>(null);
   const [pendingContactsCount, setPendingContactsCount] = useState<number>(() => getPendingContactsList().length);
 
-  // Synchronize Google Contacts authorization state & pending queue in real-time
+  // Synchronize Google Contacts local pending count from local event only
   useEffect(() => {
     let isMounted = true;
-    // 1. Initial non-interactive state load on mount (no popup)
-    const verifyInitial = async () => {
-      const valid = await ensureValidContactsToken(false);
-      if (isMounted) {
-        if (valid.accessToken) {
-          setContactsToken(valid.accessToken);
-          setIsContactsAuthorized(true);
-        } else {
-          setIsContactsAuthorized(isGoogleContactsAuthorized());
-        }
-        if (valid.email) setContactsAccountEmail(valid.email);
-      }
-      const pending = await fetchPendingContactsFromFirestore();
-      if (isMounted) {
-        setPendingContactsCount(pending.length);
-      }
-    };
-    verifyInitial();
-
-    // 2. Local custom event listener for instant pending queue UI updates
     const handlePendingUpdated = (e: any) => {
       if (!isMounted) return;
       const count = Object.keys(e?.detail || {}).length;
@@ -174,65 +162,9 @@ export default function UserManagement() {
     };
     window.addEventListener('gcontacts_pending_updated', handlePendingUpdated);
 
-    // 3. Real-time Firestore snapshot listener for multi-tab / multi-device synchronization
-    const docRef = doc(db, 'settings', 'google_contacts');
-    const unsubscribe = onSnapshot(docRef, async (snap) => {
-      if (!isMounted) return;
-      if (snap.exists()) {
-        const data = snap.data();
-        if (data.isAuthorized === false) {
-          setContactsToken(null);
-          setIsContactsAuthorized(false);
-        } else {
-          const fToken = data.accessToken;
-          const fEmail = data.email || 'wmoviznow@gmail.com';
-          const isAuth = data.isAuthorized === true || !!fToken;
-
-          setIsContactsAuthorized(isAuth);
-          if (fEmail) setContactsAccountEmail(fEmail);
-          if (fToken) {
-            setContactsToken(fToken);
-          }
-        }
-
-        // Check pending contacts from Firestore
-        if (data.pendingContacts && typeof data.pendingContacts === 'object') {
-          const count = Object.keys(data.pendingContacts).length;
-          setPendingContactsCount(count);
-        } else {
-          setPendingContactsCount(getPendingContactsList().length);
-        }
-      }
-    }, (err) => {
-      console.warn('[Google Contacts] Firestore sync listener warning:', err);
-    });
-
     return () => {
       isMounted = false;
       window.removeEventListener('gcontacts_pending_updated', handlePendingUpdated);
-      unsubscribe();
-    };
-  }, []);
-
-  // Synchronize whitelisted phone numbers in real-time
-  useEffect(() => {
-    let isMounted = true;
-    const unsub = onSnapshot(doc(db, 'settings', 'whitelisted_phones'), (snap) => {
-      if (!isMounted) return;
-      if (snap.exists()) {
-        const data = snap.data();
-        const list: string[] = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
-        setWhitelistedPhones(list);
-      } else {
-        setWhitelistedPhones([]);
-      }
-    }, (err) => {
-      console.warn('[UserManagement] Whitelisted phones listener warning:', err);
-    });
-
-    return () => {
-      isMounted = false;
-      unsub();
     };
   }, []);
 
@@ -573,314 +505,74 @@ export default function UserManagement() {
     setEditingId(null);
   });
 
-  const { users: allUsers, loading: usersLoading, updateMultipleUserFields, updateUserFields, finalizeUserChanges, hasPendingChanges, refreshUsers } = useUsers();
-  
-  // Track user UIDs whose status changed to 'expired' during the User Management tab session
-  const changedToExpiredUidsRef = useRef<Set<string>>(new Set());
-  const prevUsersMapRef = useRef<Map<string, string>>(new Map());
-  const isInitialMountCheckDoneRef = useRef(false);
-  const isSendingImmediateExpiryRef = useRef<boolean>(false);
-  const processedImmediateExpiredUidsRef = useRef<Set<string>>(new Set());
+  const { 
+    users: allUsers, 
+    loading: usersLoading, 
+    updateMultipleUserFields, 
+    updateUserFields, 
+    addUserLocally,
+    deleteUserLocally,
+    deleteMultipleUsersLocally,
+    finalizeUserChanges, 
+    hasPendingChanges, 
+    refreshUsers 
+  } = useUsers();
 
-  // Helper to send expiry notifications immediately and flag the users
-  const sendImmediateExpiryNotifications = useCallback(async (targetUids: string[], userList?: UserProfile[]) => {
-    if (!targetUids || targetUids.length === 0 || !profile?.uid) return;
-    if (profile.role !== 'admin' && profile.role !== 'owner') return;
-    if (isSendingImmediateExpiryRef.current) return;
-
-    const sourceUsers = userList && userList.length > 0 ? userList : allUsers;
-    const todayStr = new Date().toISOString().split('T')[0];
-    const uniqueUids = Array.from(new Set(targetUids.filter(Boolean)));
-    if (uniqueUids.length === 0) return;
-
-    // Filter out owners and admins
-    const validUids = uniqueUids.filter(uid => {
-      const u = sourceUsers.find(user => user.uid === uid);
-      return u && u.role !== 'admin' && u.role !== 'owner';
-    });
-
-    if (validUids.length === 0) return;
-
-    isSendingImmediateExpiryRef.current = true;
-    console.log(`[UserManagement] Triggering immediate expiry email & push notifications for ${validUids.length} user(s):`, validUids);
-
-    // 1. Immediately record in safeStorage / localStorage to prevent repeat triggers and avoid spamming Firestore
-    validUids.forEach(uid => {
-      const u = sourceUsers.find(user => user.uid === uid);
-      recordNoticeSent(uid, u?.expiryDate || todayStr);
-    });
-
-    // 2. Call backend expiry service immediately
-    try {
-      const res = await fetch('/api/notifications/check-expiry', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          adminUid: profile.uid,
-          targetUserIds: validUids,
-        }),
+  // Send status email for a specific user via their stored email address
+  const handleSendStatusEmail = useCallback(async (targetUser: UserProfile) => {
+    if (!targetUser || !targetUser.uid) return;
+    
+    const userEmail = targetUser.email?.trim().toLowerCase();
+    if (!userEmail || userEmail.endsWith('@moviznow.com') || !userEmail.includes('@')) {
+      setAlertConfig({
+        isOpen: true,
+        title: 'Missing Email Address',
+        message: `User ${targetUser.displayName || targetUser.uid} does not have a valid Gmail/email address stored.`
       });
-      const resData = await res.json();
-      console.log("[UserManagement] Immediate expiry notification response:", resData);
-
-      // 3. Mark user updates locally & in pending updates for Firestore sync
-      const batchUpdates: Record<string, Partial<UserProfile>> = {};
-      validUids.forEach(uid => {
-        const u = sourceUsers.find(user => user.uid === uid);
-        batchUpdates[uid] = {
-          status: 'expired',
-          expiryNoticeSent: true,
-          expiryNoticeSentDate: todayStr,
-          lastExpiryNoticeFor: u?.expiryDate || todayStr,
-          lastExpiryNoticeSentAt: new Date().toISOString(),
-        };
-
-        // Automatically sync contact to Google Contacts (with Exd prefix) or add to pending queue
-        if (u && u.phone) {
-          autoSyncUserToContacts({ ...u, status: 'expired' }, false);
-        }
-      });
-
-      updateMultipleUserFields(batchUpdates);
-      finalizeUserChanges(true).catch(err => console.warn("Failed to persist expiry flags on Firestore:", err));
-    } catch (err) {
-      console.error("[UserManagement] Error triggering immediate expiry notification:", err);
-    } finally {
-      isSendingImmediateExpiryRef.current = false;
-    }
-  }, [profile?.uid, profile?.role, allUsers, updateMultipleUserFields, finalizeUserChanges, autoSyncUserToContacts]);
-
-  // Helper to delete sent notification data older than 15 days (from safeStorage/localStorage and Firestore)
-  const cleanSentNotificationDataOlderThan15Days = useCallback(async (userList?: UserProfile[]) => {
-    // 1. Clean safeStorage/localStorage records older than 15 days
-    cleanLocalStorageNotices(15);
-
-    const sourceUsers = userList && userList.length > 0 ? userList : allUsers;
-    if (!sourceUsers || sourceUsers.length === 0) return;
-
-    const batchUpdates: Record<string, Partial<UserProfile>> = {};
-
-    sourceUsers.forEach(u => {
-      if (!u || !u.uid) return;
-
-      // If user is active / renewed, clear any previous notice data
-      if (u.status === 'active' && (u.expiryNoticeSent || u.expiryNoticeSentDate || u.lastExpiryNoticeFor)) {
-        clearNoticeRecord(u.uid);
-        batchUpdates[u.uid] = {
-          expiryNoticeSent: false,
-          expiryNoticeSentDate: undefined,
-          lastExpiryNoticeFor: undefined,
-          lastExpiryNoticeSentAt: undefined,
-        };
-        return;
-      }
-
-      // If notice was sent more than 15 days ago, delete that sent notification data
-      if (u.expiryNoticeSentDate && isNoticeSentOlderThanDays(u.expiryNoticeSentDate, 15)) {
-        clearNoticeRecord(u.uid);
-        batchUpdates[u.uid] = {
-          expiryNoticeSent: false,
-          expiryNoticeSentDate: undefined,
-          lastExpiryNoticeFor: undefined,
-          lastExpiryNoticeSentAt: undefined,
-        };
-      }
-    });
-
-    if (Object.keys(batchUpdates).length > 0) {
-      console.log(`[UserManagement] Deleting sent notification data older than 15 days for ${Object.keys(batchUpdates).length} user(s).`);
-      updateMultipleUserFields(batchUpdates);
-      finalizeUserChanges(true).catch(err => console.warn("Failed to persist notification cleanup on Firestore:", err));
-    }
-  }, [allUsers, updateMultipleUserFields, finalizeUserChanges]);
-
-  // Helper to check for new expired users (< 5 days of expiry) and send notifications
-  const checkAndSendExpiredNotifications = useCallback(async (userList?: UserProfile[]) => {
-    if (!profile?.uid || (profile.role !== 'admin' && profile.role !== 'owner')) return;
-    const sourceUsers = userList && userList.length > 0 ? userList : allUsers;
-    if (!sourceUsers || sourceUsers.length === 0) return;
-
-    const unnotifiedExpiredUids: string[] = [];
-
-    sourceUsers.forEach(u => {
-      if (!u || !u.uid || u.role === 'admin' || u.role === 'owner') return;
-
-      const isExpired = u.status === 'expired' || isUserExpired(u.expiryDate);
-      if (!isExpired) return;
-
-      // CRITICAL RULE: "only send new expired status that has less than 5 days of Expiry"
-      // Accounts expired more than 5 days ago are skipped!
-      const isNewExpired = isExpiredWithinDays(u.expiryDate, 5);
-      if (!isNewExpired) return;
-
-      // Check if notification was already sent recently (within 15 days) in safeStorage / localStorage
-      const alreadySentLocally = isNoticeSentRecently(u.uid, u.expiryDate, 15);
-      if (alreadySentLocally) return;
-
-      // Check if user document already has an active notice sent within 15 days for this expiry
-      const alreadySentOnUser = u.expiryNoticeSent && u.expiryNoticeSentDate && !isNoticeSentOlderThanDays(u.expiryNoticeSentDate, 15);
-      if (alreadySentOnUser) return;
-
-      unnotifiedExpiredUids.push(u.uid);
-    });
-
-    if (unnotifiedExpiredUids.length > 0) {
-      console.log(`[UserManagement] Found ${unnotifiedExpiredUids.length} newly expired user(s) (< 5 days) requiring notification:`, unnotifiedExpiredUids);
-      sendImmediateExpiryNotifications(unnotifiedExpiredUids, sourceUsers);
-    }
-  }, [profile?.uid, profile?.role, allUsers, sendImmediateExpiryNotifications]);
-
-  // Combined daily auto expiry check: runs ONLY during 5:00 AM - 9:00 AM once a day.
-  // Immediately records flag in local storage to prevent repeat execution and avoids connecting to Firestore again.
-  const runDailyAutoExpiryCheck = useCallback(async (userList?: UserProfile[]) => {
-    if (!profile?.uid || (profile.role !== 'admin' && profile.role !== 'owner')) return;
-
-    if (!canRunDailyAutoExpiryCheck()) {
       return;
     }
 
-    // Flag recorded in local storage immediately to prevent multiple runs today
-    recordAutoExpiryCheckedToday();
-    console.log("[UserManagement] Running daily auto expiry notification check (5:00 AM - 9:00 AM window). Flag recorded in local storage.");
+    const isExpired = targetUser.status === 'expired' || (!!targetUser.expiryDate && targetUser.expiryDate !== 'Lifetime' && isUserExpired(targetUser.expiryDate));
+    const effectiveStatus = targetUser.role === 'owner' ? 'active' : (isExpired ? 'expired' : 'active');
 
-    const sourceUsers = userList && userList.length > 0 ? userList : allUsers;
+    setProcessing(prev => ({ ...prev, [`email_status_${targetUser.uid}`]: true }));
+    try {
+      const res = await fetch('/api/notifications/send-user-status-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: targetUser.uid,
+          userEmail: targetUser.email,
+          userDisplayName: targetUser.displayName || targetUser.email.split('@')[0],
+          status: effectiveStatus,
+          expiryDate: targetUser.expiryDate || 'Lifetime',
+          role: targetUser.role || 'user'
+        })
+      });
 
-    // Step 1: Delete data of sent notifications older than 15 days
-    await cleanSentNotificationDataOlderThan15Days(sourceUsers);
-
-    // Step 2: Check and send notifications for newly expired users (< 5 days of expiry)
-    await checkAndSendExpiredNotifications(sourceUsers);
-
-    updateLastCheckedTimestamp();
-  }, [profile?.uid, profile?.role, allUsers, cleanSentNotificationDataOlderThan15Days, checkAndSendExpiredNotifications]);
-
-  // Periodic check during User Management tab session:
-  // Only runs auto check if 5:00 AM - 9:00 AM window is active and today's check hasn't run yet.
-  useEffect(() => {
-    if (authLoading) return;
-    if (profile?.role !== 'admin' && profile?.role !== 'owner') return;
-
-    const interval = setInterval(() => {
-      if (canRunDailyAutoExpiryCheck()) {
-        runDailyAutoExpiryCheck();
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success !== false) {
+        setAlertConfig({
+          isOpen: true,
+          title: 'Email Sent Successfully',
+          message: `Status email (${effectiveStatus.toUpperCase()}) successfully sent to ${userEmail}.`
+        });
+      } else {
+        throw new Error(data.message || data.error || 'Failed to send status email');
       }
-    }, 60000); // check every 60 seconds while on User Management tab
-
-    return () => clearInterval(interval);
-  }, [authLoading, profile?.role, runDailyAutoExpiryCheck]);
-
-  // Track status changes to 'expired' across user updates and trigger immediate notifications & contact sync
-  useEffect(() => {
-    if (!allUsers || allUsers.length === 0) return;
-    const immediateExpiredUids: string[] = [];
-
-    allUsers.forEach(u => {
-      if (u && u.uid && u.role !== 'admin' && u.role !== 'owner') {
-        const isAlreadyProcessed = processedImmediateExpiredUidsRef.current.has(u.uid);
-        const prevStatus = prevUsersMapRef.current.get(u.uid);
-        const isNowExpired = u.status === 'expired' || isUserExpired(u.expiryDate);
-        if (!isAlreadyProcessed && prevStatus !== undefined && prevStatus !== 'expired' && isNowExpired) {
-          // Trigger automatic contact sync with Exd prefix (or add to pending queue)
-          if (u.phone) {
-            autoSyncUserToContacts({ ...u, status: 'expired' }, false);
-          }
-
-          // Only send if it has less than 5 days of expiry and not already sent recently
-          if (isExpiredWithinDays(u.expiryDate, 5) && !isNoticeSentRecently(u.uid, u.expiryDate, 5)) {
-            changedToExpiredUidsRef.current.add(u.uid);
-            processedImmediateExpiredUidsRef.current.add(u.uid);
-            immediateExpiredUids.push(u.uid);
-          }
-        }
-        const effectiveStatus = isNowExpired ? 'expired' : (u.status || 'active');
-        prevUsersMapRef.current.set(u.uid, effectiveStatus);
-      }
-    });
-
-    if (immediateExpiredUids.length > 0 && (profile?.role === 'admin' || profile?.role === 'owner')) {
-      console.log(`[UserManagement Live] Status changed to expired for ${immediateExpiredUids.length} user(s). Sending immediate notification.`);
-      sendImmediateExpiryNotifications(immediateExpiredUids);
+    } catch (err: any) {
+      console.error("Error sending status email:", err);
+      setAlertConfig({
+        isOpen: true,
+        title: 'Email Failed',
+        message: err.message || 'Could not send status email. Please check email credentials in Settings.'
+      });
+    } finally {
+      setProcessing(prev => ({ ...prev, [`email_status_${targetUser.uid}`]: false }));
     }
-  }, [allUsers, profile?.role, sendImmediateExpiryNotifications, autoSyncUserToContacts]);
+  }, []);
 
-  // Fetch fresh data on mount and force sync on unmount
-  const profileRef = useRef(profile);
-  profileRef.current = profile;
-  const runDailyAutoExpiryCheckRef = useRef(runDailyAutoExpiryCheck);
-  runDailyAutoExpiryCheckRef.current = runDailyAutoExpiryCheck;
-  const hasSyncedOnMountRef = useRef(false);
-
-  useEffect(() => {
-    let mounted = true;
-    if (authLoading) return; // Wait until auth is fully loaded
-    if (hasSyncedOnMountRef.current) return;
-    hasSyncedOnMountRef.current = true;
-
-    const syncOnMount = async () => {
-      try {
-        // If there are pending changes from previous session/offline, finalize them first
-        const pendingStr = safeStorage.getItem('pending_user_updates');
-        if (pendingStr) {
-          try {
-            const parsed = JSON.parse(pendingStr);
-            if (Object.keys(parsed).length > 0) {
-              await finalizeUserChanges(true);
-            }
-          } catch(e) {
-            console.warn("Failed to finalize pending user updates on mount:", e);
-          }
-        }
-        
-        // Delta sync users using chunk_meta (cooldown prevents redundant server queries)
-        const res = await refreshUsers(false);
-        const freshUsers = res?.users || allUsers || [];
-
-        // Check for expiry send in opening of user management tab:
-        // Only checks during time period 5 AM to 9 AM once a day.
-        // After checking once, flag is recorded in local storage to avoid connecting to Firestore again.
-        const currentProfile = profileRef.current;
-        if ((currentProfile?.role === 'admin' || currentProfile?.role === 'owner') && !isInitialMountCheckDoneRef.current) {
-          isInitialMountCheckDoneRef.current = true;
-          if (canRunDailyAutoExpiryCheck()) {
-            runDailyAutoExpiryCheckRef.current(freshUsers);
-          } else {
-            console.log("[UserManagement] Auto expiry check bypassed on tab open. (Only runs once daily between 5:00 AM and 9:00 AM; avoiding connecting to Firestore).");
-          }
-        }
-      } catch (err) {
-        console.error("Refresh users failed on tab open:", err);
-      }
-    };
-
-    if (mounted) {
-      syncOnMount();
-    }
-    
-    return () => {
-      mounted = false;
-
-      // Email notification fallback for any remaining unnotified expired users when exiting User Management tab
-      const currentProfile = profileRef.current;
-      if ((currentProfile?.role === 'admin' || currentProfile?.role === 'owner') && changedToExpiredUidsRef.current.size > 0 && currentProfile?.uid) {
-        const expiredUids = Array.from(changedToExpiredUidsRef.current);
-        if (expiredUids.length > 0) {
-          console.log(`[UserManagement Exit] Triggering exit expiry check fallback for ${expiredUids.length} user(s):`, expiredUids);
-          fetch('/api/notifications/check-expiry', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              adminUid: currentProfile.uid,
-              targetUserIds: expiredUids,
-            }),
-            keepalive: true,
-          }).catch(err => console.error("Error triggering exit expiry notifications:", err));
-        }
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading]);
-
-  // Handle page unload for hard refreshes
+  // Handle page unload for hard refreshes when pending changes exist
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (hasPendingChanges) {
@@ -1049,8 +741,7 @@ export default function UserManagement() {
       updateUserFields(userId, {
         requirePasswordReset: true
       });
-      await finalizeUserChanges(true);
-      setAlertConfig({ isOpen: true, title: 'Success', message: 'User has been flagged for password reset on next login.' });
+      setAlertConfig({ isOpen: true, title: 'Pending Change', message: 'User has been flagged for password reset. Click "Upload Changes" to sync to server.' });
     } catch (error: any) {
       console.error("Error resetting password:", error);
       setAlertConfig({ isOpen: true, title: 'Error', message: error.message || 'Failed to reset password' });
@@ -1123,7 +814,6 @@ export default function UserManagement() {
       }
 
       // Detect if membership expiry date increased by more than 5 days.
-      // That means they bought a membership!
       let membershipDateIncreased = false;
       if (updateData.expiryDate) {
         const newTime = new Date(updateData.expiryDate).getTime();
@@ -1131,10 +821,9 @@ export default function UserManagement() {
         if (selectedUser.expiryDate && selectedUser.expiryDate !== 'Lifetime') {
           oldTime = new Date(selectedUser.expiryDate).getTime();
         } else {
-          oldTime = Date.now(); // fallback to current time
+          oldTime = Date.now();
         }
         
-        // Check if increased by more than 5 days (5 days in ms = 5 * 24 * 60 * 60 * 1000 = 432000000)
         const diffDays = (newTime - oldTime) / (24 * 60 * 60 * 1000);
         if (diffDays > 5) {
           membershipDateIncreased = true;
@@ -1142,7 +831,7 @@ export default function UserManagement() {
       }
 
       if (membershipDateIncreased) {
-        updateData.status = 'active'; // ensure user is active since they bought membership
+        updateData.status = 'active';
       }
 
       const isBecomingExpired = (updateData.status === 'expired' || (updateData.expiryDate && isUserExpired(updateData.expiryDate))) && ((selectedUser.role as string) !== 'owner' && (selectedUser.role as string) !== 'admin');
@@ -1161,57 +850,13 @@ export default function UserManagement() {
       const previousRole = selectedUser.role;
       const newRole = editForm.role;
 
+      // Save to local pending changes buffer
       updateUserFields(currentEditingId, updateData);
-      await finalizeUserChanges(true);
 
-      // Auto-sync user to Google Contacts if connected
-      const mergedUserForSync: UserProfile = { ...selectedUser, ...updateData, uid: currentEditingId };
-      autoSyncUserToContacts(mergedUserForSync);
-
-      // If status became expired and was previously active, check 5-day limit and immediately send expiry notifications
-      if (isBecomingExpired && selectedUser.status === 'active') {
-        const targetExp = updateData.expiryDate || selectedUser.expiryDate;
-        if (isExpiredWithinDays(targetExp, 5) && !isNoticeSentRecently(currentEditingId, targetExp, 5)) {
-          sendImmediateExpiryNotifications([currentEditingId]);
-        }
-      }
-
-      // Normalize expiry dates to YYYY-MM-DD or 'Lifetime' or 'none' to check if actually changed
-      const normalizeExp = (exp: string | null | undefined) => {
-        if (!exp) return 'none';
-        if (exp === 'Lifetime') return 'Lifetime';
-        return exp.split('T')[0].trim();
-      };
-
-      const oldExpNorm = normalizeExp(selectedUser.expiryDate);
-      const newExpNorm = normalizeExp(updateData.expiryDate);
-      const isExpiryDateChanged = oldExpNorm !== newExpNorm;
-
-      const oldStatus = selectedUser.status || 'active';
-      const newStatus = updateData.status || oldStatus;
-      const isStatusChanged = oldStatus !== newStatus;
-
-      // Send membership update notification to enabled services only if expiry date or status actually changed
-      if (isExpiryDateChanged || isStatusChanged) {
-        fetch('/api/notifications/notify-membership-update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userId: currentEditingId,
-            newExpiryDate: updateData.expiryDate || 'Lifetime',
-            previousExpiryDate: selectedUser.expiryDate,
-            role: updateData.role || selectedUser.role,
-            status: updateData.status || selectedUser.status,
-            adminName: profile?.displayName || 'Admin'
-          })
-        }).catch(err => console.warn('Failed to send membership update notification:', err));
-      }
-
-      // Handle Manager role changes
+      // Handle Manager role changes locally
       const wasManager = previousRole === 'user_manager' || previousRole === 'manager' || selectedUser.isUserManager;
 
       if (wasManager && !isNowManager) {
-        // Expire all managed users
         const managedUsers = allUsers.filter(u => u.managedBy === currentEditingId);
         if (managedUsers.length > 0) {
           managedUsers.forEach(userData => {
@@ -1224,7 +869,6 @@ export default function UserManagement() {
           });
         }
       } else if (!wasManager && isNowManager) {
-        // Restore all managed users
         const managedUsers = allUsers.filter(u => u.managedBy === currentEditingId);
         if (managedUsers.length > 0) {
           managedUsers.forEach(userData => {
@@ -1247,8 +891,6 @@ export default function UserManagement() {
     } catch (error) {
       console.error('Error updating user:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update user' });
-      setProcessing(prev => ({ ...prev, save: false }));
-      handleFirestoreError(error, OperationType.UPDATE, `users/${editingId}`);
     } finally {
       setProcessing(prev => ({ ...prev, save: false }));
     }
@@ -1258,13 +900,10 @@ export default function UserManagement() {
     if (!selectedUser) return;
     setProcessing(prev => ({ ...prev, saveAllFields: true }));
     try {
-      // 1. Buffer and persist locally via UsersContext
+      // 1. Buffer and persist locally in pending user changes
       updateUserFields(selectedUser.uid, updatedFields);
 
-      // 2. Finalize changes to Firestore database
-      await finalizeUserChanges(true);
-
-      // 3. Update active selectedUser state so the details view reflects the new fields immediately
+      // 2. Update active selectedUser state so the details view reflects the new fields immediately
       setSelectedUser(prev => {
         if (!prev) return null;
         const next = { ...prev, ...updatedFields };
@@ -1279,7 +918,7 @@ export default function UserManagement() {
         return next as UserProfile;
       });
     } catch (err: any) {
-      console.error("Failed to save all user fields:", err);
+      console.error("Failed to save all user fields locally:", err);
       throw err;
     } finally {
       setProcessing(prev => ({ ...prev, saveAllFields: false }));
@@ -1315,77 +954,20 @@ export default function UserManagement() {
     }
     
     try {
-      let deletedViaApi = false;
-      if (profile?.uid) {
-        try {
-          const res = await fetch('/api/admin/users/delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ uid: currentDeleteConfirm, adminUid: profile.uid })
-          });
-          if (res.ok) {
-            const data = await res.json().catch(() => ({}));
-            if (data.deletedFirestore) {
-              deletedViaApi = true;
-            }
-          } else {
-             const errorData = await res.json().catch(() => ({}));
-             console.error("Failed to delete user from Firebase Auth:", errorData);
-          }
-        } catch (e) {
-          console.error("Failed to call delete API:", e);
-        }
-      }
+      deleteUserLocally(currentDeleteConfirm);
 
-      if (!deletedViaApi) {
-        const batch = writeBatch(db);
-        // 1. Delete user document
-        batch.delete(doc(db, 'users', currentDeleteConfirm));
-        // Put deleted user ID inside users map field in chunk_meta.versions
-        batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [currentDeleteConfirm]: -1 } }, { merge: true });
-        await batch.commit();
-      }
-
-      // Update local chunk_meta cache safely
-      try {
-        updateChunkMetaLocalCache({ users: { [currentDeleteConfirm]: -1 } });
-      } catch (e) {}
-
-      // Clean up sync_user_mtimes cache
-      const mtimesStr = safeStorage.getItem('sync_user_mtimes');
-      if (mtimesStr) {
-        try {
-          const mtimes = JSON.parse(mtimesStr);
-          delete mtimes[currentDeleteConfirm];
-          safeStorage.setItem('sync_user_mtimes', JSON.stringify(mtimes));
-        } catch (e) {}
-      }
-
-      // Immediately remove from local storage cache so UI updates synchronously
-      const cachedStr = safeStorage.getItem('cached_all_users');
-      if (cachedStr) {
-        try {
-          const cached: UserProfile[] = JSON.parse(cachedStr);
-          const updated = cached.filter(u => u.uid !== currentDeleteConfirm);
-          safeStorage.setItem('cached_all_users', JSON.stringify(updated));
-        } catch (e) {}
-      }
-
-      // Close modal state before refresh to keep UI transitions smooth
+      // Close modal state
       setDeleteConfirm(null);
       if (selectedUser?.uid === currentDeleteConfirm) {
         setSelectedUser(null);
         setIsEditingOverlay(false);
       }
 
-      await refreshUsers(true);
-
-      setAlertConfig({ isOpen: true, title: 'Success', message: 'User and all associated data deleted successfully' });
+      setAlertConfig({ isOpen: true, title: 'User Marked for Deletion', message: 'User removed locally. Click "Upload Changes" to sync deletion to Firestore.' });
     } catch (error) {
       console.error('Error in delete action:', error);
       setDeleteConfirm(null);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to delete user' });
-      handleFirestoreError(error, OperationType.DELETE, `users/${currentDeleteConfirm}`);
     } finally {
       setProcessing(prev => ({ ...prev, delete: false }));
     }
@@ -1421,74 +1003,8 @@ export default function UserManagement() {
     const validUidsSet = new Set(uidsToDelete);
 
     try {
-      let deletedViaApi = false;
-      // 1. Delete users from Firebase Auth and Firestore via Admin API
-      if (profile?.uid) {
-        try {
-          const res = await fetch('/api/admin/users/delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ uids: uidsToDelete, adminUid: profile.uid })
-          });
-          if (res.ok) {
-            const data = await res.json().catch(() => ({}));
-            if (data.deletedFirestore) {
-              deletedViaApi = true;
-            }
-          } else {
-            const errorData = await res.json().catch(() => ({}));
-            console.error("Failed to bulk delete users from Firebase Auth:", errorData);
-          }
-        } catch (e) {
-          console.error("Failed to call bulk delete API:", e);
-        }
-      }
+      deleteMultipleUsersLocally(uidsToDelete);
 
-      // 2. Process Firestore deletions in batches of up to 400 users if not done via API
-      if (!deletedViaApi) {
-        const BATCH_CHUNK_SIZE = 400;
-        for (let i = 0; i < uidsToDelete.length; i += BATCH_CHUNK_SIZE) {
-          const batch = writeBatch(db);
-          const chunkUids = uidsToDelete.slice(i, i + BATCH_CHUNK_SIZE);
-          const versionUsersUpdate: Record<string, any> = {};
-
-          chunkUids.forEach(uid => {
-            batch.delete(doc(db, 'users', uid));
-            versionUsersUpdate[uid] = -1;
-          });
-
-          batch.set(doc(db, 'chunk_meta', 'versions'), { users: versionUsersUpdate }, { merge: true });
-          await batch.commit();
-        }
-      }
-
-      // Update local chunk_meta cache safely
-      try {
-        const deletedMeta: Record<string, number> = {};
-        uidsToDelete.forEach(uid => { deletedMeta[uid] = -1; });
-        updateChunkMetaLocalCache({ users: deletedMeta });
-      } catch (e) {}
-
-      // 3. Update local storage cache and mtimes
-      const mtimesStr = safeStorage.getItem('sync_user_mtimes');
-      if (mtimesStr) {
-        try {
-          const mtimes = JSON.parse(mtimesStr);
-          validUidsSet.forEach(uid => delete mtimes[uid]);
-          safeStorage.setItem('sync_user_mtimes', JSON.stringify(mtimes));
-        } catch (e) {}
-      }
-
-      const cachedStr = safeStorage.getItem('cached_all_users');
-      if (cachedStr) {
-        try {
-          const cached: UserProfile[] = JSON.parse(cachedStr);
-          const updated = cached.filter(u => !validUidsSet.has(u.uid));
-          safeStorage.setItem('cached_all_users', JSON.stringify(updated));
-        } catch (e) {}
-      }
-
-      // 4. Reset modal state before refresh
       setSelectedUsers([]);
       setIsBulkDeleteConfirmOpen(false);
       setBulkDeleteValidUids([]);
@@ -1497,19 +1013,15 @@ export default function UserManagement() {
         setIsEditingOverlay(false);
       }
 
-      // 5. Refresh users list
-      await refreshUsers(true);
-
       setAlertConfig({
         isOpen: true,
-        title: 'Success',
-        message: `${uidsToDelete.length} users and all associated data deleted successfully.`
+        title: 'Users Marked for Deletion',
+        message: `${uidsToDelete.length} users removed locally. Click "Upload Changes" to sync to Firestore.`
       });
     } catch (error) {
       console.error('Error in bulk delete action:', error);
       setIsBulkDeleteConfirmOpen(false);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to delete selected users.' });
-      handleFirestoreError(error, OperationType.DELETE, 'users/bulk');
     } finally {
       setProcessing(prev => ({ ...prev, delete: false, bulk: false }));
     }
@@ -1574,7 +1086,6 @@ export default function UserManagement() {
       updateUserFields(selectedUser.uid, {
         assignedContent: nextAssigned
       });
-      await finalizeUserChanges(true);
       
       // Update local state for immediate feedback
       setSelectedUser({ ...selectedUser, assignedContent: nextAssigned });
@@ -1591,7 +1102,6 @@ export default function UserManagement() {
       updateUserFields(selectedUser.uid, {
         assignedContent: nextAssigned
       });
-      await finalizeUserChanges(true);
       
       // Update local state
       setSelectedUser({ ...selectedUser, assignedContent: nextAssigned });
@@ -1608,7 +1118,6 @@ export default function UserManagement() {
       updateUserFields(selectedUser.uid, {
         assignedContent: nextAssigned
       });
-      await finalizeUserChanges(true);
       
       // Update local state
       setSelectedUser({ ...selectedUser, assignedContent: nextAssigned });
@@ -1625,8 +1134,6 @@ export default function UserManagement() {
     } catch (error) {
       console.error('Error updating access:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update access' });
-      setProcessing(prev => ({ ...prev, saveAccess: false }));
-      handleFirestoreError(error, OperationType.UPDATE, `users/${selectedUser.uid}`);
     } finally {
       setProcessing(prev => ({ ...prev, saveAccess: false }));
     }
@@ -1683,7 +1190,6 @@ export default function UserManagement() {
       const updatedRequests = userRequests.map(r => r.id === requestId ? { ...r, status } : r);
       if (selectedUser) {
         updateUserFields(selectedUser.uid, { movieRequests: updatedRequests });
-        await finalizeUserChanges(true);
       }
       setUserRequests(updatedRequests);
     } catch (error) {
@@ -1697,7 +1203,6 @@ export default function UserManagement() {
       const updatedRequests = userRequests.filter(r => r.id !== requestId);
       if (selectedUser) {
         updateUserFields(selectedUser.uid, { movieRequests: updatedRequests });
-        await finalizeUserChanges(true);
       }
       setUserRequests(updatedRequests);
     } catch (error) {
@@ -1749,10 +1254,6 @@ export default function UserManagement() {
     setProcessing(prev => ({ ...prev, bulk: true }));
 
     try {
-      const batch = writeBatch(db);
-      const u1Ref = doc(db, 'users', user1.uid);
-      const u2Ref = doc(db, 'users', user2.uid);
-
       const updates: any = {};
       
       // Merge email
@@ -1801,12 +1302,6 @@ export default function UserManagement() {
         }
       });
 
-      updates.updatedAt = new Date().toISOString();
-
-      batch.update(u1Ref, updates);
-      batch.delete(u2Ref);
-      batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [user1.uid]: getUtcVersion(), [user2.uid]: -1 } }, { merge: true });
-
       // Migrate FCM token from user2 to user1 if present
       if ((user2 as any).fcmToken && !(user1 as any).fcmToken) {
         updates.fcmToken = (user2 as any).fcmToken;
@@ -1825,14 +1320,14 @@ export default function UserManagement() {
         await updateContentFields(contentUpdates);
       }
 
-      await batch.commit();
+      updateUserFields(user1.uid, updates);
+      deleteUserLocally(user2.uid);
 
-      setAlertConfig({ isOpen: true, title: 'Success', message: 'Users merged successfully' });
+      setAlertConfig({ isOpen: true, title: 'Success', message: 'Users merged locally. Click "Upload Changes" to sync to Firestore.' });
       setSelectedUsers([]);
     } catch (error) {
       console.error('Error merging users:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to merge users' });
-      handleFirestoreError(error, OperationType.UPDATE, `users/${user1.uid}`);
     } finally {
       setProcessing(prev => ({ ...prev, bulk: false }));
     }
@@ -1846,21 +1341,13 @@ export default function UserManagement() {
     setSelectedUsers([]);
     
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const expiredUidsToSend: string[] = [];
       const batchUpdates: Record<string, Partial<UserProfile>> = {};
 
       currentSelected.forEach(uid => {
         const user = users.find(u => u.uid === uid);
         if (user?.role !== 'owner' && user?.role !== 'admin') {
           const userUpdates: Partial<UserProfile> = { status };
-          if (status === 'expired') {
-            if (isExpiredWithinDays(user?.expiryDate, 5) && !isNoticeSentRecently(uid, user?.expiryDate, 5)) {
-              if (user?.status === 'active') {
-                expiredUidsToSend.push(uid);
-              }
-            }
-          } else if (status === 'active') {
+          if (status === 'active') {
             userUpdates.expiryNoticeSent = false;
             userUpdates.expiryNoticeSentDate = undefined;
             userUpdates.lastExpiryNoticeFor = undefined;
@@ -1873,21 +1360,15 @@ export default function UserManagement() {
 
       if (Object.keys(batchUpdates).length > 0) {
         updateMultipleUserFields(batchUpdates);
-        await finalizeUserChanges(true);
-        currentSelected.forEach(uid => {
-          const u = users.find(usr => usr.uid === uid);
-          if (u) autoSyncUserToContacts({ ...u, status });
-        });
       }
-
-      if (status === 'expired' && expiredUidsToSend.length > 0) {
-        sendImmediateExpiryNotifications(expiredUidsToSend);
-      }
+      setAlertConfig({
+        isOpen: true,
+        title: 'Status Updated Locally',
+        message: `${Object.keys(batchUpdates).length} users status updated. Click "Upload Changes" to sync to server.`
+      });
     } catch (error) {
       console.error('Error updating users:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update users' });
-      setProcessing(prev => ({ ...prev, bulk: false }));
-      handleFirestoreError(error, OperationType.UPDATE, 'users/bulk');
     } finally {
       setProcessing(prev => ({ ...prev, bulk: false }));
     }
@@ -1910,17 +1391,15 @@ export default function UserManagement() {
       });
       if (Object.keys(batchUpdates).length > 0) {
         updateMultipleUserFields(batchUpdates);
-        await finalizeUserChanges(true);
-        currentSelected.forEach(uid => {
-          const u = users.find(usr => usr.uid === uid);
-          if (u) autoSyncUserToContacts({ ...u, role });
-        });
       }
+      setAlertConfig({
+        isOpen: true,
+        title: 'Role Updated Locally',
+        message: `${Object.keys(batchUpdates).length} users role updated. Click "Upload Changes" to sync to server.`
+      });
     } catch (error) {
       console.error('Error updating user roles:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update user roles' });
-      setProcessing(prev => ({ ...prev, bulk: false }));
-      handleFirestoreError(error, OperationType.UPDATE, 'users/bulk');
     } finally {
       setProcessing(prev => ({ ...prev, bulk: false }));
     }
@@ -1941,13 +1420,8 @@ export default function UserManagement() {
       result = result.filter(u => {
         const hasEmail = u.email && typeof u.email === 'string' && u.email.trim() !== '' && !u.email.endsWith('@moviznow.com');
         const phoneDigits = u.phone ? u.phone.replace(/\D/g, '') : '';
-        // Real phone numbers are at least 10 digits if they don't start with 92, and at least 12 digits if they start with 92
         const hasRealPhone = phoneDigits.length >= 10 && (phoneDigits.startsWith('92') ? phoneDigits.length >= 12 : true);
-        
-        // Check if the displayName is a dummy name
         const isDummyName = !u.displayName || u.displayName.trim() === '' || u.displayName.toLowerCase().startsWith('user (');
-        
-        // Check if user has an active membership
         const hasActiveSubscription = u.expiryDate && (u.expiryDate === 'Lifetime' || !isUserExpired(u.expiryDate));
         
         if (!hasEmail && isDummyName && !hasRealPhone && !hasActiveSubscription) {
@@ -2012,7 +1486,6 @@ export default function UserManagement() {
           };
           const timeA = getT(a.lastActive);
           const timeB = getT(b.lastActive);
-          // If sorting desc, put never active (0) at bottom
           if (timeA === 0 && timeB !== 0) return 1;
           if (timeB === 0 && timeA !== 0) return -1;
           comparison = sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
@@ -2059,12 +1532,10 @@ export default function UserManagement() {
           const timeB = getExpiryT(b);
 
           if (sortOrder === 'asc') {
-            // In ascending order: users with no expiry date (0) go to bottom
             if (timeA === 0 && timeB !== 0) return 1;
             if (timeB === 0 && timeA !== 0) return -1;
             comparison = timeA - timeB;
           } else {
-            // In descending order: Lifetime (MAX_SAFE_INTEGER) at top, valid dates next, no expiry (0) at bottom
             if (timeA === 0 && timeB !== 0) return 1;
             if (timeB === 0 && timeA !== 0) return -1;
             comparison = timeB - timeA;
@@ -2073,7 +1544,6 @@ export default function UserManagement() {
         }
       }
 
-      // Stable tie-breaker if primary comparison is equal
       if (comparison === 0) {
         const createA = (a.createdAt || '').toString();
         const createB = (b.createdAt || '').toString();
@@ -2112,28 +1582,22 @@ export default function UserManagement() {
           }
         }
         
-        updateUserFields((foundUser as any).id, updateData);
-        await finalizeUserChanges(true);
-        setAlertConfig({ isOpen: true, title: 'Success', message: 'Pending user claimed successfully.' });
+        updateUserFields((foundUser as any).id || (foundUser as any).uid, updateData);
+        setAlertConfig({ isOpen: true, title: 'Success', message: 'Pending user claimed locally. Click "Upload Changes" to sync.' });
       } else {
         const standardizedPhone = newUserForm.phone ? standardizePhone(newUserForm.phone) : '';
         const digits = standardizedPhone.replace(/\D/g, '');
         const emailToMatch = newUserForm.email ? newUserForm.email.trim().toLowerCase() : `${digits}@moviznow.com`;
 
-        // Check if user is allowed to add new users
         if ((profile?.role as string) === 'user_manager' || (profile?.role as string) === 'manager') {
           setAlertConfig({ isOpen: true, title: 'Error', message: 'No pending user found with that phone or email. Managers can only claim existing pending users.' });
         } else {
-          // No matches, create new pending user
-          
           let existingUser: any = null;
           if (standardizedPhone) {
-            const existing = await findUsersByEmailOrPhone(standardizedPhone);
-            if (existing.length > 0) existingUser = existing[0];
+            existingUser = allUsers.find(u => u.phone === standardizedPhone);
           }
           if (!existingUser && emailToMatch && emailToMatch.indexOf('@moviznow.com') === -1) {
-            const existing = await findUsersByEmailOrPhone(emailToMatch);
-            if (existing.length > 0) existingUser = existing[0];
+            existingUser = allUsers.find(u => u.email === emailToMatch);
           }
 
           if (existingUser) {
@@ -2166,10 +1630,9 @@ export default function UserManagement() {
               updateData.managedBy = profile.uid;
             }
             updateUserFields(existingUser.uid, updateData);
-            await finalizeUserChanges(true);
-            autoSyncUserToContacts({ ...existingUser, ...updateData });
-            setAlertConfig({ isOpen: true, title: 'Success', message: `Existing user account (${existingUser.email || existingUser.phone}) updated successfully.` });
+            setAlertConfig({ isOpen: true, title: 'Success', message: `Existing user account (${existingUser.email || existingUser.phone}) updated locally. Click "Upload Changes" to sync.` });
             setProcessing(prev => ({ ...prev, addUser: false }));
+            setIsAddUserModalOpen(false);
             return;
           }
           
@@ -2208,14 +1671,8 @@ export default function UserManagement() {
             newUserData.managedBy = profile.uid;
           }
 
-          const batch = writeBatch(db);
-          batch.set(doc(db, 'users', newUserId), newUserData);
-          batch.set(doc(db, 'chunk_meta', 'versions'), { users: { [newUserId]: getUtcVersion() } }, { merge: true });
-          await batch.commit();
-          
-          autoSyncUserToContacts(newUserData);
-          setAlertConfig({ isOpen: true, title: 'Success', message: 'Pending user added successfully.' });
-          refreshUsers(true).catch(console.error);
+          addUserLocally(newUserData);
+          setAlertConfig({ isOpen: true, title: 'Success', message: 'User added locally. Click "Upload Changes" to sync to Firestore.' });
         }
       }
       
@@ -2223,9 +1680,6 @@ export default function UserManagement() {
       setNewUserForm({ email: '', phone: '', displayName: '', city: '', role: 'user', status: 'pending', expiryDate: '' });
       setFoundUser(null);
       setSearchStatus('idle');
-      if (foundUser) {
-        refreshUsers(true).catch(console.error);
-      }
     } catch (error) {
       console.error('Error adding/claiming user:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to add/claim user.' });
@@ -2260,25 +1714,7 @@ export default function UserManagement() {
                 setIsManualRefreshing(true);
                 window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'syncing', isManual: true, scope: 'user_management', message: 'Refreshing users...' } }));
                 
-                const doSync = async () => {
-                   // 1. Finalize any pending user edits first
-                   const pendingStr = safeStorage.getItem('pending_user_updates');
-                   if (pendingStr) {
-                     try {
-                       const parsed = JSON.parse(pendingStr);
-                       if (Object.keys(parsed).length > 0) {
-                         await finalizeUserChanges(true);
-                       }
-                     } catch(e) {
-                       console.warn("Finalize user changes warning:", e);
-                     }
-                   }
-                   // 2. Refresh users (bypasses all cooldowns, fetches fresh chunk meta and immediately refreshes changed users)
-                   const res = await refreshUsers(true);
-                   return res;
-                };
-                
-                doSync().then((res) => {
+                refreshUsers(true).then((res) => {
                   if (res?.updatedSomething) {
                     window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'success', isManual: true, scope: 'user_management', message: 'Users refreshed successfully' } }));
                   } else {
@@ -2293,10 +1729,32 @@ export default function UserManagement() {
               }}
               disabled={isManualRefreshing}
               variant="ghost"
-              className={`px-3 ${hasPendingChanges ? 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20' : 'text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
+              className="px-3 text-zinc-600 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700"
               icon={<RefreshCw className={`w-5 h-5 ${(usersLoading || isManualRefreshing) ? 'animate-spin' : ''}`} />}
-              title={hasPendingChanges ? "Sync pending changes" : "Refresh users"}
+              title="Refresh users from server"
             />
+            <div className="relative inline-flex items-center">
+              {hasPendingChanges && (
+                <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5 z-10 pointer-events-none">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                </span>
+              )}
+              <button
+                className={clsx(
+                  "p-2.5 rounded-lg font-medium flex items-center justify-center transition-colors text-white shadow-sm",
+                  hasPendingChanges
+                    ? "bg-orange-600 hover:bg-orange-700"
+                    : "bg-zinc-600 hover:bg-zinc-700",
+                )}
+                onClick={() => setIsSyncConfirmOpen(true)}
+                title={hasPendingChanges ? "Sync pending user changes to Firestore" : "Upload user changes"}
+                aria-label="Upload Changes to Server"
+                disabled={isSyncingUsers}
+              >
+                {isSyncingUsers ? <Loader2 className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
+              </button>
+            </div>
             {(profile?.role === 'admin' || profile?.role === 'owner') && (
               <Button
                 onClick={() => setIsChunkMetaModalOpen(true)}
@@ -2847,6 +2305,17 @@ export default function UserManagement() {
                       >
                         {processing[`reminder_${user.uid}`] ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageCircle className="w-4 h-4" />}
                       </button>
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSendStatusEmail(user);
+                        }}
+                        className="p-1.5 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-colors disabled:opacity-50"
+                        title="Send Status Email (Active/Expired) to Gmail"
+                        disabled={processing[`email_status_${user.uid}`]}
+                      >
+                        {processing[`email_status_${user.uid}`] ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                      </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
@@ -2962,21 +2431,6 @@ export default function UserManagement() {
                       {Object.keys(selectedUser).length}
                     </span>
                   </button>
-                  {selectedUser.role !== 'owner' && (
-                    <button
-                      type="button"
-                      onClick={() => { setShowAllFields(false); handleEdit(selectedUser); }}
-                      className={clsx(
-                        "px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer",
-                        isEditingOverlay
-                          ? "bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-xs font-bold"
-                          : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white"
-                      )}
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
-                      <span>Edit</span>
-                    </button>
-                  )}
                 </div>
               </div>
               <button onClick={() => { setSelectedUser(null); setIsEditingOverlay(false); setShowAllFields(false); setEditingId(null); }} className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white transition-colors cursor-pointer">
@@ -3941,18 +3395,16 @@ export default function UserManagement() {
                   >
                     Send Reminder
                   </Button>
-                    {(selectedUser.role !== 'owner' || selectedUser.uid === profile?.uid) && (
-                      <Button
-                        onClick={() => {
-                          handleEdit(selectedUser);
-                        }}
-                        variant="secondary"
-                        className="px-4 py-2.5 text-sm"
-                        icon={<Edit2 className="w-4 h-4" />}
-                      >
-                        Edit User
-                      </Button>
-                    )}
+                  <Button
+                    onClick={() => handleSendStatusEmail(selectedUser)}
+                    variant="secondary"
+                    className="px-4 py-2.5 text-sm"
+                    loading={processing[`email_status_${selectedUser.uid}`]}
+                    icon={<Mail className="w-4 h-4 text-blue-400" />}
+                    title="Send Active/Expired status notification email to user's stored Gmail address"
+                  >
+                    Email Status
+                  </Button>
                 </>
               )}
             </div>
@@ -4128,6 +3580,37 @@ export default function UserManagement() {
           setBulkDeleteValidUids([]);
         }}
         loading={processing.delete || processing.bulk}
+      />
+
+      <ConfirmModal
+        isOpen={isSyncConfirmOpen}
+        title="Sync Pending User Changes"
+        message="Are you sure you want to upload all pending user edits and deletions to Firestore? All buffered changes will be consolidated and committed in minimal operations along with chunk metadata."
+        confirmText="Upload & Sync Changes"
+        onConfirm={async () => {
+          setIsSyncingUsers(true);
+          try {
+            await finalizeUserChanges(true);
+            setIsSyncConfirmOpen(false);
+            setAlertConfig({
+              isOpen: true,
+              title: 'Sync Complete',
+              message: 'All pending user changes and chunk meta versions have been synchronized to Firestore.',
+            });
+          } catch (err: any) {
+            console.error('User sync failed:', err);
+            setIsSyncConfirmOpen(false);
+            setAlertConfig({
+              isOpen: true,
+              title: 'Sync Failed',
+              message: err.message || 'Failed to sync user changes to Firestore.',
+            });
+          } finally {
+            setIsSyncingUsers(false);
+          }
+        }}
+        onCancel={() => setIsSyncConfirmOpen(false)}
+        loading={isSyncingUsers}
       />
 
       {/* Whitelist Modal */}

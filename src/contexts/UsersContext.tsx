@@ -151,6 +151,9 @@ interface UsersContextType {
   refreshUsers: (force?: boolean) => Promise<{ users: UserProfile[], updatedSomething: boolean }>;
   updateUserFields: (userId: string, fields: Partial<UserProfile>) => void;
   updateMultipleUserFields: (updates: Record<string, Partial<UserProfile>>) => void;
+  addUserLocally: (newUser: UserProfile) => void;
+  deleteUserLocally: (userId: string) => void;
+  deleteMultipleUsersLocally: (userIds: string[]) => void;
   finalizeUserChanges: (force?: boolean) => Promise<void>;
   hasPendingChanges: boolean;
 }
@@ -174,6 +177,47 @@ function isUserPrivileged(user: any, profile: any): boolean {
     effectiveProfile?.role === 'manager' ||
     effectiveProfile?.role === 'user_manager'
   );
+}
+
+export function checkHasPendingUserUpdates(): boolean {
+  const pendingStr = safeStorage.getItem('pending_user_updates');
+  if (!pendingStr) return false;
+  try {
+    const parsed = JSON.parse(pendingStr);
+    if (!parsed || typeof parsed !== 'object') return false;
+    let foundActualUpdate = false;
+    const ignoreKeys = new Set([
+      'timeSpent', 
+      'sessionsCount', 
+      'clickHistory', 
+      'lastActive', 
+      'last_active', 
+      'updatedAt', 
+      'lastLogin', 
+      'createdAt',
+      'lastScannedAt',
+      'hasScanned'
+    ]);
+
+    for (const uid of Object.keys(parsed)) {
+      const userUpdates = parsed[uid];
+      if (userUpdates && typeof userUpdates === 'object') {
+        const keys = Object.keys(userUpdates).filter(k => !ignoreKeys.has(k));
+        if (keys.length > 0) {
+          foundActualUpdate = true;
+          break;
+        }
+      }
+    }
+    if (!foundActualUpdate) {
+      safeStorage.removeItem('pending_user_updates');
+      return false;
+    }
+    return true;
+  } catch {
+    safeStorage.removeItem('pending_user_updates');
+    return false;
+  }
 }
 
 export function UsersProvider({ children }: { children: React.ReactNode }) {
@@ -202,16 +246,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [hasPendingChanges, setHasPendingChanges] = useState(() => {
-    const pendingStr = safeStorage.getItem('pending_user_updates');
-    if (!pendingStr) return false;
-    try {
-      const parsed = JSON.parse(pendingStr);
-      return Object.keys(parsed).length > 0;
-    } catch {
-      return false;
-    }
-  });
+  const [hasPendingChanges, setHasPendingChanges] = useState(() => checkHasPendingUserUpdates());
 
   // Reusable multi-tier cache persistence helper (Synchronous LocalStorage + Asynchronous IndexedDB)
   const saveUsersCache = useCallback((usersList: UserProfile[], mtimes?: Record<string, any>) => {
@@ -310,9 +345,20 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     for (const [userId, fields] of Object.entries(updates)) {
       pending[userId] = { ...pending[userId], ...fields };
     }
+
+    for (const uid of Object.keys(pending)) {
+      if (!pending[uid] || Object.keys(pending[uid]).length === 0) {
+        delete pending[uid];
+      }
+    }
     
-    safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
-    setHasPendingChanges(true);
+    if (Object.keys(pending).length > 0) {
+      safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
+      setHasPendingChanges(checkHasPendingUserUpdates());
+    } else {
+      safeStorage.removeItem('pending_user_updates');
+      setHasPendingChanges(false);
+    }
     window.dispatchEvent(new CustomEvent('pending_user_updates_changed'));
 
     // If the currently active logged-in user profile was updated, update profile_cache and dispatch user_profile_updated
@@ -345,6 +391,53 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
     updateMultipleUserFields({ [userId]: fields });
   }, [updateMultipleUserFields]);
 
+  const addUserLocally = useCallback((newUser: UserProfile) => {
+    if (!newUser || !newUser.uid) return;
+    const normalized = normalizeUserStatusAndExpiry(newUser);
+    
+    setUsers(prev => {
+      const exists = prev.some(u => u.uid === normalized.uid);
+      const next = exists ? prev.map(u => u.uid === normalized.uid ? normalized : u) : [normalized, ...prev];
+      saveUsersCache(next);
+      return next;
+    });
+
+    const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
+    let pending: Record<string, any> = {};
+    try { pending = JSON.parse(pendingStr); } catch(e) {}
+    pending[normalized.uid] = { ...(pending[normalized.uid] || {}), ...normalized };
+    safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
+    setHasPendingChanges(checkHasPendingUserUpdates());
+    window.dispatchEvent(new CustomEvent('pending_user_updates_changed'));
+  }, [saveUsersCache]);
+
+  const deleteMultipleUsersLocally = useCallback((userIds: string[]) => {
+    if (!userIds || userIds.length === 0) return;
+    const idsSet = new Set(userIds);
+
+    setUsers(prev => {
+      const next = prev.filter(u => !idsSet.has(u.uid));
+      saveUsersCache(next);
+      return next;
+    });
+
+    const pendingStr = safeStorage.getItem('pending_user_updates') || '{}';
+    let pending: Record<string, any> = {};
+    try { pending = JSON.parse(pendingStr); } catch(e) {}
+
+    userIds.forEach(uid => {
+      pending[uid] = { __DELETE_USER__: true };
+    });
+
+    safeStorage.setItem('pending_user_updates', JSON.stringify(pending));
+    setHasPendingChanges(checkHasPendingUserUpdates());
+    window.dispatchEvent(new CustomEvent('pending_user_updates_changed'));
+  }, [saveUsersCache]);
+
+  const deleteUserLocally = useCallback((userId: string) => {
+    deleteMultipleUsersLocally([userId]);
+  }, [deleteMultipleUsersLocally]);
+
   const isFinalizingRef = useRef(false);
   const lastFetchTimestampRef = useRef(0);
   const fetchPromiseRef = useRef<Promise<{ users: UserProfile[], updatedSomething: boolean }> | null>(null);
@@ -361,7 +454,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         return;
     }
     
-    let pending: Record<string, Partial<UserProfile>> = {};
+    let pending: Record<string, any> = {};
     try { pending = JSON.parse(pendingStr); } catch(e) {}
     
     const userIds = Object.keys(pending);
@@ -373,6 +466,8 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       let batches = [writeBatch(db)];
       let opCount = 0;
       const nowIso = new Date().toISOString();
+      const nowSyncUtc = getUtcVersion();
+      const metaUsersUpdate: Record<string, any> = {};
 
       for (const uid of userIds) {
         if (opCount >= 490) {
@@ -381,8 +476,17 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         }
         
         let writeData: any = { ...pending[uid] };
+
+        if (writeData.__DELETE_USER__ === true) {
+          batches[batches.length - 1].delete(doc(db, 'users', uid));
+          metaUsersUpdate[uid] = -1;
+          opCount++;
+          continue;
+        }
+
         writeData.uid = uid;
         writeData.updatedAt = nowIso;
+        metaUsersUpdate[uid] = nowSyncUtc;
 
         for (const key in writeData) {
           if (writeData[key] === '__DELETE_FIELD__') {
@@ -398,11 +502,6 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         opCount++;
       }
 
-      const nowSyncUtc = getUtcVersion();
-      const metaUsersUpdate: Record<string, any> = {};
-      for (const uid of userIds) {
-        metaUsersUpdate[uid] = nowSyncUtc;
-      }
       if (opCount >= 490) {
         batches.push(writeBatch(db));
         opCount = 0;
@@ -425,14 +524,18 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {}
 
       for (const uid of userIds) {
-        safeStorage.setItem(`profile_version_${uid}`, nowSyncUtc);
+        if (metaUsersUpdate[uid] === -1) {
+          safeStorage.removeItem(`profile_version_${uid}`);
+        } else {
+          safeStorage.setItem(`profile_version_${uid}`, nowSyncUtc);
+        }
       }
 
       try {
         const cachedProfileStr = safeStorage.getItem('profile_cache');
         if (cachedProfileStr) {
           const currentProfile = JSON.parse(cachedProfileStr);
-          if (currentProfile?.uid && pending[currentProfile.uid]) {
+          if (currentProfile?.uid && pending[currentProfile.uid] && pending[currentProfile.uid].__DELETE_USER__ !== true) {
             const updatedActiveProfile = normalizeUserStatusAndExpiry({ ...currentProfile, ...pending[currentProfile.uid] });
             safeStorage.setItem('profile_cache', JSON.stringify(updatedActiveProfile));
             safeStorage.setItemAsync('profile_cache', JSON.stringify(updatedActiveProfile)).catch(() => {});
@@ -743,7 +846,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const handlePendingChanges = () => {
-      setHasPendingChanges(true);
+      setHasPendingChanges(checkHasPendingUserUpdates());
       const cached = safeStorage.getItem('cached_all_users');
       if (cached) {
         try {
@@ -765,7 +868,19 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
   }, [finalizeUserChanges]);
 
   return (
-    <UsersContext.Provider value={{ users, loading, error, refreshUsers: fetchUsers, updateUserFields, updateMultipleUserFields, finalizeUserChanges, hasPendingChanges }}>
+    <UsersContext.Provider value={{ 
+      users, 
+      loading, 
+      error, 
+      refreshUsers: fetchUsers, 
+      updateUserFields, 
+      updateMultipleUserFields, 
+      addUserLocally,
+      deleteUserLocally,
+      deleteMultipleUsersLocally,
+      finalizeUserChanges, 
+      hasPendingChanges 
+    }}>
       {children}
     </UsersContext.Provider>
   );
