@@ -255,7 +255,7 @@ export const requestNotificationPermission = async (force: boolean = false) => {
           return token;
         }
 
-        // 1. Guaranteed server registration via API (persists to Firestore fcm_tokens & subscribes to topics)
+        // 1. Guaranteed server registration via API (persists to Firestore fcm_tokens/registry & subscribes to topics)
         let apiSubscribed = false;
         try {
           const res = await fetch('/api/notifications/subscribe', {
@@ -264,6 +264,7 @@ export const requestNotificationPermission = async (force: boolean = false) => {
             body: JSON.stringify({ 
               token, 
               userId: isUser ? auth.currentUser!.uid : undefined,
+              email: isUser ? auth.currentUser?.email : undefined,
               isGuest: !isUser,
               guestId: !isUser ? guestId : undefined
             })
@@ -276,19 +277,19 @@ export const requestNotificationPermission = async (force: boolean = false) => {
         // 2. Direct client-side Firestore write only as fallback if backend was unreachable
         if (!apiSubscribed) {
           try {
-            const tokenDocRef = doc(db, 'fcm_tokens', token.replace(/[\/\s]/g, '_'));
-            const tokenData: any = {
-              token,
-              updatedAt: new Date().toISOString(),
-              userId: isUser ? auth.currentUser!.uid : 'guest',
-              isGuest: !isUser,
-              guestId: !isUser ? guestId : null,
-              platform: typeof navigator !== 'undefined' ? navigator.userAgent : 'web'
+            const nowPkt = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+            const tokenEntry = {
+              u: isUser ? auth.currentUser!.uid : 'guest',
+              e: isUser && auth.currentUser?.email ? auth.currentUser.email : 'n',
+              d: nowPkt
             };
-            if (isUser && auth.currentUser?.email) {
-              tokenData.userEmail = auth.currentUser.email;
-            }
-            await runWithNetwork(() => setDoc(tokenDocRef, tokenData, { merge: true }));
+            const registryDocRef = doc(db, 'fcm_tokens', 'registry');
+            await runWithNetwork(() => setDoc(registryDocRef, {
+              tokens: {
+                [token]: tokenEntry
+              },
+              updatedAt: new Date().toISOString()
+            }, { merge: true }));
           } catch (docErr) {
             console.warn("Could not write FCM token directly to Firestore:", docErr);
           }

@@ -119,6 +119,7 @@ export default function AdminLayout() {
           <button 
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
             className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:text-white relative"
+            aria-label="Toggle navigation menu"
           >
             <AnimatePresence mode="wait">
               <motion.div

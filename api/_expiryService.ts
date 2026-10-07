@@ -400,23 +400,33 @@ async function sendFcmExpiryNotification(userId: string, expiryDateStr: string) 
       console.warn(`[Expiry Notification] FCM topic send notice for user_${userId}:`, topicErr.message);
     }
 
-    // Also attempt direct send to device tokens if available in fcm_tokens collection
+    // Also attempt direct send to device tokens if available in fcm_tokens registry
     try {
       const firestore = getDb();
       if (firestore) {
-        const tokensSnap = await firestore.collection("fcm_tokens").where("userId", "==", userId).limit(5).get();
-        if (!tokensSnap.empty) {
-          const directTokens = tokensSnap.docs.map(d => d.data()?.token).filter(Boolean);
-          if (directTokens.length > 0) {
-            const tokenMessages = directTokens.map(token => ({
-              ...message,
-              token,
-              topic: undefined,
-            }));
-            const directRes = await admin.messaging().sendEach(tokenMessages);
-            console.log(`[Expiry Notification] FCM direct tokens sent (${directRes.successCount}/${directTokens.length} success) for user ${userId}`);
-            if (directRes.successCount > 0) sentAny = true;
+        const regSnap = await firestore.collection("fcm_tokens").get();
+        const directTokens: string[] = [];
+        for (const regDoc of regSnap.docs) {
+          if (!regDoc.id.startsWith("registry")) continue;
+          const tokensMap = regDoc.data()?.tokens || {};
+          for (const [tKey, entry] of Object.entries(tokensMap)) {
+            if ((entry as any)?.u === userId) {
+              directTokens.push(tKey);
+              if (directTokens.length >= 5) break;
+            }
           }
+          if (directTokens.length >= 5) break;
+        }
+
+        if (directTokens.length > 0) {
+          const tokenMessages = directTokens.map(token => ({
+            ...message,
+            token,
+            topic: undefined,
+          }));
+          const directRes = await admin.messaging().sendEach(tokenMessages);
+          console.log(`[Expiry Notification] FCM direct tokens sent (${directRes.successCount}/${directTokens.length} success) for user ${userId}`);
+          if (directRes.successCount > 0) sentAny = true;
         }
       }
     } catch (tokenErr: any) {

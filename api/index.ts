@@ -3996,53 +3996,120 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     return [];
   }
 
-  // Subscribe to FCM topic & enforce single device token per user or guest
+  const MAX_TOKENS_PER_REGISTRY = 3000;
+
+  async function saveFcmTokenToRegistry(
+    firestoreDb: FirebaseFirestore.Firestore,
+    token: string,
+    userId?: string,
+    userEmail?: string
+  ) {
+    const isUserLoggedIn = !!userId && userId !== 'guest' && userId !== 'anonymous';
+    // Format YYYY-MM-DD in PKT (+05:00)
+    const nowPkt = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+    const tokenEntry = {
+      u: isUserLoggedIn ? userId : 'guest',
+      e: isUserLoggedIn && userEmail ? userEmail : 'n',
+      d: nowPkt
+    };
+
+    try {
+      const fcmSnap = await firestoreDb.collection("fcm_tokens").get();
+      let targetDocRef: FirebaseFirestore.DocumentReference | null = null;
+      let maxRegistryIndex = 1;
+      let latestDocRef: FirebaseFirestore.DocumentReference | null = null;
+      let latestDocCount = 0;
+
+      for (const d of fcmSnap.docs) {
+        if (!d.id.startsWith("registry")) continue;
+        const idx = d.id === "registry" ? 1 : parseInt(d.id.replace("registry_", ""), 10) || 1;
+        if (idx >= maxRegistryIndex) {
+          maxRegistryIndex = idx;
+          latestDocRef = d.ref;
+          latestDocCount = d.data()?.count || Object.keys(d.data()?.tokens || {}).length || 0;
+        }
+
+        const tokensMap = d.data()?.tokens || {};
+        if (tokensMap[token]) {
+          targetDocRef = d.ref;
+          break;
+        }
+      }
+
+      if (!targetDocRef) {
+        if (latestDocRef && latestDocCount < MAX_TOKENS_PER_REGISTRY) {
+          targetDocRef = latestDocRef;
+        } else {
+          const nextIdx = latestDocRef ? maxRegistryIndex + 1 : 1;
+          const nextDocId = nextIdx === 1 ? "registry" : `registry_${nextIdx}`;
+          targetDocRef = firestoreDb.collection("fcm_tokens").doc(nextDocId);
+        }
+      }
+
+      // Save token under tokens map with merge
+      await targetDocRef.set({
+        tokens: {
+          [token]: tokenEntry
+        },
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      // Update count
+      const updatedSnap = await targetDocRef.get();
+      const exactCount = Object.keys(updatedSnap.data()?.tokens || {}).length;
+      await targetDocRef.update({ count: exactCount });
+    } catch (err) {
+      console.warn("[saveFcmTokenToRegistry Warning]:", err);
+    }
+  }
+
+  async function removeUserFcmTokensFromRegistry(
+    firestoreDb: FirebaseFirestore.Firestore,
+    targetUids: string[]
+  ) {
+    if (!targetUids || targetUids.length === 0) return;
+    try {
+      const uidsSet = new Set(targetUids);
+      const fcmSnap = await firestoreDb.collection("fcm_tokens").get();
+
+      for (const d of fcmSnap.docs) {
+        if (!d.id.startsWith("registry")) continue;
+        const tokensMap = d.data()?.tokens || {};
+        const updatesToField: Record<string, any> = {};
+        let hasDeletions = false;
+
+        for (const [token, entry] of Object.entries(tokensMap)) {
+          if (entry && typeof entry === "object" && uidsSet.has((entry as any).u)) {
+            updatesToField[`tokens.${token}`] = admin.firestore.FieldValue.delete();
+            hasDeletions = true;
+          }
+        }
+
+        if (hasDeletions) {
+          await d.ref.update(updatesToField);
+          const updatedSnap = await d.ref.get();
+          const exactCount = Object.keys(updatedSnap.data()?.tokens || {}).length;
+          await d.ref.update({ count: exactCount });
+        }
+      }
+    } catch (err) {
+      console.warn("[removeUserFcmTokensFromRegistry Warning]:", err);
+    }
+  }
+
+  // Subscribe to FCM topic & save to minified fcm_tokens/registry
   app.post(
     ["/api/notifications/subscribe", "/notifications/subscribe"],
     async (req, res) => {
       try {
-        const { token, userId, isGuest, guestId, previousGuestId } = req.body;
+        const { token, userId, email, isGuest } = req.body;
         if (!token) return res.status(400).json({ error: "Token required" });
 
         const isUserLoggedIn = !!userId && userId !== 'guest' && userId !== 'anonymous';
-        const effectiveGuestId = guestId || 'guest_device';
 
-        // 1. GUARANTEED STORAGE: Always save the token in Firestore fcm_tokens collection first
+        // 1. GUARANTEED STORAGE: Save to minified fcm_tokens registry chunk (max 3000 tokens per chunk)
         if (db) {
-          try {
-            const tokenDocId = token.replace(/[\/\s]/g, '_');
-            const tokenPayload: any = {
-              token,
-              userId: isUserLoggedIn ? userId : 'guest',
-              isGuest: !isUserLoggedIn,
-              guestId: !isUserLoggedIn ? effectiveGuestId : null,
-              updatedAt: new Date().toISOString()
-            };
-
-            await db.collection("fcm_tokens").doc(tokenDocId).set(tokenPayload, { merge: true });
-
-            if (isUserLoggedIn) {
-              await cleanupOldUserFcmTokens(db, userId, token);
-
-              // Safe merge: if previous guest ID existed, update any matching docs
-              if (previousGuestId) {
-                const guestDocs = await db.collection("fcm_tokens").where("guestId", "==", previousGuestId).get();
-                for (const gDoc of guestDocs.docs) {
-                  gDoc.ref.set(
-                    {
-                      userId: userId,
-                      isGuest: false,
-                      guestId: null,
-                      updatedAt: new Date().toISOString()
-                    },
-                    { merge: true }
-                  ).catch(() => {});
-                }
-              }
-            }
-          } catch (storageErr) {
-            console.warn("[FCM Token Storage Warning]:", storageErr);
-          }
+          await saveFcmTokenToRegistry(db, token, userId, email);
         }
 
         // 2. TOPIC SUBSCRIPTION: Subscribe to relevant FCM topics if Firebase Admin is available
@@ -4438,6 +4505,9 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             await batch.commit();
           }
           deletedFirestore = true;
+
+          // 3. Remove deleted users' FCM tokens from fcm_tokens/registry*
+          await removeUserFcmTokensFromRegistry(db, targetUids);
         } catch (err) {
           console.error("Firestore user deletion error in delete endpoint:", err);
         }
