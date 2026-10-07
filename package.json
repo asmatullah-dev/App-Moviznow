@@ -1,8 +1,8 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "5.4.16",
-  "versionUpdatedAt": "Oct 07, 2026, 06:14 AM (PKT)",
+  "version": "5.4.17",
+  "versionUpdatedAt": "Oct 07, 2026, 08:14 AM (PKT)",
   "type": "module",
   "engines": {
     "node": "24.x"
@@ -70,5 +70,5 @@
     "vite": "^6.2.0",
     "vite-plugin-pwa": "^1.2.0"
   },
-  "versionTimestamp": 1791335687975
+  "versionTimestamp": 1791342893158
 }
