@@ -182,6 +182,8 @@ export default function Login() {
     try {
       await signInWithGoogle();
     } catch {
+      // Error handled in AuthContext
+    } finally {
       setIsLoggingIn(false);
     }
   };

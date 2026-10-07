@@ -3997,6 +3997,8 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
   }
 
   const MAX_TOKENS_PER_REGISTRY = 3000;
+  // In-memory cache to prevent duplicate Firestore reads and writes for identical FCM token registrations
+  const syncedTokensMemoryCache = new Map<string, string>();
 
   async function saveFcmTokenToRegistry(
     firestoreDb: FirebaseFirestore.Firestore,
@@ -4007,9 +4009,18 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     const isUserLoggedIn = !!userId && userId !== 'guest' && userId !== 'anonymous';
     // Format YYYY-MM-DD in PKT (+05:00)
     const nowPkt = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+    const userIdentifier = isUserLoggedIn ? userId : 'guest';
+    const emailIdentifier = isUserLoggedIn && userEmail ? userEmail : 'n';
+    const cacheKey = `${userIdentifier}:${emailIdentifier}`;
+
+    // 0. MEMORY DEDUPLICATION: If token was already synced with identical user/email in this server instance, exit with 0 Firestore operations!
+    if (syncedTokensMemoryCache.get(token) === cacheKey) {
+      return;
+    }
+
     const tokenEntry = {
-      u: isUserLoggedIn ? userId : 'guest',
-      e: isUserLoggedIn && userEmail ? userEmail : 'n',
+      u: userIdentifier,
+      e: emailIdentifier,
       d: nowPkt
     };
 
@@ -4019,45 +4030,65 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       let maxRegistryIndex = 1;
       let latestDocRef: FirebaseFirestore.DocumentReference | null = null;
       let latestDocCount = 0;
+      let isAlreadyUpToDate = false;
+      let existingTokensCount = 0;
+      let tokenAlreadyInDoc = false;
 
       for (const d of fcmSnap.docs) {
         if (!d.id.startsWith("registry")) continue;
         const idx = d.id === "registry" ? 1 : parseInt(d.id.replace("registry_", ""), 10) || 1;
+        const tokensMap = d.data()?.tokens || {};
+        const docCount = d.data()?.count || Object.keys(tokensMap).length || 0;
+
         if (idx >= maxRegistryIndex) {
           maxRegistryIndex = idx;
           latestDocRef = d.ref;
-          latestDocCount = d.data()?.count || Object.keys(d.data()?.tokens || {}).length || 0;
+          latestDocCount = docCount;
         }
 
-        const tokensMap = d.data()?.tokens || {};
         if (tokensMap[token]) {
           targetDocRef = d.ref;
+          existingTokensCount = docCount;
+          tokenAlreadyInDoc = true;
+          const existingEntry = tokensMap[token];
+          // Check if token already contains the exact same user identity
+          if (existingEntry && (existingEntry as any).u === tokenEntry.u && (existingEntry as any).e === tokenEntry.e) {
+            isAlreadyUpToDate = true;
+          }
           break;
         }
+      }
+
+      // If document already contains the exact same token with the same user & email, SKIP WRITE completely (0 writes!)
+      if (isAlreadyUpToDate) {
+        syncedTokensMemoryCache.set(token, cacheKey);
+        return;
       }
 
       if (!targetDocRef) {
         if (latestDocRef && latestDocCount < MAX_TOKENS_PER_REGISTRY) {
           targetDocRef = latestDocRef;
+          existingTokensCount = latestDocCount;
         } else {
           const nextIdx = latestDocRef ? maxRegistryIndex + 1 : 1;
           const nextDocId = nextIdx === 1 ? "registry" : `registry_${nextIdx}`;
           targetDocRef = firestoreDb.collection("fcm_tokens").doc(nextDocId);
+          existingTokensCount = 0;
         }
       }
 
-      // Save token under tokens map with merge
+      const newCount = tokenAlreadyInDoc ? existingTokensCount : (existingTokensCount + 1);
+
+      // Single atomic write containing token, updatedAt AND count (avoids extra get() read and extra update() write!)
       await targetDocRef.set({
         tokens: {
           [token]: tokenEntry
         },
+        count: newCount,
         updatedAt: new Date().toISOString()
       }, { merge: true });
 
-      // Update count
-      const updatedSnap = await targetDocRef.get();
-      const exactCount = Object.keys(updatedSnap.data()?.tokens || {}).length;
-      await targetDocRef.update({ count: exactCount });
+      syncedTokensMemoryCache.set(token, cacheKey);
     } catch (err) {
       console.warn("[saveFcmTokenToRegistry Warning]:", err);
     }
@@ -4075,21 +4106,23 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       for (const d of fcmSnap.docs) {
         if (!d.id.startsWith("registry")) continue;
         const tokensMap = d.data()?.tokens || {};
+        const currentCount = d.data()?.count || Object.keys(tokensMap).length || 0;
         const updatesToField: Record<string, any> = {};
-        let hasDeletions = false;
+        let deletedKeysCount = 0;
 
         for (const [token, entry] of Object.entries(tokensMap)) {
           if (entry && typeof entry === "object" && uidsSet.has((entry as any).u)) {
             updatesToField[`tokens.${token}`] = admin.firestore.FieldValue.delete();
-            hasDeletions = true;
+            syncedTokensMemoryCache.delete(token);
+            deletedKeysCount++;
           }
         }
 
-        if (hasDeletions) {
+        if (deletedKeysCount > 0) {
+          updatesToField['count'] = Math.max(0, currentCount - deletedKeysCount);
+          updatesToField['updatedAt'] = new Date().toISOString();
+          // Single atomic update without re-fetching the document!
           await d.ref.update(updatesToField);
-          const updatedSnap = await d.ref.get();
-          const exactCount = Object.keys(updatedSnap.data()?.tokens || {}).length;
-          await d.ref.update({ count: exactCount });
         }
       }
     } catch (err) {

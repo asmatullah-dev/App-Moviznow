@@ -29,6 +29,7 @@ import {
   setPersistence,
   browserLocalPersistence,
   indexedDBLocalPersistence,
+  browserPopupRedirectResolver,
 } from "firebase/auth";
 import {
   doc,
@@ -2034,7 +2035,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await setPersistence(auth, indexedDBLocalPersistence).catch(() => setPersistence(auth, browserLocalPersistence));
       } catch (pErr) {}
       const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
 
       // Force refresh app data
       safeStorage.removeItem("profile_cache");

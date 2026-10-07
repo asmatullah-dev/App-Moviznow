@@ -189,11 +189,11 @@ export default function AdminSettings() {
     setConnectingGmail(true);
     setError(null);
     try {
-      const { signInWithPopup, GoogleAuthProvider } = await import('firebase/auth');
+      const { signInWithPopup, GoogleAuthProvider, browserPopupRedirectResolver } = await import('firebase/auth');
       const provider = new GoogleAuthProvider();
       provider.addScope('https://www.googleapis.com/auth/gmail.readonly');
       provider.setCustomParameters({ prompt: 'select_account' });
-      const result = await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
       const credential = GoogleAuthProvider.credentialFromResult(result);
       if (credential?.accessToken) {
         await syncGmailTokenToServer(credential.accessToken, result.user.email || undefined);
