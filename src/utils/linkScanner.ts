@@ -260,7 +260,7 @@ export function formatQuality(q?: string) {
 export function normalizePrintQuality(text?: string, qualities?: Quality[]) {
   if (!text) return undefined;
 
-  const isV2OrHqHdtc = /(?:v2[\.\-\s_/]*hq[\.\-\s_/]*hdtc|hq[\.\-\s_/]*v2[\.\-\s_/]*hdtc|v2[\.\-\s_/]*hdtc|hdtc[\.\-\s_/]*v2|hq[\.\-\s_/]*hdtc|hdtc[\.\-\s_/]*hq|\bv2\b[^\n\r]*\bhdtc\b|\bhdtc\b[^\n\r]*\bv2\b|\bhq\b[^\n\r]*\bhdtc\b|\bhdtc\b[^\n\r]*\bhq\b)/i.test(
+  const isV2OrHqHdtc = /(?:v2[\.\-\s_/]*hq[\.\-\s_/]*(?:hdtc|hdts)|hq[\.\-\s_/]*v2[\.\-\s_/]*(?:hdtc|hdts)|v2[\.\-\s_/]*(?:hdtc|hdts)|(?:hdtc|hdts)[\.\-\s_/]*v2|hq[\.\-\s_/]*(?:hdtc|hdts)|(?:hdtc|hdts)[\.\-\s_/]*hq|\bv2\b[^\n\r]*\b(?:hdtc|hdts)\b|\b(?:hdtc|hdts)\b[^\n\r]*\bv2\b|\bhq\b[^\n\r]*\b(?:hdtc|hdts)\b|\b(?:hdtc|hdts)\b[^\n\r]*\bhq\b)/i.test(
     text,
   );
 
@@ -271,7 +271,7 @@ export function normalizePrintQuality(text?: string, qualities?: Quality[]) {
   else if (/(blu[\.\-\s_]*ray|bd[\.\-\s_]*rip|br[\.\-\s_]*rip)/i.test(text))
     detected = "Blu-Ray";
   else if (/(web[\.\-\s_]*dl)/i.test(text)) detected = "WEB-DL";
-  else if (/(hdtc)/i.test(text)) detected = "HDTC";
+  else if (/(hdtc|hdts|hd[\.\-\s_]*tc|hd[\.\-\s_]*ts)/i.test(text)) detected = "HDTC";
   else if (/(hdcam)/i.test(text)) detected = "HDCAM";
   else if (/(dvd[\.\-\s_]*rip)/i.test(text)) detected = "DVDRip";
   else if (/\bHD\b/i.test(text)) detected = "WEB-DL";
@@ -425,11 +425,26 @@ export function detectLanguageListFromText(
     Kashmiri: ["kas", "ks"],
   };
 
-  // Check if Hindi is in text
+  // Helper function to check if a language in text is strictly a subtitle specification
+  const isLanguageOnlySubtitles = (langName: string, codes: string[] = []): boolean => {
+    const tokens = [langName, ...codes].filter(Boolean);
+    for (const token of tokens) {
+      const esc = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // e.g. "Hindi.Subtitles", "Hindi Subtitles", "Hindi.Subtitle", "Hindi.Sub", "Hindi.Esub", "Hindi.Srt"
+      const regex = new RegExp(`\\b${esc}[\\s._-]*\\b(subtitles?|subs?|esubs?|msubs?|softsubs?|hardsubs?|srts?)\\b`, 'i');
+      if (regex.test(text)) return true;
+    }
+    return false;
+  };
+
+  // Check if Hindi is in text (and NOT just as Hindi Subtitles)
+  const isHindiSubOnly = isLanguageOnlySubtitles("Hindi", ["hin", "hi"]);
   const isHindiPresent =
-    /\b(hindi|hin)\b/i.test(text) ||
-    normalizedLower.includes("hindi") ||
-    /(?<=^|[^a-zA-Z0-9])hi(?![a-zA-Z0-9])/i.test(text);
+    !isHindiSubOnly && (
+      /\b(hindi|hin)\b/i.test(text) ||
+      (normalizedLower.includes("hindi") && !/hindi[\s._-]*\b(subtitles?|subs?|esubs?|msubs?|softsubs?|hardsubs?|srts?)\b/i.test(text)) ||
+      /(?<=^|[^a-zA-Z0-9])hi(?![a-zA-Z0-9])/i.test(text)
+    );
 
   if (isHindiPresent) {
     if (isLineAudio) {
@@ -462,13 +477,21 @@ export function detectLanguageListFromText(
     // Skip Hindi as handled specifically with line logic
     if (lLower.includes("hindi")) return;
 
+    const codes = langShortCodes[langName] || [];
+    if (isLanguageOnlySubtitles(langName, codes)) {
+      return; // Skip adding as audio language because it's a subtitle indicator
+    }
+
     const normalizedLang = lLower.replace(/[\.\-\s_()\[\]]+/g, "");
     if (normalizedLower.includes(normalizedLang)) {
+      // Make sure this match in normalizedLower isn't just part of "language.subtitles"
+      const langSubRegex = new RegExp(`\\b${normalizedLang}[\\s._-]*\\b(subtitles?|subs?|esubs?|msubs?|softsubs?|hardsubs?|srts?)\\b`, 'i');
+      if (langSubRegex.test(text)) return;
+
       if (!foundLangs.includes(langName)) foundLangs.push(langName);
       return;
     }
 
-    const codes = langShortCodes[langName] || [];
     for (const code of codes) {
       const codeRegex = new RegExp(
         `(?<=^|[^a-zA-Z0-9])${code}(?![a-zA-Z0-9])`,
