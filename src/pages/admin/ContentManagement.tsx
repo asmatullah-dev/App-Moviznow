@@ -901,7 +901,7 @@ export default function ContentManagement() {
     if (typeof refreshLocalContent === 'function') {
       refreshLocalContent();
     }
-  }, [refreshLocalContent]);
+  }, []);
 
   const [isSyncingFromFirestore, setIsSyncingFromFirestore] = useState(false);
   const [isGithubModalOpen, setIsGithubModalOpen] = useState(false);

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { 
   doc, 
   getDoc, 
@@ -640,7 +640,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     });
   }, [contentList, allUsers]);
 
-  const refreshContentFromLocal = () => {
+  const refreshContentFromLocal = useCallback(() => {
     const rawContentMap: Record<string, Content> = {};
     const seenChunkIds = new Set<string>();
 
@@ -723,7 +723,22 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     });
     
     // In AdminContentContext, maintain complete content including links and seasons
-    setContentList(rawContent);
+    setContentList(prev => {
+        if (prev.length === rawContent.length && prev.length > 0) {
+            let isSame = true;
+            for (let i = 0; i < Math.min(prev.length, 15); i++) {
+                if (prev[i]?.id !== rawContent[i]?.id || prev[i]?.updatedAt !== rawContent[i]?.updatedAt) {
+                    isSame = false;
+                    break;
+                }
+            }
+            if (isSame && prev[prev.length - 1]?.id === rawContent[rawContent.length - 1]?.id) {
+                return prev;
+            }
+        }
+        return rawContent;
+    });
+
     if (rawContent.length > 0) {
       safeStorage.setItem('admin_content_cache', JSON.stringify(rawContent));
       try {
@@ -733,9 +748,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       } catch (e) {}
     }
     window.dispatchEvent(new CustomEvent('content_updated_locally'));
-  };
+  }, []);
 
-  const refreshCollectionsFromLocal = () => {
+  const refreshCollectionsFromLocal = useCallback(() => {
     let allCollections: AppCollection[] = [];
     const keys = safeStorage.keys().filter(k => k.startsWith('admin_collection_chunk_'));
     
@@ -764,12 +779,24 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     }
     
     const sorted = allCollections.sort((a, b) => (b.order || 0) - (a.order || 0));
-    setCollections(sorted);
+    setCollections(prev => {
+      if (prev.length === sorted.length && prev.length > 0) {
+        let isSame = true;
+        for (let i = 0; i < prev.length; i++) {
+          if (prev[i]?.id !== sorted[i]?.id || prev[i]?.order !== sorted[i]?.order) {
+            isSame = false;
+            break;
+          }
+        }
+        if (isSame) return prev;
+      }
+      return sorted;
+    });
     if (sorted.length > 0) {
       safeStorage.setItem('admin_collections_cache', JSON.stringify(sorted));
     }
     return sorted;
-  };
+  }, []);
 
   const syncWithServer = async (force: boolean = false, forceAdminSync: boolean = false): Promise<{ updatedSomething: boolean; updatedContentCount: number; isInitialLoad?: boolean }> => {
     // Only connect to Firestore if explicitly requested by Content Management tab
