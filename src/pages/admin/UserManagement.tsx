@@ -14,6 +14,7 @@ import { UserDataFieldsView } from '../../components/UserDataFieldsView';
 import { ChunkMetaDocModal } from '../../components/ChunkMetaDocModal';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { formatDateToMonthDDYYYY } from '../../utils/contentUtils';
+import { parseVersionTime } from '../../utils/chunkMeta';
 import { useAuth, standardizePhone } from '../../contexts/AuthContext';
 import { getUserDisplayName } from '../../utils/userUtils';
 import { smartSearch } from '../../utils/searchUtils';
@@ -434,9 +435,10 @@ export default function UserManagement() {
     if (!dateStr) return 'N/A';
     if (dateStr === 'Lifetime') return 'Lifetime';
 
-    const cleanDateStr = dateStr.split('T')[0].trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(cleanDateStr)) {
-      const parts = cleanDateStr.split('-');
+    const trimmed = String(dateStr).trim();
+    // If it's a date-only string like YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      const parts = trimmed.split('-');
       const year = parseInt(parts[0], 10);
       const month = parseInt(parts[1], 10) - 1;
       const day = parseInt(parts[2], 10);
@@ -444,7 +446,13 @@ export default function UserManagement() {
       return isNaN(d.getTime()) ? 'Invalid Date' : format(d, fmt);
     }
 
-    const d = new Date(dateStr);
+    const ms = parseVersionTime(trimmed);
+    if (ms > 0) {
+      const d = new Date(ms);
+      return isNaN(d.getTime()) ? 'Invalid Date' : format(d, fmt);
+    }
+
+    const d = new Date(trimmed);
     if (!isNaN(d.getTime())) {
       return format(d, fmt);
     }
@@ -453,7 +461,8 @@ export default function UserManagement() {
 
   const safeDistance = (dateStr: string | null | undefined) => {
     if (!dateStr) return 'Never';
-    const d = new Date(dateStr);
+    const ms = parseVersionTime(dateStr);
+    const d = ms > 0 ? new Date(ms) : new Date(dateStr);
     return isNaN(d.getTime()) ? 'Invalid Date' : formatDistanceToNow(d, { addSuffix: true });
   };
 
@@ -678,7 +687,19 @@ export default function UserManagement() {
   };
 
   const getUserAnalytics = (uid: string) => {
-    return scannedAnalytics[uid] || { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false, sessionsCount: 0 };
+    if (scannedAnalytics[uid]) return scannedAnalytics[uid];
+    const u = users.find(x => x.uid === uid) || (selectedUser?.uid === uid ? selectedUser : null);
+    if (u) {
+      return {
+        timeSpent: u.timeSpent || 0,
+        favoritesCount: (u.favorites || []).length,
+        watchLaterCount: (u.watchLater || []).length,
+        lastActive: u.lastActive || null,
+        hasScanned: true,
+        sessionsCount: u.sessionsCount || 0,
+      };
+    }
+    return { timeSpent: 0, favoritesCount: 0, watchLaterCount: 0, lastActive: null, hasScanned: false, sessionsCount: 0 };
   };
 
   const handleRowClick = (user: UserProfile, e: React.MouseEvent) => {
@@ -2262,7 +2283,11 @@ export default function UserManagement() {
                           </span>
                         )}
                         <span className={`text-[10px] font-medium ${isUserOnline(user.lastActive) ? 'text-emerald-500' : 'text-zinc-500 dark:text-zinc-400'}`}>
-                          {isUserOnline(user.lastActive) ? 'Online' : (user.lastActive ? safeDistance(user.lastActive) : 'Never')}
+                          {isUserOnline(user.lastActive) 
+                            ? 'Online' 
+                            : user.lastActive 
+                              ? safeDistance(user.lastActive) 
+                              : 'Never'}
                         </span>
                       </div>
                     </div>
@@ -3193,14 +3218,14 @@ export default function UserManagement() {
                                         </span>
                                       )}
                                       <div className={`font-bold text-xs ${isUserOnline(userAna.lastActive) ? 'text-emerald-500' : 'text-zinc-900 dark:text-white'}`}>
-                                        {!userAna.hasScanned ? (
-                                          <span className="text-zinc-400 italic font-normal">Not Scanned</span>
-                                        ) : (
-                                          isUserOnline(userAna.lastActive) ? 'Online' : (userAna.lastActive ? safeFormat(userAna.lastActive, 'MMM dd, HH:mm') : 'Never')
-                                        )}
+                                        {isUserOnline(userAna.lastActive) 
+                                          ? 'Online' 
+                                          : userAna.lastActive 
+                                            ? safeFormat(userAna.lastActive, 'MMM dd, yyyy · hh:mm a') 
+                                            : 'Never'}
                                       </div>
                                     </div>
-                                    {userAna.hasScanned && userAna.lastActive && (
+                                    {userAna.lastActive && (
                                       <div className="text-[10px] text-zinc-500">
                                         {safeDistance(userAna.lastActive)}
                                       </div>

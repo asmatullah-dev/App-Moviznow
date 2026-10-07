@@ -49,9 +49,20 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
     u = { ...u, displayName: resolvedName };
   }
 
-  // Ensure createdAt (Joined Date) is always present
+  // Ensure createdAt (Joined Date) is always present and formatted as PKT ISO string
   if (!u.createdAt || u.createdAt === 'null' || u.createdAt === 'undefined') {
-    u = { ...u, createdAt: new Date().toISOString() };
+    u = { ...u, createdAt: getUtcVersion() };
+  } else if (typeof u.createdAt === 'object') {
+    const parsedMs = parseVersionTime(u.createdAt);
+    u = { ...u, createdAt: getUtcVersion(parsedMs || Date.now()) };
+  }
+
+  // Ensure updatedAt is always present and formatted as PKT ISO string (e.g. 2026-10-04T07:41:46.053+05:00)
+  if (!u.updatedAt || u.updatedAt === 'null' || u.updatedAt === 'undefined') {
+    u = { ...u, updatedAt: getUtcVersion() };
+  } else if (typeof u.updatedAt === 'object') {
+    const parsedMs = parseVersionTime(u.updatedAt);
+    u = { ...u, updatedAt: getUtcVersion(parsedMs || Date.now()) };
   }
 
   // Ensure phone is normalized from any available phone fields or phone-based email
@@ -485,7 +496,7 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
         }
 
         writeData.uid = uid;
-        writeData.updatedAt = nowIso;
+        writeData.lastActive = nowSyncUtc;
         metaUsersUpdate[uid] = nowSyncUtc;
 
         for (const key in writeData) {
@@ -694,8 +705,8 @@ export function UsersProvider({ children }: { children: React.ReactNode }) {
             const userInLocal = currentUsersMap.get(cleanUid);
             const localVer = localUsersVersion[cleanUid];
             const localMtime = parseVersionTime(localVer);
-            const userUpdatedAtTime = userInLocal ? parseVersionTime(userInLocal.updatedAt) : 0;
-            const effectiveLocalTime = Math.max(localMtime, userUpdatedAtTime);
+            const userLastActiveTime = userInLocal ? parseVersionTime(userInLocal.lastActive || userInLocal.updatedAt) : 0;
+            const effectiveLocalTime = Math.max(localMtime, userLastActiveTime);
 
             // Fetch ONLY if not present in local cache OR server version is strictly newer than local doc!
             if (!userInLocal || effectiveLocalTime === 0 || serverTime > effectiveLocalTime) {

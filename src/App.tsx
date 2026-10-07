@@ -289,7 +289,6 @@ export default function App() {
         <AuthLanguageSync />
         <UsersProvider>
           <SettingsProvider>
-            <AdminContentProvider>
             <ContentProvider>
               <NotificationProvider>
                 <CartProvider>
@@ -336,24 +335,31 @@ export default function App() {
                         <Route path="/privacy" element={<ProtectedRoute><PrivacyPolicy /></ProtectedRoute>} />
                         <Route path="/privacy-policy" element={<ProtectedRoute><PrivacyPolicy /></ProtectedRoute>} />
                         
-                        {/* Admin Routes */}
-                        <Route path="/admin" element={<ProtectedRoute requireAdmin><AdminLayout /></ProtectedRoute>}>
+                        {/* Admin Routes - AdminContentProvider is scoped to admin content routes */}
+                        <Route
+                          path="/admin"
+                          element={
+                            <ProtectedRoute requireAdmin>
+                              <AdminLayout />
+                            </ProtectedRoute>
+                          }
+                        >
                           <Route index element={<Navigate to="content" replace />} />
                           <Route path="analytics" element={<Analytics />} />
                           <Route path="orders" element={<OrdersManagement />} />
-                          <Route path="content" element={<ContentManagement />} />
-                          <Route path="collections" element={<CollectionsManagement />} />
-                          <Route path="genres" element={<GenreManagement />} />
-                          <Route path="languages" element={<LanguageManagement />} />
-                          <Route path="qualities" element={<QualityManagement />} />
+                          <Route path="content" element={<AdminContentProvider><ContentManagement /></AdminContentProvider>} />
+                          <Route path="collections" element={<AdminContentProvider><CollectionsManagement /></AdminContentProvider>} />
+                          <Route path="genres" element={<AdminContentProvider><GenreManagement /></AdminContentProvider>} />
+                          <Route path="languages" element={<AdminContentProvider><LanguageManagement /></AdminContentProvider>} />
+                          <Route path="qualities" element={<AdminContentProvider><QualityManagement /></AdminContentProvider>} />
                           <Route path="users" element={<UserManagement />} />
                           <Route path="user-managers" element={<UserManagers />} />
-                          <Route path="selected-content" element={<SelectedContentUsers />} />
+                          <Route path="selected-content" element={<AdminContentProvider><SelectedContentUsers /></AdminContentProvider>} />
                           <Route path="income" element={<IncomeManagement />} />
-                          <Route path="error-links" element={<ErrorLinks />} />
-                          <Route path="reported-links" element={<ReportedLinks />} />
+                          <Route path="error-links" element={<AdminContentProvider><ErrorLinks /></AdminContentProvider>} />
+                          <Route path="reported-links" element={<AdminContentProvider><ReportedLinks /></AdminContentProvider>} />
                           <Route path="notifications" element={<Notifications />} />
-                          <Route path="requests" element={<MovieRequestsManagement />} />
+                          <Route path="requests" element={<AdminContentProvider><MovieRequestsManagement /></AdminContentProvider>} />
                           <Route path="sync" element={<ContentSync />} />
                           <Route path="settings" element={<AdminSettings />} />
                         </Route>
@@ -365,7 +371,6 @@ export default function App() {
                 </CartProvider>
               </NotificationProvider>
             </ContentProvider>
-            </AdminContentProvider>
           </SettingsProvider>
         </UsersProvider>
       </AuthProvider>

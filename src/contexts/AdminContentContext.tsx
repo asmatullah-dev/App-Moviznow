@@ -48,6 +48,7 @@ interface AdminContentContextType {
   checkForUpdates: (force?: boolean) => Promise<{ updated: boolean; updatedContentCount: number; isInitialLoad?: boolean }>;
   quickRefreshCatalog: (manual?: boolean, prefetchedVersions?: Record<string, any>, forceAdminSync?: boolean) => Promise<{ updated: boolean; updatedCount: number; message: string; isRelaxed?: boolean; isInitialLoad?: boolean }>;
   reloadCollectionsFromStaticJson: (markPendingSync?: boolean) => Promise<AppCollection[]>;
+  refreshLocalContent: () => void;
 }
 
 const AdminContentContext = createContext<AdminContentContextType | undefined>(undefined);
@@ -129,17 +130,36 @@ export function isContentDataEqual(existing: any, updated: any): boolean {
 
 export const checkHasPendingChanges = (): boolean => {
   try {
-    const chunkUpdates = safeStorage.getItem('admin_pending_chunk_updates');
-    if (chunkUpdates && chunkUpdates !== '[]') {
+    const getVal = (k: string) => {
+      const v = safeStorage.getItem(k);
+      if (v) return v;
+      if (typeof window !== 'undefined' && window.localStorage) {
+        return window.localStorage.getItem(k);
+      }
+      return null;
+    };
+
+    const chunkUpdates = getVal('admin_pending_chunk_updates');
+    if (chunkUpdates && chunkUpdates !== '[]' && chunkUpdates !== '{}') {
       const arr = JSON.parse(chunkUpdates);
       if (Array.isArray(arr) && arr.length > 0) return true;
     }
-    const collUpdates = safeStorage.getItem('admin_pending_collection_updates');
-    if (collUpdates && collUpdates !== '[]') {
+    const itemUpdates = getVal('admin_pending_item_updates');
+    if (itemUpdates && itemUpdates !== '{}' && itemUpdates !== '[]') {
+      const obj = JSON.parse(itemUpdates);
+      if (obj && typeof obj === 'object' && Object.keys(obj).length > 0) return true;
+    }
+    const createdItems = getVal('admin_pending_created_items');
+    if (createdItems && createdItems !== '[]' && createdItems !== '{}') {
+      const arr = JSON.parse(createdItems);
+      if (Array.isArray(arr) && arr.length > 0) return true;
+    }
+    const collUpdates = getVal('admin_pending_collection_updates');
+    if (collUpdates && collUpdates !== '[]' && collUpdates !== '{}') {
       const arr = JSON.parse(collUpdates);
       if (Array.isArray(arr) && arr.length > 0) return true;
     }
-    const metaUpdates = safeStorage.getItem('admin_pending_metadata_updates');
+    const metaUpdates = getVal('admin_pending_metadata_updates');
     if (metaUpdates === 'true') return true;
   } catch (e) {}
   return false;
@@ -151,19 +171,58 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
   const [contentList, setContentList] = useState<Content[]>(() => {
     const cached = safeStorage.getItem('admin_content_cache');
-    return cached ? JSON.parse(cached) : [];
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {}
+    }
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        const sessionCached = window.sessionStorage.getItem('admin_content_cache_fast');
+        if (sessionCached) {
+          const parsed = JSON.parse(sessionCached);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      }
+    } catch (e) {}
+    return [];
   });
   const [genres, setGenres] = useState<Genre[]>(() => {
     const cached = safeStorage.getItem('admin_genres_cache');
-    return cached ? JSON.parse(cached).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)) : [];
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.sort((a: any, b: any) => (a.order || 999) - (b.order || 999));
+        }
+      } catch (e) {}
+    }
+    return [];
   });
   const [languages, setLanguages] = useState<Language[]>(() => {
     const cached = safeStorage.getItem('admin_languages_cache');
-    return cached ? JSON.parse(cached).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)) : [];
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.sort((a: any, b: any) => (a.order || 999) - (b.order || 999));
+        }
+      } catch (e) {}
+    }
+    return [];
   });
   const [qualities, setQualities] = useState<Quality[]>(() => {
     const cached = safeStorage.getItem('admin_qualities_cache');
-    return cached ? JSON.parse(cached).sort((a: any, b: any) => (a.order || 999) - (b.order || 999)) : [];
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.sort((a: any, b: any) => (a.order || 999) - (b.order || 999));
+        }
+      } catch (e) {}
+    }
+    return [];
   });
   const [collections, setCollections] = useState<AppCollection[]>(() => {
     const cached = safeStorage.getItem('admin_collections_cache');
@@ -176,8 +235,15 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     return [];
   });
   const [loading, setLoading] = useState(() => {
-    const hasC = safeStorage.getItem('admin_content_cache');
-    return !hasC;
+    const cached = safeStorage.getItem('admin_content_cache');
+    if (cached) return false;
+    try {
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        const sessionCached = window.sessionStorage.getItem('admin_content_cache_fast');
+        if (sessionCached && sessionCached.length > 10) return false;
+      }
+    } catch (e) {}
+    return true;
   });
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
@@ -199,6 +265,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       // 2. Initial sync from admin local storage for IMMEDIATE UI feedback
       refreshContentFromLocal();
       refreshCollectionsFromLocal();
+      setHasPendingChanges(checkHasPendingChanges());
 
       // 3. Load auxiliary from admin cache
       const g = safeStorage.getItem('admin_genres_cache');
@@ -220,6 +287,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       if (isMounted) {
         refreshContentFromLocal();
         refreshCollectionsFromLocal();
+        setHasPendingChanges(checkHasPendingChanges());
       }
     };
 
@@ -232,14 +300,24 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       }
     };
 
+    const handlePendingChangesEvent = () => {
+      if (isMounted) {
+        setHasPendingChanges(checkHasPendingChanges());
+      }
+    };
+
     window.addEventListener('safe_storage_hydrated', handleStorageHydrated);
     window.addEventListener('collections_updated_locally', handleCollectionsUpdated);
+    window.addEventListener('pending_changes_updated', handlePendingChangesEvent);
+    window.addEventListener('storage', handlePendingChangesEvent);
 
     return () => {
       isMounted = false;
       clearTimeout(safetyTimer);
       window.removeEventListener('safe_storage_hydrated', handleStorageHydrated);
       window.removeEventListener('collections_updated_locally', handleCollectionsUpdated);
+      window.removeEventListener('pending_changes_updated', handlePendingChangesEvent);
+      window.removeEventListener('storage', handlePendingChangesEvent);
     };
   }, [profile?.role, user?.uid]);
 
@@ -613,9 +691,16 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
     }
 
-    // Fallback: If no chunks found yet, check admin_content_cache
+    // Fallback: If no chunks found yet, check admin_content_cache and sessionStorage
     if (Object.keys(rawContentMap).length === 0) {
-      const cachedContent = safeStorage.getItem('admin_content_cache');
+      let cachedContent = safeStorage.getItem('admin_content_cache');
+      if (!cachedContent || cachedContent === '[]') {
+        try {
+          if (typeof window !== 'undefined' && window.sessionStorage) {
+            cachedContent = window.sessionStorage.getItem('admin_content_cache_fast') || null;
+          }
+        } catch (e) {}
+      }
       if (cachedContent && cachedContent !== '[]') {
         try {
           const parsed = JSON.parse(cachedContent);
@@ -641,6 +726,11 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
     setContentList(rawContent);
     if (rawContent.length > 0) {
       safeStorage.setItem('admin_content_cache', JSON.stringify(rawContent));
+      try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          window.sessionStorage.setItem('admin_content_cache_fast', JSON.stringify(rawContent));
+        }
+      } catch (e) {}
     }
     window.dispatchEvent(new CustomEvent('content_updated_locally'));
   };
@@ -660,9 +750,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
     }
 
-    // Fallback: check admin_collections_cache or general collections_cache / collection_chunk_
+    // Fallback: check admin_collections_cache
     if (allCollections.length === 0) {
-      const cachedCollStr = safeStorage.getItem('admin_collections_cache') || safeStorage.getItem('collections_cache');
+      const cachedCollStr = safeStorage.getItem('admin_collections_cache');
       if (cachedCollStr && cachedCollStr !== '[]') {
         try {
           const parsed = JSON.parse(cachedCollStr);
@@ -670,21 +760,6 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             allCollections = parsed;
           }
         } catch(e) {}
-      }
-
-      if (allCollections.length === 0) {
-        const fallbackKeys = safeStorage.keys().filter(k => k.startsWith('collection_chunk_') && !k.startsWith('static_'));
-        for (const key of fallbackKeys) {
-          const chunkStr = safeStorage.getItem(key);
-          if (chunkStr) {
-            try {
-              const items = JSON.parse(chunkStr);
-              const chunkList = Object.values(items) as AppCollection[];
-              allCollections = [...allCollections, ...chunkList];
-              safeStorage.setItem('admin_' + key, chunkStr);
-            } catch(e) {}
-          }
-        }
       }
     }
     
@@ -1819,15 +1894,44 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         updateOrder, getContent, saveContent, deleteContent, updateContentFields, deleteMultipleContents, 
         updateAuxiliaryCollection, addCollection, updateCollection, deleteCollection, reorderCollections,
         addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem, finalizeChanges, hasPendingChanges, checkForUpdates,
-        quickRefreshCatalog, reloadCollectionsFromStaticJson
+        quickRefreshCatalog, reloadCollectionsFromStaticJson, refreshLocalContent: refreshContentFromLocal
     }}>
       {children}
     </AdminContentContext.Provider>
   );
 }
 
+const fallbackAdminContentContext: AdminContentContextType = {
+  contentList: [],
+  genres: [],
+  languages: [],
+  qualities: [],
+  collections: [],
+  loading: false,
+  isOffline: false,
+  updateOrder: async () => {},
+  getContent: async () => null,
+  saveContent: async () => {},
+  deleteContent: async () => {},
+  updateContentFields: async () => {},
+  deleteMultipleContents: async () => {},
+  updateAuxiliaryCollection: async () => {},
+  addCollection: async () => {},
+  updateCollection: async () => {},
+  deleteCollection: async () => {},
+  reorderCollections: async () => {},
+  addAuxiliaryItem: async () => {},
+  updateAuxiliaryItem: async () => {},
+  deleteAuxiliaryItem: async () => {},
+  finalizeChanges: async () => {},
+  hasPendingChanges: false,
+  checkForUpdates: async () => ({ updated: false, updatedContentCount: 0 }),
+  quickRefreshCatalog: async () => ({ updated: false, updatedCount: 0, message: '' }),
+  reloadCollectionsFromStaticJson: async () => [],
+  refreshLocalContent: () => {},
+};
+
 export const useAdminContent = () => {
   const context = useContext(AdminContentContext);
-  if (context === undefined) throw new Error('useContent must be used within a AdminContentProvider');
-  return context;
+  return context || fallbackAdminContentContext;
 };

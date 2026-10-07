@@ -887,6 +887,7 @@ export default function ContentManagement() {
     finalizeChanges,
     hasPendingChanges,
     quickRefreshCatalog,
+    refreshLocalContent,
   } = useAdminContent();
   const { sendNotification } = useNotifications();
   const [loading, setLoading] = useState(contextLoading);
@@ -894,6 +895,13 @@ export default function ContentManagement() {
   useEffect(() => {
     setLoading(contextLoading);
   }, [contextLoading]);
+
+  // Ensure local admin content cache is refreshed immediately upon opening the Content Management tab
+  useEffect(() => {
+    if (typeof refreshLocalContent === 'function') {
+      refreshLocalContent();
+    }
+  }, [refreshLocalContent]);
 
   const [isSyncingFromFirestore, setIsSyncingFromFirestore] = useState(false);
   const [isGithubModalOpen, setIsGithubModalOpen] = useState(false);

@@ -2159,8 +2159,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         updates.photoURL = result.user.photoURL || "";
         updates.provider = "google.com";
         updates.isGoogleUser = true;
-        updates.createdAt = new Date().toISOString();
-        updates.updatedAt = new Date().toISOString();
+        updates.createdAt = getUtcVersion();
+        updates.updatedAt = getUtcVersion();
         updates.sessionId = localSessionId;
       }
 
@@ -2951,10 +2951,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Save local first!
-      const nowIso = new Date().toISOString();
+      const nowUtc = getUtcVersion();
       data.uid = user.uid;
-      data.lastActive = nowIso;
-      data.updatedAt = nowIso;
+      data.lastActive = nowUtc;
+      data.updatedAt = nowUtc;
 
       if (data.expiryDate && data.expiryDate !== "Lifetime") {
         if (!isUserExpired(data.expiryDate) && data.status !== "suspended" && data.status !== "pending") {

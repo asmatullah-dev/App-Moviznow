@@ -136,9 +136,7 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
       updatesToPush.preferredLanguage = currentLang;
     }
 
-    const nowIso = new Date().toISOString();
-    updatesToPush.lastActive = nowIso;
-    updatesToPush.updatedAt = serverTimestamp();
+    updatesToPush.lastActive = nowUtc;
 
     if (!navigator.onLine) {
       safeStorage.setItem('needs_user_sync', 'true');
@@ -189,7 +187,7 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
       safeStorage.setItem(`profile_version_${currentUserUid}`, nowUtc);
 
       if (currentProfile) {
-        const localUpdates = { ...updatesToPush, updatedAt: nowIso };
+        const localUpdates = { ...updatesToPush };
         const updatedProfile = { ...currentProfile, ...localUpdates };
         const json = JSON.stringify(updatedProfile);
         safeStorage.setItem('profile_cache', json);
