@@ -9,7 +9,7 @@ const DEFAULT_FIREBASE_CONFIG = {
   firestoreDatabaseId: "moviznow-app",
   appId: "1:460140141169:web:c906282a0ae274657799d0",
   apiKey: "AIzaSyBogF7pfzJOkkIKu0190KurpQKIgDJ0CAg",
-  authDomain: "app-moviznow.firebaseapp.com",
+  authDomain: "auth.moviznow.com",
   storageBucket: "app-moviznow.firebasestorage.app",
   messagingSenderId: "460140141169",
   measurementId: "G-JFWSRZ18PK",
