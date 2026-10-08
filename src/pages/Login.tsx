@@ -351,6 +351,24 @@ export default function Login() {
     setCustomError(null);
     setIsLoggingIn(true);
     try {
+      const isGoogleUser = Boolean(
+        registeredUser.provider === 'google.com' ||
+        (registeredUser as any).isGoogleUser === true ||
+        (registeredUser as any).providerId === 'google.com' ||
+        (Array.isArray((registeredUser as any).providerData) && (registeredUser as any).providerData.some((p: any) => p?.providerId === 'google.com'))
+      );
+      if (!isGoogleUser) {
+        const phoneToCheck = registeredUser.phone || (registeredUser.email?.toLowerCase().endsWith('@moviznow.com') ? registeredUser.email.split('@')[0] : '');
+        if (phoneToCheck) {
+          const isWhitelisted = await isPhoneWhitelisted(phoneToCheck, true);
+          if (!isWhitelisted) {
+            setCustomError("This WhatsApp number is not authorized. Please contact admin.");
+            setIsLoggingIn(false);
+            return;
+          }
+        }
+      }
+
       // If they logged in with phone, we use the dummy email or their real email if linked
       const loginEmail = registeredUser.email || `${identifier.replace('+', '')}@moviznow.com`;
       await signInWithEmail(loginEmail, password);

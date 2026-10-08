@@ -71,6 +71,7 @@ import {
   CheckCircle2,
   Check,
   CheckCheck,
+  RotateCcw,
 } from "lucide-react";
 import {
   isSubscribedToUpcoming,
@@ -82,6 +83,7 @@ import { touchMetadataUsage } from "../../services/cacheManager";
 import AlertModal from "../../components/AlertModal";
 import ConfirmModal from "../../components/ConfirmModal";
 import SharePreviewModal from "../../components/SharePreviewModal";
+import PlayerFU, { PlayerFUButton, usePlayerFU } from "../../components/PlayerFU";
 import { clsx } from "clsx";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -330,6 +332,7 @@ export default function MovieDetails() {
   const [isLightboxImageLoading, setIsLightboxImageLoading] = useState(true);
   const [isTrailerPopupOpen, setIsTrailerPopupOpen] = useState(false);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = useState(false);
+  const [isPlayerOpen, setIsPlayerOpen] = useState<boolean>(false);
   const [showRatePrompt, setShowRatePrompt] = useState(false);
   const [showReportConfirm, setShowReportConfirm] = useState(false);
   const [pendingReportTarget, setPendingReportTarget] = useState<{ link: any; contextTitle?: string } | null>(null);
@@ -451,6 +454,7 @@ export default function MovieDetails() {
   );
   useModalBehavior(linkPopup?.isOpen || false, () => setLinkPopup(null));
   useModalBehavior(isPosterExpanded, () => setIsPosterExpanded(false));
+  useModalBehavior(isPlayerOpen, () => setIsPlayerOpen(false));
 
   const hasLoggedView = useRef(false);
   const navigate = useNavigate();
@@ -766,6 +770,9 @@ export default function MovieDetails() {
   }, [content, cachedMetadata, fullContent, id, contentLoading, isOffline]);
 
   const { rating: hookRating, ottPlatform: hookOtt } = useImdbRating(mergedContent);
+
+  // Stream availability & IMDb lookup managed cleanly via PlayerFU hook
+  const { isAvailable: isStreamAvailable, currentImdbId } = usePlayerFU(mergedContent);
 
   const loadTmdbImagesForGallery = async () => {
     if (!mergedContent || loadingTmdbGallery) {
@@ -3022,6 +3029,57 @@ export default function MovieDetails() {
                   );
                 })()}
 
+                {/* Instant Play Movie Stream Button - PlayerFU */}
+                {isStreamAvailable && (
+                  <PlayerFUButton
+                    onClick={() => {
+                      if (!profile) {
+                        setShowLoginPrompt(true);
+                        return;
+                      }
+                      if (!canPlay) {
+                        if (mergedContent?.status === "selected_content") {
+                          setAlertConfig({
+                            isOpen: true,
+                            title: t("Content Locked"),
+                            message: t("You don't have access to this content. Contact Admin."),
+                          });
+                        } else if (isPending) {
+                          setAlertConfig({
+                            isOpen: true,
+                            title: t("Account Pending"),
+                            message: t("Your account activation is pending. Please Get Membership or Add any content to cart to activate your account."),
+                          });
+                        } else if (isExpired) {
+                          setAlertConfig({
+                            isOpen: true,
+                            title: profile?.role === "trial" ? t("Trial Expired") : t("Membership Expired"),
+                            message: profile?.role === "trial"
+                              ? t("Your free Trial has expired. Please get Membership to continue watching.")
+                              : t("Your membership has expired. Please renew to continue watching."),
+                          });
+                        } else {
+                          setAlertConfig({
+                            isOpen: true,
+                            title: t("Content Locked"),
+                            message: t("This content is locked. Please contact admin to get access to this movie/series."),
+                          });
+                        }
+                        return;
+                      }
+                      setIsPlayerOpen(true);
+                      trackStreamAndCheckRate();
+                      if (profile?.uid && mergedContent) {
+                        logEvent("link_click", profile.uid, {
+                          contentId: mergedContent.id,
+                          contentTitle: mergedContent.title,
+                          linkName: "Instant Stream Play",
+                        });
+                      }
+                    }}
+                  />
+                )}
+
                 {(mergedContent.trailerUrl ||
                   (mergedContent.type === "series" &&
                     seasons.some((s) => s.trailerUrl))) && (
@@ -4926,6 +4984,14 @@ export default function MovieDetails() {
             </div>
           )}
       </AnimatePresence>
+
+      {/* PlayerFU Stream Modal */}
+      <PlayerFU
+        isOpen={isPlayerOpen}
+        onClose={() => setIsPlayerOpen(false)}
+        content={mergedContent}
+        imdbId={currentImdbId}
+      />
       
       <ConfirmModal
         isOpen={showLoginPrompt}

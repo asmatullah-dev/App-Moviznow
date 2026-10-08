@@ -1162,7 +1162,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             let isWhitelisted = false;
             if (phoneToCheck) {
               const standardized = standardizePhone(phoneToCheck);
-              isWhitelisted = await isPhoneWhitelisted(standardized);
+              isWhitelisted = await isPhoneWhitelisted(standardized, true);
             }
 
             // Not logged in by Google / missing gmail AND phone number is not whitelisted

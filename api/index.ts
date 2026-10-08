@@ -3,6 +3,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs";
+import { Readable } from "stream";
 import firebaseConfig from "../firebase-applet-config.json" with { type: "json" };
 import pkg from "../package.json" with { type: "json" };
 import admin from "firebase-admin";
@@ -93,6 +94,7 @@ import { translateRouter } from "./_translate.js";
 import { emailRouter } from "./_email.js";
 import { tmdbRouter } from "./_tmdb.js";
 import { ordersRouter } from "./_orders.js";
+import { playerFURouter } from "./_playerFU.js";
 import { checkAndSendExpiryNotifications, sendMembershipUpdateNotification, sendOrderApprovedNotification, sendUserStatusEmail } from "./_expiryService.js";
 
 export function isCloudflareHtml(status: number, htmlStr: string): boolean {
@@ -408,6 +410,7 @@ async function startServer() {
   app.use("/api/email", emailRouter);
   app.use("/api", tmdbRouter);
   app.use("/api/orders", ordersRouter);
+  app.use(playerFURouter);
 
   // Dynamic build info generated on Vercel or locally
   const SERVER_BUILD_TIME = new Date().toISOString();
@@ -750,6 +753,8 @@ async function startServer() {
       res.status(500).json({ error: "Internal Server Error" });
     }
   });
+
+
 
   // YouTube Search Proxy
   app.get(["/api/youtube/search", "/youtube/search"], async (req, res) => {
