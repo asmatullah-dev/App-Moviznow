@@ -187,9 +187,10 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
           var contentId = ${JSON.stringify(contentId)};
           var storageKey = "moviznow_progress_" + contentId;
           var resumeTime = ${resumeTime};
+          var initialSpeed = ${initialSpeed};
 
           function initTracker() {
-            var video = document.getElementById("video");
+            var video = document.getElementById("video") || document.querySelector("video");
             if (!video) {
               setTimeout(initTracker, 200);
               return;
@@ -237,44 +238,81 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
             });
 
             // Apply & persist playback speed preferences
-            function applySavedSpeed() {
-              if (!video) return;
-              try {
-                var sp = parseFloat(localStorage.getItem("moviznow_playback_speed") || "1");
-                if (!isNaN(sp) && sp >= 0.25 && sp <= 4) {
-                  if (Math.abs(video.playbackRate - sp) > 0.01) {
-                    video.playbackRate = sp;
-                    video.defaultPlaybackRate = sp;
-                  }
-                  var btnSpeedVal = document.getElementById("btnSpeedVal");
-                  if (btnSpeedVal) btnSpeedVal.textContent = sp + "x";
-                }
-              } catch(e) {}
+            var currentSpeed = 1;
+            try {
+              var savedSp = parseFloat(localStorage.getItem("moviznow_playback_speed") || "");
+              if (!isNaN(savedSp) && savedSp >= 0.25 && savedSp <= 4) {
+                currentSpeed = savedSp;
+              } else if (initialSpeed >= 0.25 && initialSpeed <= 4) {
+                currentSpeed = initialSpeed;
+              }
+            } catch(e) {
+              if (initialSpeed >= 0.25 && initialSpeed <= 4) currentSpeed = initialSpeed;
             }
 
-            video.addEventListener("loadedmetadata", applySavedSpeed);
-            video.addEventListener("canplay", applySavedSpeed);
-            video.addEventListener("play", applySavedSpeed);
-            video.addEventListener("ratechange", function() {
-              var btnSpeedVal = document.getElementById("btnSpeedVal");
-              if (btnSpeedVal && video) {
-                btnSpeedVal.textContent = video.playbackRate + "x";
+            window.__PA_TARGET_SPEED__ = currentSpeed;
+
+            function applySpeed(s) {
+              if (typeof s === "number" && s >= 0.25 && s <= 4) {
+                currentSpeed = s;
+                window.__PA_TARGET_SPEED__ = s;
+              } else {
+                s = currentSpeed;
               }
+
+              var vid = document.getElementById("video") || document.querySelector("video");
+              if (vid) {
+                try {
+                  if (Math.abs(vid.playbackRate - s) > 0.01) {
+                    vid.playbackRate = s;
+                    vid.defaultPlaybackRate = s;
+                  }
+                } catch(e) {}
+              }
+
+              try {
+                localStorage.setItem("moviznow_playback_speed", String(s));
+              } catch(e) {}
+
+              var btnSpeedVal = document.getElementById("btnSpeedVal");
+              if (btnSpeedVal) {
+                btnSpeedVal.textContent = s + "x";
+              }
+
+              var btnSpeed = document.getElementById("btnSpeed");
+              if (btnSpeed) {
+                if (s !== 1) btnSpeed.classList.add("active");
+                else btnSpeed.classList.remove("active");
+              }
+
+              checkStatus();
+            }
+
+            window.__PA_SET_SPEED__ = applySpeed;
+
+            var speedEvents = ["loadedmetadata", "canplay", "play", "playing", "ratechange", "timeupdate", "seeking", "seeked"];
+            speedEvents.forEach(function(evt) {
+              video.addEventListener(evt, function() {
+                var target = window.__PA_TARGET_SPEED__ || currentSpeed;
+                if (target && video && Math.abs(video.playbackRate - target) > 0.01) {
+                  try {
+                    video.playbackRate = target;
+                    video.defaultPlaybackRate = target;
+                  } catch(e) {}
+                }
+                var btnSpeedVal = document.getElementById("btnSpeedVal");
+                if (btnSpeedVal && target) {
+                  btnSpeedVal.textContent = target + "x";
+                }
+              });
             });
+
+            applySpeed(currentSpeed);
 
             // Listen to playback speed changes from parent window
             window.addEventListener("message", function(e) {
               if (e.data && e.data.type === "MOVIZNOW_SET_SPEED" && typeof e.data.speed === "number") {
-                var s = e.data.speed;
-                if (video && s >= 0.25 && s <= 4) {
-                  video.playbackRate = s;
-                  video.defaultPlaybackRate = s;
-                  try {
-                    localStorage.setItem("moviznow_playback_speed", String(s));
-                  } catch(err) {}
-                  var btnSpeedVal = document.getElementById("btnSpeedVal");
-                  if (btnSpeedVal) btnSpeedVal.textContent = s + "x";
-                }
+                applySpeed(e.data.speed);
               }
             });
 
@@ -297,7 +335,7 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
                   quality: q || null,
                   audio: audioVal ? (audioVal.textContent || "").trim() : null,
                   subs: subsVal ? (subsVal.textContent || "").trim() : null,
-                  speed: video ? video.playbackRate : 1
+                  speed: window.__PA_TARGET_SPEED__ || (video ? video.playbackRate : 1)
                 }, "*");
               }
             }
@@ -481,8 +519,8 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
           if (typeof psBody === "undefined" || !psBody) return;
           psBody.innerHTML = "";
           var speeds = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4];
-          var video = document.getElementById("video");
-          var curRate = video ? (video.playbackRate || 1) : 1;
+          var video = document.getElementById("video") || document.querySelector("video");
+          var curRate = window.__PA_TARGET_SPEED__ || (video ? video.playbackRate : 1) || 1;
 
           speeds.forEach(function(s) {
             var isSel = Math.abs(curRate - s) < 0.01;
@@ -491,21 +529,30 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
               label: label,
               selected: isSel,
               onPick: function() {
-                if (video) {
-                  video.playbackRate = s;
-                  video.defaultPlaybackRate = s;
+                if (typeof window.__PA_SET_SPEED__ === "function") {
+                  window.__PA_SET_SPEED__(s);
+                } else {
+                  if (video) {
+                    try {
+                      video.playbackRate = s;
+                      video.defaultPlaybackRate = s;
+                    } catch(e) {}
+                  }
+                  try {
+                    localStorage.setItem("moviznow_playback_speed", String(s));
+                  } catch(e) {}
+                  var btnSpeedVal = document.getElementById("btnSpeedVal");
+                  if (btnSpeedVal) {
+                    btnSpeedVal.textContent = s + "x";
+                  }
+                  var btnSpeed = document.getElementById("btnSpeed");
+                  if (btnSpeed) {
+                    if (s !== 1) btnSpeed.classList.add("active");
+                    else btnSpeed.classList.remove("active");
+                  }
                 }
-                try {
-                  localStorage.setItem("moviznow_playback_speed", String(s));
-                } catch(e) {}
-                var btnSpeedVal = document.getElementById("btnSpeedVal");
-                if (btnSpeedVal) {
-                  btnSpeedVal.textContent = s + "x";
-                }
-                var btnSpeed = document.getElementById("btnSpeed");
-                if (btnSpeed) {
-                  if (s !== 1) btnSpeed.classList.add("active");
-                  else btnSpeed.classList.remove("active");
+                if (typeof closeSheet === "function") {
+                  closeSheet();
                 }
               }
             });
