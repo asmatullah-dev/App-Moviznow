@@ -18,6 +18,10 @@ export default function AdminLayout() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isLogoutModalOpen, setIsLogoutModalOpen] = useState(false);
   const { users, hasPendingChanges } = useUsers();
+  const isSubdomain = typeof window !== 'undefined' && (
+    window.location.hostname.startsWith('admin.') ||
+    window.location.hostname.includes('admin.moviznow')
+  );
 
   
   const reportedLinksCount = useMemo(() => {
@@ -102,19 +106,35 @@ export default function AdminLayout() {
     <div className="min-h-screen bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white flex flex-col md:flex-row transition-colors duration-300">
       {/* Mobile Header */}
       <div className="md:hidden sticky top-0 z-40 h-16 flex items-center justify-between p-4 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 transition-colors duration-300">
-        <Link to="/" className="flex items-center gap-2">
-          <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-8 block dark:hidden" />
-          <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-8 hidden dark:block" />
-          <span className="ml-2 text-sm font-bold text-emerald-500 tracking-tighter whitespace-nowrap">
-            {settings?.headerText || 'MovizNow'}
-          </span>
-          <span className="ml-2 text-xs font-normal text-zinc-500 uppercase tracking-widest whitespace-nowrap">
-            {profile?.role === 'user_manager' ? 'User Manager' : 
-             profile?.role === 'content_manager' ? 'Content Manager' : 
-             profile?.role === 'manager' ? 'Manager' : 
-             profile?.role === 'owner' ? 'Owner' : 'Admin'}
-          </span>
-        </Link>
+        {isSubdomain ? (
+          <a href="https://moviznow.com" className="flex items-center gap-2">
+            <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-8 block dark:hidden" />
+            <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-8 hidden dark:block" />
+            <span className="ml-2 text-sm font-bold text-emerald-500 tracking-tighter whitespace-nowrap">
+              {settings?.headerText || 'MovizNow'}
+            </span>
+            <span className="ml-2 text-xs font-normal text-zinc-500 uppercase tracking-widest whitespace-nowrap">
+              {profile?.role === 'user_manager' ? 'User Manager' : 
+               profile?.role === 'content_manager' ? 'Content Manager' : 
+               profile?.role === 'manager' ? 'Manager' : 
+               profile?.role === 'owner' ? 'Owner' : 'Admin'}
+            </span>
+          </a>
+        ) : (
+          <Link to="/" className="flex items-center gap-2">
+            <img src="/Blacklogo.svg" alt="Logo" className="w-auto h-8 block dark:hidden" />
+            <img src="/Whitelogo.svg" alt="Logo" className="w-auto h-8 hidden dark:block" />
+            <span className="ml-2 text-sm font-bold text-emerald-500 tracking-tighter whitespace-nowrap">
+              {settings?.headerText || 'MovizNow'}
+            </span>
+            <span className="ml-2 text-xs font-normal text-zinc-500 uppercase tracking-widest whitespace-nowrap">
+              {profile?.role === 'user_manager' ? 'User Manager' : 
+               profile?.role === 'content_manager' ? 'Content Manager' : 
+               profile?.role === 'manager' ? 'Manager' : 
+               profile?.role === 'owner' ? 'Owner' : 'Admin'}
+            </span>
+          </Link>
+        )}
         {(profile?.role === 'admin' || profile?.role === 'owner') ? (
           <button 
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -168,13 +188,23 @@ export default function AdminLayout() {
         </div>
 
         <nav className="flex-1 px-4 py-4 md:py-0 space-y-2 overflow-y-auto">
-          <Link
-            to="/"
-            className="flex items-center gap-3 px-4 py-3 rounded-xl transition-colors font-medium text-emerald-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 mb-4 border border-emerald-500/20"
-          >
-            <Film className="w-5 h-5" />
-            Back to App
-          </Link>
+          {isSubdomain ? (
+            <a
+              href="https://moviznow.com"
+              className="flex items-center gap-3 px-4 py-3 rounded-xl transition-colors font-medium text-emerald-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 mb-4 border border-emerald-500/20"
+            >
+              <Film className="w-5 h-5" />
+              Visit Main Website
+            </a>
+          ) : (
+            <Link
+              to="/"
+              className="flex items-center gap-3 px-4 py-3 rounded-xl transition-colors font-medium text-emerald-500 hover:bg-zinc-200 dark:hover:bg-zinc-800 mb-4 border border-emerald-500/20"
+            >
+              <Film className="w-5 h-5" />
+              Back to App
+            </Link>
+          )}
           
           {sortedNavItems.map((item) => {
             const Icon = item.icon;

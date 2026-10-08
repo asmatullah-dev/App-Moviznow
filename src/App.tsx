@@ -250,6 +250,10 @@ import { runPeriodicCacheCleanup } from "./services/cacheManager";
 
 export default function App() {
   const [isMediaModalOpen, setIsMediaModalOpen] = useState(false);
+  const isAdminSubdomain = typeof window !== 'undefined' && (
+    window.location.hostname.startsWith('admin.') ||
+    window.location.hostname.includes('admin.moviznow')
+  );
 
   useGlobalButtonHaptics();
 
@@ -312,8 +316,42 @@ export default function App() {
                         <Route path="/install" element={<InstallApp />} />
                         <Route path="/unsubscribe" element={<Unsubscribe />} />
                         
-                        {/* User Routes */}
-                        <Route path="/" element={<ProtectedRoute><Home onOpenMediaModal={() => setIsMediaModalOpen(true)} /></ProtectedRoute>} />
+                        {/* Direct Subdomain Aliases for admin.moviznow.com */}
+                        {isAdminSubdomain && (
+                          <>
+                            <Route path="/content" element={<Navigate to="/admin/content" replace />} />
+                            <Route path="/analytics" element={<Navigate to="/admin/analytics" replace />} />
+                            <Route path="/orders" element={<Navigate to="/admin/orders" replace />} />
+                            <Route path="/collections" element={<Navigate to="/admin/collections" replace />} />
+                            <Route path="/genres" element={<Navigate to="/admin/genres" replace />} />
+                            <Route path="/languages" element={<Navigate to="/admin/languages" replace />} />
+                            <Route path="/qualities" element={<Navigate to="/admin/qualities" replace />} />
+                            <Route path="/users" element={<Navigate to="/admin/users" replace />} />
+                            <Route path="/user-managers" element={<Navigate to="/admin/user-managers" replace />} />
+                            <Route path="/selected-content" element={<Navigate to="/admin/selected-content" replace />} />
+                            <Route path="/income" element={<Navigate to="/admin/income" replace />} />
+                            <Route path="/error-links" element={<Navigate to="/admin/error-links" replace />} />
+                            <Route path="/reported-links" element={<Navigate to="/admin/reported-links" replace />} />
+                            <Route path="/notifications" element={<Navigate to="/admin/notifications" replace />} />
+                            <Route path="/requests" element={<Navigate to="/admin/requests" replace />} />
+                            <Route path="/sync" element={<Navigate to="/admin/sync" replace />} />
+                            <Route path="/admin-settings" element={<Navigate to="/admin/settings" replace />} />
+                          </>
+                        )}
+
+                        {/* User Routes - On admin.moviznow.com, "/" directly opens Admin Dashboard */}
+                        <Route
+                          path="/"
+                          element={
+                            isAdminSubdomain ? (
+                              <Navigate to="/admin/content" replace />
+                            ) : (
+                              <ProtectedRoute>
+                                <Home onOpenMediaModal={() => setIsMediaModalOpen(true)} />
+                              </ProtectedRoute>
+                            )
+                          }
+                        />
                         <Route path="/:id" element={<ProtectedRoute><MovieDetails /></ProtectedRoute>} />
                         <Route path="/movie/:id" element={<ProtectedRoute><MovieDetails /></ProtectedRoute>} />
                         <Route path="/series/:id" element={<ProtectedRoute><MovieDetails /></ProtectedRoute>} />
