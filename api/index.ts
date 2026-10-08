@@ -361,7 +361,7 @@ export function extractHtmlPagination(html: string, currentUrl: string) {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   // Block automated bot scans & probes early to save CPU/memory and stop scanner spam
   app.use((req, res, next) => {
@@ -5268,7 +5268,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     let title = "MovizNow - Premium Movies & Series";
     let description =
       "Watch the latest movies and series on MovizNow. Your ultimate entertainment destination.";
-    let image = `${baseUrl}/moviznow_share_banner.jpg`; // Use our beautiful banner as the default social share preview image
+    let image = `${baseUrl}/moviznow_share_banner.png`; // Use our beautiful banner as the default social share preview image
 
     if (hasRef) {
       title = "Join MovizNow - Premium Movies & Series";
@@ -5917,6 +5917,9 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     app.use(vite.middlewares);
 
     app.get("*", async (req, res, next) => {
+      if (req.path.startsWith("/api/")) {
+        return res.status(404).json({ error: "API route not found" });
+      }
       try {
         const url = req.originalUrl;
         let template = fs.readFileSync(
@@ -5944,10 +5947,15 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     }
     app.use(express.static(distPath, { index: false })); // Disable default index.html serving
 
-    // Explicitly serve PWA files with correct MIME types
-    app.get("/moviznow_share_banner.jpg", (req, res) => {
-      res.sendFile(path.join(distPath, "moviznow_share_banner.jpg"), {
-        headers: { "Content-Type": "image/jpeg" },
+    // Explicitly serve PWA files and share banners with correct MIME types
+    app.get(["/moviznow_share_banner.png", "/moviznow_share_banner.jpg"], (req, res) => {
+      const isPng = req.path.endsWith(".png");
+      let bannerPath = path.join(distPath, "moviznow_share_banner.png");
+      if (!fs.existsSync(bannerPath)) {
+        bannerPath = path.join(process.cwd(), "public", "moviznow_share_banner.png");
+      }
+      res.sendFile(bannerPath, {
+        headers: { "Content-Type": isPng ? "image/png" : "image/jpeg" },
       });
     });
 
@@ -5968,6 +5976,10 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     });
 
     app.get("*", async (req, res) => {
+      // Return 404 JSON for unknown API routes
+      if (req.path.startsWith("/api/")) {
+        return res.status(404).json({ error: "API route not found" });
+      }
       // Return 404 for missing static assets instead of serving index.html
       if (req.path.startsWith("/assets/") || /\.(js|css|json|png|jpg|jpeg|gif|ico|svg|woff2?|ttf|eot)$/i.test(req.path)) {
         return res.status(404).send("Asset not found");

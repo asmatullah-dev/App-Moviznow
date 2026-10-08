@@ -199,10 +199,13 @@ export default function Login() {
       const isEmail = rawTrimmed.includes('@');
       const formatted = formatIdentifier(rawTrimmed);
       
-      // If it is a phone number, ALWAYS enforce whitelist check first
-      if (!isEmail) {
-        const standardizedPhone = standardizePhone(rawTrimmed);
-        const isWhitelisted = await isPhoneWhitelisted(standardizedPhone);
+      // If it is a phone number or a @moviznow.com email, ALWAYS enforce whitelist check first
+      const isMoviznowEmail = rawTrimmed.toLowerCase().endsWith('@moviznow.com');
+      const phoneFromIdentifier = isMoviznowEmail ? rawTrimmed.split('@')[0] : (!isEmail ? rawTrimmed : '');
+
+      if (phoneFromIdentifier) {
+        const standardizedPhone = standardizePhone(phoneFromIdentifier);
+        const isWhitelisted = await isPhoneWhitelisted(standardizedPhone, true);
         
         if (!isWhitelisted) {
           setCustomError(
@@ -263,12 +266,13 @@ export default function Login() {
         const isGoogleFoundUser = Boolean(
           foundUser.provider === 'google.com' ||
           foundUser.isGoogleUser === true ||
-          (foundUser.email && !foundUser.email.endsWith('@moviznow.com') && foundUser.email.includes('@'))
+          foundUser.providerId === 'google.com' ||
+          (Array.isArray(foundUser.providerData) && foundUser.providerData.some((p: any) => p?.providerId === 'google.com'))
         );
-        if (!isGoogleFoundUser && (foundUser.phone || foundUser.email?.endsWith('@moviznow.com'))) {
+        if (!isGoogleFoundUser && (foundUser.phone || foundUser.email?.toLowerCase().endsWith('@moviznow.com'))) {
           const userPhone = foundUser.phone || foundUser.email?.split('@')[0] || '';
           if (userPhone) {
-            const isWhitelisted = await isPhoneWhitelisted(userPhone);
+            const isWhitelisted = await isPhoneWhitelisted(userPhone, true);
             if (!isWhitelisted) {
               setCustomError(
                 <div className="flex flex-col gap-3">
@@ -718,6 +722,21 @@ export default function Login() {
 
                 try {
                   if (!registeredUser || registeredUser.uid.startsWith('pending_')) {
+                    // Pre-validate phone whitelist before proceeding with signup
+                    const cleanId = identifier.trim();
+                    const phonePart = cleanId.toLowerCase().endsWith('@moviznow.com')
+                      ? cleanId.split('@')[0]
+                      : (!cleanId.includes('@') ? cleanId : '');
+                    if (phonePart) {
+                      const std = standardizePhone(phonePart);
+                      const isWhitelisted = await isPhoneWhitelisted(std, true);
+                      if (!isWhitelisted) {
+                        setCustomError("This WhatsApp number is not authorized for account creation. Please contact admin.");
+                        setIsLoggingIn(false);
+                        return;
+                      }
+                    }
+
                     // New user or pending user
                     const dummyEmail = `${identifier.replace(/[^0-9]/g, '')}@moviznow.com`;
                     await signUpWithPhoneAndPassword(identifier, password, displayName, optionalEmail.trim().toLowerCase() || dummyEmail);

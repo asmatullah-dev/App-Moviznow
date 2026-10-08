@@ -73,7 +73,7 @@ interface AuthContextType {
     displayName: string,
     email?: string,
   ) => Promise<void>;
-  isPhoneWhitelisted: (phone: string) => Promise<boolean>;
+  isPhoneWhitelisted: (phone: string, forceFresh?: boolean) => Promise<boolean>;
   whitelistPhoneNumber: (phone: string) => Promise<boolean>;
   unwhitelistPhoneNumber: (phone: string) => Promise<boolean>;
   findUsersByEmailOrPhone: (identifier: string) => Promise<UserProfile[]>;
@@ -2226,9 +2226,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       
       // If logging in with phone-generated email, verify whitelist
-      if (email.endsWith('@moviznow.com')) {
+      if (email.toLowerCase().endsWith('@moviznow.com')) {
         const phonePart = email.split('@')[0];
-        const isWhitelisted = await isPhoneWhitelisted(phonePart);
+        const isWhitelisted = await isPhoneWhitelisted(phonePart, true);
         if (!isWhitelisted) {
           throw new Error("This WhatsApp number is not authorized. Please contact admin.");
         }
@@ -2456,11 +2456,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error("This account is already registered.");
       }
 
-      if (!isEmail) {
-        const isWhitelisted = await isPhoneWhitelisted(standardizedPhone);
+      // Extract phone number to strictly enforce whitelist check (even if entered as an email or dummy email)
+      let phoneToCheck = standardizedPhone;
+      if (!phoneToCheck) {
+        if (identifier.toLowerCase().endsWith('@moviznow.com')) {
+          phoneToCheck = standardizePhone(identifier.split('@')[0]);
+        } else if (signupEmail.toLowerCase().endsWith('@moviznow.com')) {
+          phoneToCheck = standardizePhone(signupEmail.split('@')[0]);
+        }
+      }
+
+      if (phoneToCheck) {
+        const isWhitelisted = await isPhoneWhitelisted(phoneToCheck, true);
         if (!isWhitelisted) {
           throw new Error(
-            "This WhatsApp number is not authorized for new account creation.",
+            "This WhatsApp number is not authorized for new account creation. Please contact admin.",
           );
         }
       }
@@ -2556,14 +2566,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const isPhoneWhitelisted = async (phone: string): Promise<boolean> => {
+  const isPhoneWhitelisted = async (phone: string, forceFresh = false): Promise<boolean> => {
     const standardizedPhone = standardizePhone(phone);
     if (!standardizedPhone) return false;
     const stdDigits = standardizedPhone.replace(/\D/g, "");
     const last10 = stdDigits.slice(-10);
 
+    const checkMatch = (list: string[]) => {
+      if (!list || list.length === 0) return false;
+      return list.some((n: any) => {
+        if (!n || typeof n !== "string") return false;
+        const stdN = standardizePhone(n);
+        if (stdN && stdN === standardizedPhone) return true;
+        const nDigits = n.replace(/\D/g, "");
+        if (nDigits.slice(-10) === last10 && last10.length === 10) return true;
+        return n.trim() === phone.trim() || n.trim() === standardizedPhone;
+      });
+    };
+
     try {
-      // Check memory/local cache first (30-minute TTL) to avoid burning Firestore reads on every check
       const CACHE_KEY = 'cached_whitelisted_phones_doc';
       const CACHE_TIME_KEY = 'cached_whitelisted_phones_time';
       const cachedStr = safeStorage.getItem(CACHE_KEY);
@@ -2571,34 +2592,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const now = Date.now();
 
       let numbers: string[] = [];
-      if (cachedStr && (now - cachedTime < 30 * 60 * 1000)) {
+      if (!forceFresh && cachedStr && (now - cachedTime < 30 * 60 * 1000)) {
         try {
           numbers = JSON.parse(cachedStr);
         } catch (e) {}
       }
 
-      if (!numbers || numbers.length === 0) {
-        // Fetch from Firestore only when cache expired or empty
-        const docRef = doc(db, "settings", "whitelisted_phones");
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          numbers = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
-          safeStorage.setItem(CACHE_KEY, JSON.stringify(numbers));
-          safeStorage.setItem(CACHE_TIME_KEY, now.toString());
-        }
+      // If matched in cached list, immediately return true
+      if (numbers && numbers.length > 0 && checkMatch(numbers)) {
+        return true;
       }
 
-      if (numbers && numbers.length > 0) {
-        return numbers.some((n: any) => {
-          if (!n || typeof n !== "string") return false;
-          const stdN = standardizePhone(n);
-          if (stdN && stdN === standardizedPhone) return true;
-          const nDigits = n.replace(/\D/g, "");
-          if (nDigits.slice(-10) === last10 && last10.length === 10) return true;
-          return n.trim() === phone.trim() || n.trim() === standardizedPhone;
-        });
+      // If not matched in cache or forceFresh requested, query Firestore fresh
+      const docRef = doc(db, "settings", "whitelisted_phones");
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const freshNumbers = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
+        safeStorage.setItem(CACHE_KEY, JSON.stringify(freshNumbers));
+        safeStorage.setItem(CACHE_TIME_KEY, now.toString());
+        return checkMatch(freshNumbers);
       }
+
       return false;
     } catch (err) {
       console.error("Error checking whitelisted phone:", err);
