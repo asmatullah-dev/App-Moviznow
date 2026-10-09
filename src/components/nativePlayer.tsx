@@ -21,6 +21,7 @@ import {
   Subtitles,
   Mic,
   RefreshCw,
+  Server,
 } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 import { safeStorage } from "../utils/safeStorage";
@@ -104,10 +105,11 @@ export function normalizePixeldrainUrl(url?: string): string {
   if (!url || typeof url !== "string") return "";
   const trimmed = url.trim();
   const uMatch = trimmed.match(
-    /(?:https?:\/\/)?(?:www\.)?(?:pixeldrain\.(?:dev|com|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i
+    /(?:https?:\/\/)?(?:www\.)?(pixeldrain\.(?:dev|com|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i
   );
-  if (uMatch && uMatch[1]) {
-    return `https://pixeldrain.dev/api/file/${uMatch[1]}`;
+  if (uMatch && uMatch[2]) {
+    const host = uMatch[1].toLowerCase().includes("dev") ? "pixeldrain.dev" : "pixeldrain.com";
+    return `https://${host}/api/file/${uMatch[2]}`;
   }
   return trimmed;
 }
@@ -406,30 +408,29 @@ export function NativePlayer({
 
   // Engine: "native" (Universal Codec Transcode Engine) or "web" (HubCloud Web Player)
   const [engine, setEngine] = useState<"native" | "web">("native");
+  const [mediaInfo, setMediaInfo] = useState<MediaProbeInfo | null>(null);
 
-  const isDirectMkvOrPixeldrain = useMemo(() => {
+  const isDirectMkv = useMemo(() => {
     if (!directStreamUrl) return false;
     const lower = directStreamUrl.toLowerCase();
     return (
-      activeServer === "pixeldrain" ||
-      lower.includes("pixeldrain") ||
-      lower.includes("pixel.drain") ||
       lower.includes(".mkv") ||
-      lower.includes("matroska")
+      lower.includes("matroska") ||
+      Boolean(mediaInfo?.isMkv) ||
+      Boolean(mediaInfo?.needsTranscode)
     );
-  }, [directStreamUrl, activeServer]);
+  }, [directStreamUrl, mediaInfo]);
 
-  const [mediaInfo, setMediaInfo] = useState<MediaProbeInfo | null>(null);
   const [streamAttempt, setStreamAttempt] = useState<number>(0);
   const [streamMode, setStreamMode] = useState<"proxy" | "transcode">(() => {
-    return isDirectMkvOrPixeldrain ? "transcode" : "proxy";
+    return isDirectMkv ? "transcode" : "proxy";
   });
 
   useEffect(() => {
-    if (isDirectMkvOrPixeldrain || mediaInfo?.isMkv || mediaInfo?.needsTranscode) {
+    if (isDirectMkv || mediaInfo?.isMkv || mediaInfo?.needsTranscode) {
       setStreamMode("transcode");
     }
-  }, [isDirectMkvOrPixeldrain, mediaInfo]);
+  }, [isDirectMkv, mediaInfo]);
   const [seekOffset, setSeekOffset] = useState<number>(0);
   const [totalDuration, setTotalDuration] = useState<number>(0);
   const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(0);
@@ -504,7 +505,8 @@ export function NativePlayer({
         console.warn("[NativePlayer] FSL Server failed to start playback within 15 seconds. Switching to Pixeldrain Server...");
         showToast(t("FSL server took too long. Switching to Pixeldrain..."));
         setActiveServer("pixeldrain");
-        setStreamMode("transcode");
+        setStreamMode("proxy");
+        setHasPlaybackError(false);
         setStreamAttempt((prev) => prev + 1);
         setIsBuffering(true);
       }
@@ -560,6 +562,26 @@ export function NativePlayer({
   // Construct stream URL with seek offset and audio track
   const currentStreamSrc = useMemo(() => {
     if (!directStreamUrl) return "";
+
+    const requiresTranscode =
+      streamMode === "transcode" ||
+      isDirectMkv ||
+      Boolean(mediaInfo?.isMkv) ||
+      Boolean(mediaInfo?.needsTranscode);
+
+    // If on Pixeldrain and proxy failed on retry (streamAttempt >= 1), only stream directly if file DOES NOT require transcoding
+    // Pixeldrain supports CORS (Access-Control-Allow-Origin: *), completely bypassing serverless limits for native mp4
+    if (
+      !requiresTranscode &&
+      activeServer === "pixeldrain" &&
+      streamAttempt >= 1 &&
+      directStreamUrl.startsWith("http") &&
+      selectedAudioTrack === 0 &&
+      seekOffset === 0
+    ) {
+      return directStreamUrl;
+    }
+
     const params = new URLSearchParams();
     params.set("url", directStreamUrl);
     params.set("mode", streamMode);
@@ -576,7 +598,7 @@ export function NativePlayer({
 
     const apiBase = getStreamingApiBase();
     return `${apiBase}/api/native-player/stream?${params.toString()}`;
-  }, [directStreamUrl, streamMode, seekOffset, selectedAudioTrack, streamAttempt]);
+  }, [directStreamUrl, activeServer, streamMode, seekOffset, selectedAudioTrack, streamAttempt, isDirectMkv, mediaInfo]);
 
   const controlsShownAtRef = useRef<number>(Date.now());
 
@@ -863,18 +885,30 @@ export function NativePlayer({
       console.warn("[NativePlayer] FSL server error encountered. Switching to Pixeldrain Server...");
       showToast(t("FSL server error. Switching to Pixeldrain..."));
       setActiveServer("pixeldrain");
+      const needsTc = isDirectMkv || mediaInfo?.isMkv || mediaInfo?.needsTranscode;
+      setStreamMode(needsTc ? "transcode" : "proxy");
+      setHasPlaybackError(false);
+      setStreamAttempt((prev) => prev + 1);
+      setIsBuffering(true);
+      return;
+    }
+
+    // If proxy failed on Pixeldrain or any stream, escalate to transcode mode before failing!
+    if (streamMode === "proxy") {
+      console.warn("[NativePlayer] Proxy mode failed. Escalating to transcode engine...");
       setStreamMode("transcode");
       setStreamAttempt((prev) => prev + 1);
       setIsBuffering(true);
       return;
     }
-    // If proxy failed, automatically switch to transcode mode (Universal Remux/Transcode Engine) and retry once
-    if (streamMode === "proxy" && streamAttempt === 0) {
-      setStreamMode("transcode");
+
+    // If transcode failed on attempt 0 or 1, retry once
+    if (streamAttempt === 0) {
       setStreamAttempt(1);
       setIsBuffering(true);
       return;
     }
+
     setHasPlaybackError(true);
   };
 
@@ -1328,18 +1362,48 @@ export function NativePlayer({
                   {t("Playback Notice")}
                 </h3>
                 <p className="text-zinc-400 text-xs sm:text-sm max-w-sm mb-6 leading-relaxed">
-                  {t("Video playback encountered a temporary network delay. Tap retry to reconnect.")}
+                  {t("Playback paused due to a temporary network delay. Click Replay or switch Stream Server.")}
                 </p>
-                <div className="flex items-center justify-center">
+                <div className="flex flex-wrap items-center justify-center gap-3">
                   <button
                     type="button"
                     onClick={handleRetryPlayback}
-                    className="p-3.5 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-white rounded-2xl shadow-lg shadow-emerald-500/25 transition-all flex items-center justify-center cursor-pointer"
-                    title={t("Retry")}
-                    aria-label={t("Retry")}
+                    className="px-5 py-3 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-500/25 transition-all flex items-center gap-2 cursor-pointer"
                   >
-                    <RefreshCw className="w-5 h-5" />
+                    <RefreshCw className="w-4 h-4" />
+                    <span>{t("Replay Video")}</span>
                   </button>
+                  {fslCandidate && pixeldrainCandidate && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = activeServer === "fsl" ? "pixeldrain" : "fsl";
+                        setActiveServer(target);
+                        const needsTc = isDirectMkv || mediaInfo?.isMkv || mediaInfo?.needsTranscode;
+                        setStreamMode(target === "pixeldrain" && needsTc ? "transcode" : "proxy");
+                        setHasPlaybackError(false);
+                        setStreamAttempt((p) => p + 1);
+                        setIsBuffering(true);
+                        showToast(t(`Switched to ${target === "fsl" ? "FSL" : "Pixeldrain"} Server`));
+                      }}
+                      className="px-5 py-3 bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-zinc-200 font-bold text-sm rounded-xl border border-zinc-700 transition-all flex items-center gap-2 cursor-pointer"
+                    >
+                      <Server className="w-4 h-4" />
+                      <span>{t("Switch Server")}</span>
+                    </button>
+                  )}
+                  {directStreamUrl && (
+                    <a
+                      href={directStreamUrl}
+                      download
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-5 py-3 bg-zinc-800/80 hover:bg-zinc-700/80 active:scale-95 text-zinc-300 font-semibold text-sm rounded-xl border border-zinc-700/60 transition-all flex items-center gap-2"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>{t("Direct Download")}</span>
+                    </a>
+                  )}
                 </div>
               </div>
             )}
@@ -1401,7 +1465,9 @@ export function NativePlayer({
                       e.stopPropagation();
                       if (activeServer !== "pixeldrain") {
                         setActiveServer("pixeldrain");
-                        setStreamMode("transcode");
+                        const needsTc = isDirectMkv || mediaInfo?.isMkv || mediaInfo?.needsTranscode;
+                        setStreamMode(needsTc ? "transcode" : "proxy");
+                        setHasPlaybackError(false);
                         setStreamAttempt((p) => p + 1);
                         setIsBuffering(true);
                         showToast(t("Switched to Pixeldrain Server"));

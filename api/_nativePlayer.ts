@@ -1,10 +1,52 @@
 import express from "express";
 import { Readable } from "stream";
 import { spawn } from "child_process";
-import { getCachedHubcloudData, isExtractableIntermediate } from "./_LinkExtractionModal.js";
+import { getCachedHubcloudData, isExtractableIntermediate, performExtraction } from "./_LinkExtractionModal.js";
 import { normalizeDomain } from "./_domainUtils.js";
 
 export const nativePlayerRouter = express.Router();
+
+let cachedFfmpegAvailable: boolean | null = null;
+export async function checkFFmpegAvailable(): Promise<boolean> {
+  if (cachedFfmpegAvailable !== null) return cachedFfmpegAvailable;
+  return new Promise((resolve) => {
+    try {
+      const proc = spawn("ffmpeg", ["-version"]);
+      proc.on("error", () => {
+        cachedFfmpegAvailable = false;
+        resolve(false);
+      });
+      proc.on("close", (code) => {
+        cachedFfmpegAvailable = code === 0;
+        resolve(cachedFfmpegAvailable);
+      });
+    } catch {
+      cachedFfmpegAvailable = false;
+      resolve(false);
+    }
+  });
+}
+
+let cachedFfprobeAvailable: boolean | null = null;
+export async function checkFFprobeAvailable(): Promise<boolean> {
+  if (cachedFfprobeAvailable !== null) return cachedFfprobeAvailable;
+  return new Promise((resolve) => {
+    try {
+      const proc = spawn("ffprobe", ["-version"]);
+      proc.on("error", () => {
+        cachedFfprobeAvailable = false;
+        resolve(false);
+      });
+      proc.on("close", (code) => {
+        cachedFfprobeAvailable = code === 0;
+        resolve(cachedFfprobeAvailable);
+      });
+    } catch {
+      cachedFfprobeAvailable = false;
+      resolve(false);
+    }
+  });
+}
 
 export interface NativeStreamData {
   hasWatchOnline: boolean;
@@ -84,10 +126,11 @@ export function normalizePixeldrainUrl(url?: string): string {
   if (!url || typeof url !== "string") return "";
   const trimmed = url.trim();
   const uMatch = trimmed.match(
-    /(?:https?:\/\/)?(?:www\.)?(?:pixeldrain\.(?:dev|com|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i
+    /(?:https?:\/\/)?(?:www\.)?(pixeldrain\.(?:dev|com|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i
   );
-  if (uMatch && uMatch[1]) {
-    return `https://pixeldrain.dev/api/file/${uMatch[1]}`;
+  if (uMatch && uMatch[2]) {
+    const host = uMatch[1].toLowerCase().includes("dev") ? "pixeldrain.dev" : "pixeldrain.com";
+    return `https://${host}/api/file/${uMatch[2]}`;
   }
   return trimmed;
 }
@@ -238,8 +281,7 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
       const isMkv =
         resolvedStreamUrl.includes(".mkv") ||
         url.includes(".mkv") ||
-        url.includes("pixeldrain") ||
-        url.includes("pixel.drain");
+        url.toLowerCase().includes("matroska");
       const result: NativeStreamData = {
         hasWatchOnline: true,
         playable: true,
@@ -248,7 +290,7 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
         directUrl: `/api/native-player/stream?url=${encodeURIComponent(resolvedStreamUrl)}${isMkv ? "&mode=transcode" : ""}`,
         sourceUrl: resolvedStreamUrl,
         title: "Movie Stream",
-        mime: "video/mp4",
+        mime: isMkv ? "video/x-matroska" : "video/mp4",
         quality: "720p",
         candidates: [{ text: "Pixeldrain Server", href: resolvedStreamUrl }],
       };
@@ -290,7 +332,7 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
           ? streamUrl
           : `https://hbplay.pages.dev/?u=${Buffer.from(streamUrl).toString("base64")}&m=${Buffer.from("video/x-matrosk").toString("base64")}&t=${Buffer.from(title).toString("base64")}`;
 
-        const isMkv = streamUrl.includes(".mkv") || streamUrl.includes("pixeldrain");
+        const isMkv = streamUrl.includes(".mkv") || streamUrl.toLowerCase().includes("matroska");
         const result: NativeStreamData = {
           hasWatchOnline: true,
           playable: true,
@@ -309,22 +351,32 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
       }
     }
 
-    // 3. Perform server extraction call
-    const port = process.env.PORT || 3000;
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 12000);
-
+    // 3. Perform server extraction call (in-process direct extraction for Vercel & local support)
     try {
-      const extractRes = await fetch(`http://127.0.0.1:${port}/api/hubcloud/direct-link`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+      let data: any = null;
+      try {
+        data = await performExtraction(url, false, 0, false, false);
+      } catch {
+        const port = process.env.PORT || 3000;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 6000);
+        try {
+          const extractRes = await fetch(`http://127.0.0.1:${port}/api/hubcloud/direct-link`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+            signal: controller.signal,
+          });
+          clearTimeout(timeout);
+          if (extractRes.ok) {
+            data = await extractRes.json();
+          }
+        } catch {
+          clearTimeout(timeout);
+        }
+      }
 
-      if (extractRes.ok) {
-        const data = await extractRes.json();
+      if (data) {
         const fsl = findFslCandidate(data.candidates);
         const pixel = findPixeldrainCandidate(data.candidates);
         const match = findWatchCandidate(data.candidates);
@@ -339,7 +391,7 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
             ? streamUrl
             : `https://hbplay.pages.dev/?u=${Buffer.from(streamUrl).toString("base64")}&m=${Buffer.from("video/x-matrosk").toString("base64")}&t=${Buffer.from(title).toString("base64")}`;
 
-          const isMkv = streamUrl.includes(".mkv") || streamUrl.includes("pixeldrain");
+          const isMkv = streamUrl.includes(".mkv") || streamUrl.toLowerCase().includes("matroska");
           const result: NativeStreamData = {
             hasWatchOnline: true,
             playable: true,
@@ -357,9 +409,7 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
           return res.json(result);
         }
       }
-    } catch {
-      clearTimeout(timeout);
-    }
+    } catch {}
 
     const noResult: NativeStreamData = { hasWatchOnline: false, playable: false };
     checkCache.set(url, { data: noResult, timestamp: Date.now() });
@@ -391,15 +441,24 @@ nativePlayerRouter.get(["/api/native-player/resolve", "/native-player/resolve"],
       });
     }
 
-    const port = process.env.PORT || 3000;
-    const extractRes = await fetch(`http://127.0.0.1:${port}/api/hubcloud/direct-link`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url }),
-    });
+    let data: any = null;
+    try {
+      data = await performExtraction(url, false, 0, false, false);
+    } catch {
+      const port = process.env.PORT || 3000;
+      try {
+        const extractRes = await fetch(`http://127.0.0.1:${port}/api/hubcloud/direct-link`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url }),
+        });
+        if (extractRes.ok) {
+          data = await extractRes.json();
+        }
+      } catch {}
+    }
 
-    if (extractRes.ok) {
-      const data = await extractRes.json();
+    if (data) {
       const fsl = findFslCandidate(data.candidates);
       const pixel = findPixeldrainCandidate(data.candidates);
       const match = findWatchCandidate(data.candidates);
@@ -430,23 +489,74 @@ nativePlayerRouter.get(["/api/native-player/resolve", "/native-player/resolve"],
  */
 nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async (req, res) => {
   try {
-    const targetUrl = ((req.query.url || req.body?.url || "") as string).trim();
-    if (!targetUrl || !targetUrl.startsWith("http")) {
+    const rawTarget = ((req.query.url || req.body?.url || "") as string).trim();
+    if (!rawTarget || !rawTarget.startsWith("http")) {
       return res.status(400).json({ error: "Invalid or missing url" });
     }
+    const targetUrl = normalizePixeldrainUrl(rawTarget) || rawTarget;
 
     const cached = infoCache.get(targetUrl);
     if (cached && Date.now() - cached.timestamp < INFO_CACHE_TTL) {
       return res.json(cached.data);
     }
 
+    let isPixeldrain = false;
+    let pixeldrainId = "";
+    const pdMatch = targetUrl.match(/pixeldrain\.(?:dev|com|net)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i);
+    if (pdMatch && pdMatch[1]) {
+      isPixeldrain = true;
+      pixeldrainId = pdMatch[1];
+    }
+
+    let isMkv = targetUrl.toLowerCase().includes(".mkv") || targetUrl.toLowerCase().includes("matroska");
+    let needsTranscode = isMkv;
+
+    if (isPixeldrain && pixeldrainId) {
+      try {
+        const pdInfoRes = await fetch(`https://pixeldrain.com/api/file/${pixeldrainId}/info`, {
+          signal: AbortSignal.timeout(3000),
+        }).catch(() =>
+          fetch(`https://pixeldrain.dev/api/file/${pixeldrainId}/info`, {
+            signal: AbortSignal.timeout(3000),
+          })
+        );
+        if (pdInfoRes && pdInfoRes.ok) {
+          const pdInfo: any = await pdInfoRes.json();
+          if (
+            pdInfo.mime_type === "video/matroska" ||
+            (pdInfo.name && pdInfo.name.toLowerCase().endsWith(".mkv"))
+          ) {
+            isMkv = true;
+            needsTranscode = true;
+          }
+        }
+      } catch {}
+    }
+
+    const defaultData: MediaProbeInfo = {
+      duration: 0,
+      format: isMkv ? "matroska,webm" : "mp4",
+      videoCodec: isMkv ? "hevc" : "h264",
+      width: 1920,
+      height: 1080,
+      isMkv,
+      audioTracks: [{ id: 0, language: "Stereo", codec: "aac", title: "Audio Track" }],
+      subtitleTracks: [],
+      needsTranscode,
+      playable: true,
+    };
+
+    const hasFfprobe = await checkFFprobeAvailable();
+    if (!hasFfprobe) {
+      // Vercel serverless environment: ffprobe is not installed
+      // Return instant metadata without spawning ffprobe to avoid ENOENT errors
+      infoCache.set(targetUrl, { data: defaultData, timestamp: Date.now() });
+      return res.json(defaultData);
+    }
+
     let referer = "";
     if (targetUrl.includes("hbplay.pages.dev")) {
       referer = "https://hbplay.pages.dev/";
-    } else if (targetUrl.includes("pixeldrain.dev")) {
-      referer = "https://pixeldrain.dev/";
-    } else if (targetUrl.includes("pixeldrain.com")) {
-      referer = "https://pixeldrain.com/";
     }
 
     const headerStr = referer
@@ -465,7 +575,14 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
     let probeTimeout: any = null;
     let finished = false;
 
-    const child = spawn("ffprobe", args);
+    let child: any;
+    try {
+      child = spawn("ffprobe", args);
+    } catch {
+      infoCache.set(targetUrl, { data: defaultData, timestamp: Date.now() });
+      return res.json(defaultData);
+    }
+
     let output = "";
     let errorOutput = "";
 
@@ -480,46 +597,28 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       return res.json(data);
     };
 
+    // Attach child error handler to PREVENT uncaught exceptions on spawn error!
+    child.on("error", (err: any) => {
+      console.warn("[ffprobe spawn error]:", err);
+      finishProbe(defaultData);
+    });
+
     probeTimeout = setTimeout(() => {
-      const isMkv = targetUrl.includes(".mkv") || targetUrl.includes("cloudflarestorage") || targetUrl.includes("matroska");
-      finishProbe({
-        duration: 0,
-        format: isMkv ? "matroska,webm" : "mp4",
-        videoCodec: "h264",
-        width: 1280,
-        height: 720,
-        isMkv,
-        audioTracks: [{ id: 0, language: "Stereo", codec: "aac", title: "Audio Track" }],
-        subtitleTracks: [],
-        needsTranscode: false,
-        playable: true,
-      });
+      finishProbe(defaultData);
     }, 5000);
 
-    child.stdout.on("data", (d) => {
+    child.stdout.on("data", (d: any) => {
       output += d.toString();
     });
 
-    child.stderr.on("data", (d) => {
+    child.stderr.on("data", (d: any) => {
       errorOutput += d.toString();
     });
 
-    child.on("close", (code) => {
+    child.on("close", (code: number) => {
       if (code !== 0 || !output) {
         console.warn("[ffprobe exit code]:", code, errorOutput.slice(0, 200));
-        const isMkv = targetUrl.includes(".mkv") || targetUrl.includes("cloudflarestorage") || targetUrl.includes("matroska");
-        return finishProbe({
-          duration: 0,
-          format: isMkv ? "matroska,webm" : "mp4",
-          videoCodec: "h264",
-          width: 1280,
-          height: 720,
-          isMkv,
-          audioTracks: [{ id: 0, language: "Default", codec: "aac", title: "Audio Track" }],
-          subtitleTracks: [],
-          needsTranscode: false,
-          playable: true,
-        });
+        return finishProbe(defaultData);
       }
 
       try {
@@ -533,9 +632,7 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
           formatName.includes("matroska") ||
           formatName.includes("webm") ||
           targetUrl.includes(".mkv") ||
-          targetUrl.includes("cloudflarestorage") ||
-          targetUrl.includes("pixeldrain") ||
-          targetUrl.includes("pixel.drain");
+          targetUrl.includes("cloudflarestorage");
         const vCodec = (videoStream?.codec_name || "").toLowerCase();
         const duration = parseFloat(meta.format?.duration || "0") || 0;
 
@@ -678,9 +775,15 @@ const subtitleCuesCache = new Map<string, { cues: Array<{ start: number; end: nu
  */
 nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitles"], async (req, res) => {
   try {
-    const targetUrl = (req.query.url as string || "").trim();
-    if (!targetUrl || !targetUrl.startsWith("http")) {
+    const rawTarget = (req.query.url as string || "").trim();
+    if (!rawTarget || !rawTarget.startsWith("http")) {
       return res.status(400).json({ error: "Invalid stream URL", cues: [] });
+    }
+    const targetUrl = normalizePixeldrainUrl(rawTarget) || rawTarget;
+
+    const hasFFmpeg = await checkFFmpegAvailable();
+    if (!hasFFmpeg) {
+      return res.json({ ok: true, cues: [] });
     }
 
     const subIdx = parseInt((req.query.sub as string) || "0", 10) || 0;
@@ -693,10 +796,6 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
     let referer = "";
     if (targetUrl.includes("hbplay.pages.dev")) {
       referer = "https://hbplay.pages.dev/";
-    } else if (targetUrl.includes("pixeldrain.dev")) {
-      referer = "https://pixeldrain.dev/";
-    } else if (targetUrl.includes("pixeldrain.com")) {
-      referer = "https://pixeldrain.com/";
     }
 
     const subHeaders = referer
@@ -713,12 +812,17 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
       "pipe:1"
     ];
 
-    const child = spawn("ffmpeg", ffmpegArgs, {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+    let child: any;
+    try {
+      child = spawn("ffmpeg", ffmpegArgs, {
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+    } catch {
+      return res.json({ ok: false, cues: [] });
+    }
 
     let vttText = "";
-    child.stdout.on("data", (chunk) => {
+    child.stdout.on("data", (chunk: any) => {
       vttText += chunk.toString();
     });
 
@@ -728,7 +832,7 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
       return res.json({ ok: true, cues });
     });
 
-    child.on("error", (err) => {
+    child.on("error", (err: any) => {
       console.warn("[FFmpeg subtitle extraction error]:", err);
       return res.json({ ok: false, cues: [] });
     });
@@ -746,28 +850,30 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
 /**
  * Fallback raw WebVTT stream endpoint
  */
-nativePlayerRouter.get(["/api/native-player/subtitle", "/native-player/subtitle"], (req, res) => {
+nativePlayerRouter.get(["/api/native-player/subtitle", "/native-player/subtitle"], async (req, res) => {
   try {
-    const targetUrl = (req.query.url as string || "").trim();
-    if (!targetUrl || !targetUrl.startsWith("http")) {
+    const rawTarget = (req.query.url as string || "").trim();
+    if (!rawTarget || !rawTarget.startsWith("http")) {
       return res.status(400).send("Invalid stream URL");
     }
-
-    const subIdx = parseInt((req.query.sub as string) || "0", 10) || 0;
-    const ss = parseFloat((req.query.ss as string) || "0") || 0;
+    const targetUrl = normalizePixeldrainUrl(rawTarget) || rawTarget;
 
     res.setHeader("Content-Type", "text/vtt; charset=utf-8");
     res.setHeader("Content-Disposition", "inline");
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "no-cache");
 
+    const hasFFmpeg = await checkFFmpegAvailable();
+    if (!hasFFmpeg) {
+      return res.send("WEBVTT\n\n");
+    }
+
+    const subIdx = parseInt((req.query.sub as string) || "0", 10) || 0;
+    const ss = parseFloat((req.query.ss as string) || "0") || 0;
+
     let referer = "";
     if (targetUrl.includes("hbplay.pages.dev")) {
       referer = "https://hbplay.pages.dev/";
-    } else if (targetUrl.includes("pixeldrain.dev")) {
-      referer = "https://pixeldrain.dev/";
-    } else if (targetUrl.includes("pixeldrain.com")) {
-      referer = "https://pixeldrain.com/";
     }
 
     const subHeaders = referer
@@ -791,9 +897,14 @@ nativePlayerRouter.get(["/api/native-player/subtitle", "/native-player/subtitle"
       "pipe:1"
     );
 
-    const child = spawn("ffmpeg", ffmpegArgs, {
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+    let child: any;
+    try {
+      child = spawn("ffmpeg", ffmpegArgs, {
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+    } catch {
+      return res.send("WEBVTT\n\n");
+    }
 
     child.stdout.pipe(res);
 
@@ -804,7 +915,7 @@ nativePlayerRouter.get(["/api/native-player/subtitle", "/native-player/subtitle"
     });
 
     child.on("error", () => {
-      if (!res.headersSent) res.status(500).send("Subtitle error");
+      if (!res.headersSent) res.send("WEBVTT\n\n");
     });
   } catch (err: any) {
     if (!res.headersSent) res.status(500).send("Subtitle error");
@@ -814,15 +925,13 @@ nativePlayerRouter.get(["/api/native-player/subtitle", "/native-player/subtitle"
 /**
  * Helper to stream media directly via HTTP byte ranges (supports instant seek, 0 CPU overhead)
  */
-async function streamViaProxy(targetUrl: string, req: express.Request, res: express.Response) {
+async function streamViaProxy(rawTargetUrl: string, req: express.Request, res: express.Response) {
   try {
+    let targetUrl = normalizePixeldrainUrl(rawTargetUrl) || rawTargetUrl;
+
     let referer = "";
     if (targetUrl.includes("hbplay.pages.dev")) {
       referer = "https://hbplay.pages.dev/";
-    } else if (targetUrl.includes("pixeldrain.dev")) {
-      referer = "https://pixeldrain.dev/";
-    } else if (targetUrl.includes("pixeldrain.com")) {
-      referer = "https://pixeldrain.com/";
     }
 
     const forwardHeaders: Record<string, string> = {
@@ -839,18 +948,58 @@ async function streamViaProxy(targetUrl: string, req: express.Request, res: expr
       forwardHeaders["Range"] = req.headers.range as string;
     }
 
-    let upstreamRes = await fetch(targetUrl, {
-      method: req.method,
-      headers: forwardHeaders,
-    });
+    let upstreamRes: Response | null = null;
+    let fetchError: any = null;
 
-    // If upstream returned 403 or 401 with referer, retry without referer
-    if ((upstreamRes.status === 403 || upstreamRes.status === 401) && forwardHeaders["Referer"]) {
-      delete forwardHeaders["Referer"];
+    try {
       upstreamRes = await fetch(targetUrl, {
-        method: req.method,
+        method: req.method === "HEAD" ? "HEAD" : "GET",
         headers: forwardHeaders,
       });
+    } catch (err: any) {
+      fetchError = err;
+    }
+
+    // If Pixeldrain request failed or gave an error (status >= 400), try the alternate domain (.dev <-> .com)
+    if (!upstreamRes || upstreamRes.status >= 400) {
+      let alternateUrl = "";
+      if (targetUrl.includes("pixeldrain.dev")) {
+        alternateUrl = targetUrl.replace("pixeldrain.dev", "pixeldrain.com");
+      } else if (targetUrl.includes("pixeldrain.com")) {
+        alternateUrl = targetUrl.replace("pixeldrain.com", "pixeldrain.dev");
+      }
+
+      if (alternateUrl && alternateUrl !== targetUrl) {
+        try {
+          const altRes = await fetch(alternateUrl, {
+            method: req.method === "HEAD" ? "HEAD" : "GET",
+            headers: forwardHeaders,
+          });
+          if (altRes && (altRes.ok || altRes.status === 206)) {
+            upstreamRes = altRes;
+            targetUrl = alternateUrl;
+          }
+        } catch {}
+      }
+    }
+
+    // If upstream returned 403 or 401 with referer, retry without referer
+    if (upstreamRes && (upstreamRes.status === 403 || upstreamRes.status === 401) && forwardHeaders["Referer"]) {
+      delete forwardHeaders["Referer"];
+      try {
+        upstreamRes = await fetch(targetUrl, {
+          method: req.method === "HEAD" ? "HEAD" : "GET",
+          headers: forwardHeaders,
+        });
+      } catch {}
+    }
+
+    if (!upstreamRes) {
+      console.warn("[NativePlayer Stream Proxy fetch failed]:", fetchError);
+      if (!res.headersSent) {
+        return res.status(502).send("Upstream video streaming error");
+      }
+      return;
     }
 
     res.status(upstreamRes.status);
@@ -889,11 +1038,13 @@ async function streamViaProxy(targetUrl: string, req: express.Request, res: expr
     const nodeStream = Readable.fromWeb(upstreamRes.body as any);
     nodeStream.on("error", (err) => {
       console.warn("[NativePlayer Stream pipe error]:", err);
-      if (!res.writableEnded) res.end();
+      if (!res.writableEnded) {
+        try { res.end(); } catch {}
+      }
     });
 
     res.on("close", () => {
-      nodeStream.destroy();
+      try { nodeStream.destroy(); } catch {}
     });
 
     nodeStream.pipe(res);
@@ -934,21 +1085,25 @@ nativePlayerRouter.all(
   ],
   async (req, res) => {
     try {
-      const targetUrl = (req.query.url as string || "").trim();
-      if (!targetUrl || !targetUrl.startsWith("http")) {
+      const rawTargetUrl = (req.query.url as string || "").trim();
+      if (!rawTargetUrl || !rawTargetUrl.startsWith("http")) {
         return res.status(400).send("Invalid stream URL");
       }
+      const targetUrl = normalizePixeldrainUrl(rawTargetUrl) || rawTargetUrl;
 
       const mode = (req.query.mode as string || "proxy").toLowerCase();
       const ss = parseFloat((req.query.ss as string) || "0") || 0;
       const audioIdx = parseInt((req.query.audio as string) || "0", 10) || 0;
 
+      const cachedProbe = infoCache.get(targetUrl)?.data;
       const isMkvTarget =
-        targetUrl.includes(".mkv") ||
-        targetUrl.includes("cloudflarestorage") ||
-        targetUrl.includes("pixeldrain") ||
-        targetUrl.includes("pixel.drain") ||
-        targetUrl.toLowerCase().includes("matroska");
+        targetUrl.toLowerCase().includes(".mkv") ||
+        targetUrl.toLowerCase().includes("matroska") ||
+        Boolean(cachedProbe?.isMkv) ||
+        Boolean(cachedProbe?.needsTranscode) ||
+        cachedProbe?.videoCodec === "hevc" ||
+        cachedProbe?.videoCodec === "h265" ||
+        cachedProbe?.format?.includes("matroska");
 
       // Handle HEAD requests immediately for browser pre-flight checks
       if (req.method === "HEAD") {
@@ -959,12 +1114,20 @@ nativePlayerRouter.all(
         return res.status(200).end();
       }
 
+      // Check whether FFmpeg is available on the hosting environment (Vercel has no ffmpeg)
+      const hasFFmpeg = await checkFFmpegAvailable();
+
+      // If FFmpeg is NOT available (e.g. Vercel runtime), ALWAYS stream cleanly via proxy
+      if (!hasFFmpeg) {
+        return streamViaProxy(targetUrl, req, res);
+      }
+
       // If mode is explicitly raw, stream directly via byte-range proxy
       if (mode === "raw") {
         return streamViaProxy(targetUrl, req, res);
       }
 
-      // If mode is proxy and target is NOT an MKV or Pixeldrain link, stream directly via byte-range proxy
+      // If mode is proxy and target is NOT an MKV link and doesn't need transcoding, stream directly via byte-range proxy
       if (mode === "proxy" && !isMkvTarget && audioIdx === 0 && ss === 0) {
         return streamViaProxy(targetUrl, req, res);
       }
@@ -984,10 +1147,6 @@ nativePlayerRouter.all(
         let referer = "";
         if (targetUrl.includes("hbplay.pages.dev")) {
           referer = "Referer: https://hbplay.pages.dev/\r\n";
-        } else if (targetUrl.includes("pixeldrain.dev") || targetUrl.includes("pixel.drain")) {
-          referer = "Referer: https://pixeldrain.dev/\r\n";
-        } else if (targetUrl.includes("pixeldrain.com")) {
-          referer = "Referer: https://pixeldrain.com/\r\n";
         }
 
         const ffmpegArgs: string[] = [
@@ -997,7 +1156,7 @@ nativePlayerRouter.all(
 
         // Instant seeking support with fast input seek
         if (ss > 0) {
-          ffmpegArgs.push("-ss", String(ss));
+          ffmpegArgs.push("-noaccurate_seek", "-ss", String(ss));
         }
 
         ffmpegArgs.push("-i", targetUrl);
