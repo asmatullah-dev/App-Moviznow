@@ -6,6 +6,11 @@ import { safeStorage } from "../utils/safeStorage";
 import { useModalBehavior } from "../hooks/useModalBehavior";
 import { getStreamingApiBase } from "../utils/domains";
 import {
+  getPlaybackProgressKey,
+  getSavedProgress,
+  saveProgress,
+} from "../utils/playbackProgress";
+import {
   modalBackdropAnimation,
   modalContainerAnimation,
   modalGpuStyle,
@@ -34,6 +39,8 @@ export interface PlayerFUProps {
   content: PlayerFUContent | null;
   imdbId?: string;
   className?: string;
+  season?: number;
+  episode?: number;
 }
 
 export interface PlayerFUButtonProps {
@@ -109,7 +116,11 @@ export function resolveBestQuality(
   return `${minHeight}p`;
 }
 
-export function usePlayerFU(content: PlayerFUContent | null) {
+export function usePlayerFU(
+  content: PlayerFUContent | null,
+  season?: number,
+  episode?: number
+) {
   const [isAvailable, setIsAvailable] = useState<boolean>(false);
   const [streamMeta, setStreamMeta] = useState<StreamMetadata | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -208,18 +219,9 @@ export function usePlayerFU(content: PlayerFUContent | null) {
   // Read saved playback position from local storage
   const getSavedPlaybackTime = useCallback((): number => {
     if (!content?.id) return 0;
-    try {
-      const key = `moviznow_progress_${content.id}`;
-      const saved = safeStorage.getItem(key) || localStorage.getItem(key);
-      if (saved) {
-        const val = parseFloat(saved);
-        if (!isNaN(val) && val > 5) return val;
-      }
-    } catch {
-      // Storage access failure fallback
-    }
-    return 0;
-  }, [content?.id]);
+    const key = getPlaybackProgressKey(content.id, season, episode);
+    return getSavedProgress(key);
+  }, [content?.id, season, episode]);
 
   return {
     isAvailable,
@@ -268,9 +270,11 @@ export function PlayerFU({
   onClose,
   content,
   imdbId,
+  season,
+  episode,
 }: PlayerFUProps) {
   const { t } = useLanguage();
-  const { streamMeta } = usePlayerFU(content);
+  const { streamMeta } = usePlayerFU(content, season, episode);
 
   // Snapshot the iframe URL once when opened so it NEVER changes during active playback
   const [activeIframeSrc, setActiveIframeSrc] = useState<string>("");
@@ -281,20 +285,9 @@ export function PlayerFU({
       return;
     }
 
-    // Determine initial resume time once from storage
-    let initialResumeTime = 0;
-    try {
-      const key = `moviznow_progress_${content.id}`;
-      const saved = safeStorage.getItem(key) || localStorage.getItem(key);
-      if (saved) {
-        const parsed = parseFloat(saved);
-        if (!isNaN(parsed) && parsed > 5) {
-          initialResumeTime = parsed;
-        }
-      }
-    } catch {
-      initialResumeTime = 0;
-    }
+    // Determine initial resume time once from unified storage key
+    const progressKey = getPlaybackProgressKey(content.id, season, episode);
+    const initialResumeTime = getSavedProgress(progressKey);
 
     // Determine remembered quality preference across all movies with fallback logic.
     // If preference is missing or set to auto, resolveBestQuality automatically selects minimum quality.
@@ -329,15 +322,23 @@ export function PlayerFU({
 
     // Construct immutable URL for this session with explicit quality & speed preferences
     const apiBase = getStreamingApiBase();
-    const stableUrl = `${apiBase}/api/stream/player/${content.id}?imdb=${encodeURIComponent(
+    let stableUrl = `${apiBase}/api/stream/player/${content.id}?imdb=${encodeURIComponent(
       imdbId,
     )}&t=${initialResumeTime}&quality=${encodeURIComponent(preferredQuality)}&speed=${encodeURIComponent(savedSpeed)}&autoplay=1`;
+    if (season !== undefined && season !== null) {
+      stableUrl += `&season=${encodeURIComponent(String(season))}`;
+    }
+    if (episode !== undefined && episode !== null) {
+      stableUrl += `&episode=${encodeURIComponent(String(episode))}`;
+    }
     setActiveIframeSrc(stableUrl);
-  }, [isOpen, content?.id, imdbId, streamMeta?.qualities]);
+  }, [isOpen, content?.id, imdbId, streamMeta?.qualities, season, episode]);
 
   // Listen to playback & status messages from the player iframe to save progress & remember quality & speed
   useEffect(() => {
     if (!isOpen || !content?.id) return;
+
+    const progressKey = getPlaybackProgressKey(content.id, season, episode);
 
     const handleMessage = (event: MessageEvent) => {
       if (!event.data || event.data.contentId !== content.id) return;
@@ -345,13 +346,7 @@ export function PlayerFU({
       if (event.data.type === "MOVIZNOW_PLAYBACK_PROGRESS") {
         const { currentTime } = event.data;
         if (typeof currentTime === "number" && currentTime > 2) {
-          try {
-            const key = `moviznow_progress_${content.id}`;
-            safeStorage.setItem(key, String(Math.floor(currentTime)));
-            localStorage.setItem(key, String(Math.floor(currentTime)));
-          } catch {
-            // Storage quota or restriction fallback
-          }
+          saveProgress(progressKey, currentTime);
         }
       } else if (event.data.type === "MOVIZNOW_PLAYER_STATUS") {
         const rawQuality = event.data.quality;
@@ -391,7 +386,7 @@ export function PlayerFU({
     return () => {
       window.removeEventListener("message", handleMessage);
     };
-  }, [isOpen, content?.id]);
+  }, [isOpen, content?.id, season, episode]);
 
   // Handle ESC key to close modal
   useEffect(() => {

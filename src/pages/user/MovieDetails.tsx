@@ -352,9 +352,10 @@ export default function MovieDetails() {
     contentId?: string;
     poster?: string;
     year?: string | number;
-    seasonInfo?: { number: number; title?: string };
-    episodeInfo?: { number: number; title?: string };
+    seasonInfo?: { number?: number; seasonNumber?: number; title?: string; id?: string };
+    episodeInfo?: { number?: number; episodeNumber?: number; title?: string };
     candidates?: Array<{ text: string; href: string }>;
+    availableQualities?: Array<{ id?: string; name?: string; label?: string; url: string; size?: string; unit?: string }>;
   } | null>(null);
   const [showRatePrompt, setShowRatePrompt] = useState(false);
   const [showReportConfirm, setShowReportConfirm] = useState(false);
@@ -969,6 +970,7 @@ export default function MovieDetails() {
         candidates: [
           { text: "Pixeldrain Server", href: streamUrl }
         ],
+        availableQualities: links,
       });
       setIsNativePlayerOpen(true);
       trackStreamAndCheckRate();
@@ -998,6 +1000,7 @@ export default function MovieDetails() {
           poster: mergedContent.posterUrl || mergedContent.backdropUrl,
           year: mergedContent.year,
           candidates: [{ text: directVideoLink.name || "Direct Stream", href: streamUrl }],
+          availableQualities: links,
         });
         setIsNativePlayerOpen(true);
         return;
@@ -1058,6 +1061,7 @@ export default function MovieDetails() {
           poster: mergedContent.posterUrl || mergedContent.backdropUrl,
           year: mergedContent.year,
           candidates: candidates.length > 0 ? candidates : (pixel ? [{ text: pixel.text, href: pixel.streamUrl }] : []),
+          availableQualities: links,
         });
         setIsNativePlayerOpen(true);
         trackStreamAndCheckRate();
@@ -3386,9 +3390,6 @@ export default function MovieDetails() {
                       <>
                         <Play className="w-5 h-5 fill-current" />
                         <span>{t('Play Movie')}</span>
-                        <span className="text-[11px] font-bold bg-black/25 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                          {movieQualityBadge}
-                        </span>
                       </>
                     )}
                   </button>
@@ -4971,8 +4972,12 @@ export default function MovieDetails() {
                         const fslCandidate = findFslCandidate(linkPopup.candidates);
                         const pixelCandidate = findPixeldrainCandidate(linkPopup.candidates);
                         const watchCandidate = findWatchOnlineCandidate(linkPopup.candidates);
-                        const chosenCandidate = fslCandidate || pixelCandidate || watchCandidate;
-                        if (!chosenCandidate) return null;
+                        // If linkPopup.url matches an extracted candidate, prioritize it, else FSL or Pixeldrain
+                        const matchedCandidate = linkPopup.candidates?.find((c: any) => c && c.href && c.href === linkPopup.url);
+                        const chosenCandidate = matchedCandidate || fslCandidate || pixelCandidate || watchCandidate;
+                        const chosenHref = chosenCandidate ? chosenCandidate.href : linkPopup.url;
+                        if (!chosenHref) return null;
+
                         const isEp = Boolean(
                           linkPopup.episodeInfo ||
                           /E\d+|Episode\s*\d+/i.test(linkPopup.name)
@@ -4988,26 +4993,39 @@ export default function MovieDetails() {
                           ? t("Play Season")
                           : t("Play Movie");
 
-                        const streamUrl = normalizePixeldrainUrl(
-                          fslCandidate ? fslCandidate.href : chosenCandidate.href
-                        );
+                        const streamUrl = normalizePixeldrainUrl(chosenHref);
+
+                        // Find all other qualities for same episode, full season MKV, or movie
+                        let availableQualities: any[] = [];
+                        if (isEp) {
+                          const sNum = linkPopup.seasonInfo?.number ?? (linkPopup.seasonInfo as any)?.seasonNumber;
+                          const eNum = linkPopup.episodeInfo?.number ?? (linkPopup.episodeInfo as any)?.episodeNumber;
+                          const targetSeason = seasons.find((s) => s.seasonNumber === sNum);
+                          const targetEp = targetSeason?.episodes?.find((e) => e.episodeNumber === eNum);
+                          availableQualities = targetEp?.links || [];
+                        } else if (isSeas) {
+                          const sNum = linkPopup.seasonInfo?.number ?? (linkPopup.seasonInfo as any)?.seasonNumber;
+                          const targetSeason = seasons.find((s) => s.seasonNumber === sNum);
+                          availableQualities = targetSeason?.mkvLinks || targetSeason?.zipLinks || [];
+                        } else {
+                          availableQualities = getLinksArray(mergedContent?.movieLinks || (mergedContent as any)?.links);
+                        }
 
                         return (
                           <button
                             onClick={() => {
                               setActiveNativePlayerConfig({
-                                watchUrl: chosenCandidate.href,
+                                watchUrl: chosenHref,
                                 streamUrl: streamUrl,
                                 title: linkPopup.formattedTitle || linkPopup.name || mergedContent?.title,
                                 quality: linkPopup.name || "HD",
-                                contentId: mergedContent?.id
-                                  ? `${mergedContent.id}_${linkPopup.id}`
-                                  : linkPopup.id,
+                                contentId: mergedContent?.id || "default",
                                 poster: mergedContent?.posterUrl || mergedContent?.backdropUrl,
                                 year: mergedContent?.year,
                                 seasonInfo: linkPopup.seasonInfo,
                                 episodeInfo: linkPopup.episodeInfo,
                                 candidates: linkPopup.candidates,
+                                availableQualities: availableQualities,
                               });
                               setIsNativePlayerOpen(true);
                               trackStreamAndCheckRate();
@@ -5015,7 +5033,7 @@ export default function MovieDetails() {
                                 logEvent("link_click", profile.uid, {
                                   contentId: mergedContent.id,
                                   contentTitle: mergedContent.title,
-                                  linkName: `Native Player - FSL Server - ${linkPopup.name}`,
+                                  linkName: `Native Player - ${chosenCandidate?.text || "Extracted Stream"} - ${linkPopup.name}`,
                                 });
                               }
                               closeLinkPopup();
@@ -5437,6 +5455,7 @@ export default function MovieDetails() {
         seasonInfo={activeNativePlayerConfig?.seasonInfo}
         episodeInfo={activeNativePlayerConfig?.episodeInfo}
         candidates={activeNativePlayerConfig?.candidates}
+        availableQualities={activeNativePlayerConfig?.availableQualities}
       />
       
       <ConfirmModal

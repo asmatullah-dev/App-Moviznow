@@ -113,6 +113,8 @@ play4uRouter.get(["/api/stream/check", "/stream/check"], async (req, res) => {
 play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"], async (req, res) => {
   try {
     const { contentId } = req.params;
+    const season = (req.query.season as string || "").trim();
+    const episode = (req.query.episode as string || "").trim();
     const imdbId = (req.query.imdb as string || "").trim();
     const resumeTime = parseFloat((req.query.t as string) || "0") || 0;
     const initialSpeed = parseFloat((req.query.speed as string) || "1") || 1;
@@ -198,8 +200,16 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
     const trackingScript = `
       <script>
         (function() {
-          var contentId = ${JSON.stringify(contentId)};
-          var storageKey = "moviznow_progress_" + contentId;
+          var rawContentId = ${JSON.stringify(contentId)};
+          var cleanContentId = rawContentId.split("_link_")[0];
+          var seasonVal = ${JSON.stringify(season)};
+          var episodeVal = ${JSON.stringify(episode)};
+          var storageKey = "moviznow_progress_" + cleanContentId;
+          if (seasonVal && episodeVal) {
+            storageKey = "moviznow_progress_" + cleanContentId + "_s" + seasonVal + "_e" + episodeVal;
+          } else if (seasonVal) {
+            storageKey = "moviznow_progress_" + cleanContentId + "_s" + seasonVal;
+          }
           var resumeTime = ${resumeTime};
           var initialSpeed = ${initialSpeed};
 

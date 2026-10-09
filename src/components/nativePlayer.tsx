@@ -29,6 +29,12 @@ import { useModalBehavior } from "../hooks/useModalBehavior";
 import { getStreamingApiBase } from "../utils/domains";
 export { getStreamingApiBase };
 import {
+  getPlaybackProgressKey,
+  getSavedProgress,
+  saveProgress,
+  extractQualityLabel,
+} from "../utils/playbackProgress";
+import {
   modalBackdropAnimation,
   modalContainerAnimation,
   fullScreenModalAnimation,
@@ -57,6 +63,15 @@ export interface NativeStreamData {
   subtitleTracks?: Array<any>;
 }
 
+export interface NativePlayerQualityOption {
+  id?: string;
+  name?: string;
+  label?: string;
+  url: string;
+  size?: string;
+  unit?: string;
+}
+
 export interface NativePlayerProps {
   isOpen: boolean;
   onClose: () => void;
@@ -67,9 +82,10 @@ export interface NativePlayerProps {
   poster?: string;
   year?: string | number;
   quality?: string;
-  seasonInfo?: { number: number; title?: string };
-  episodeInfo?: { number: number; title?: string };
+  seasonInfo?: { number?: number; seasonNumber?: number; title?: string };
+  episodeInfo?: { number?: number; episodeNumber?: number; title?: string };
   candidates?: Array<{ text: string; href: string }>;
+  availableQualities?: NativePlayerQualityOption[];
 }
 
 export interface MediaProbeInfo {
@@ -352,6 +368,7 @@ export function NativePlayer({
   seasonInfo,
   episodeInfo,
   candidates,
+  availableQualities,
 }: NativePlayerProps) {
   const { t } = useLanguage();
   useModalBehavior(isOpen, onClose);
@@ -362,10 +379,29 @@ export function NativePlayer({
   const progressSaveIntervalRef = useRef<any>(null);
   const toastTimeoutRef = useRef<any>(null);
 
-  // Parse direct stream URL (prioritizing FSL candidate, Pixeldrain candidate if FSL missing, decoded meta, propStreamUrl, or direct watchUrl)
-  const fslCandidate = useMemo(() => findFslCandidate(candidates), [candidates]);
-  const pixeldrainCandidate = useMemo(() => findPixeldrainCandidate(candidates), [candidates]);
-  const decodedMeta = useMemo(() => decodeWatchUrl(watchUrl), [watchUrl]);
+  // Active quality, stream, watchUrl, and candidates state for seamless dynamic quality switching
+  const [currentQuality, setCurrentQuality] = useState<string>(quality || "720p");
+  const [activeWatchUrl, setActiveWatchUrl] = useState<string>(watchUrl || "");
+  const [activeStreamUrl, setActiveStreamUrl] = useState<string>(propStreamUrl || "");
+  const [activeCandidates, setActiveCandidates] = useState<Array<{ text: string; href: string }>>(() => {
+    return Array.isArray(candidates) ? candidates : [];
+  });
+  const [isSwitchingQuality, setIsSwitchingQuality] = useState<boolean>(false);
+
+  // Sync state when props change
+  useEffect(() => {
+    if (isOpen) {
+      setCurrentQuality(quality || "720p");
+      setActiveWatchUrl(watchUrl || "");
+      setActiveStreamUrl(propStreamUrl || "");
+      setActiveCandidates(Array.isArray(candidates) ? candidates : []);
+    }
+  }, [isOpen, quality, watchUrl, propStreamUrl, candidates]);
+
+  // Parse direct stream URL (prioritizing FSL candidate, Pixeldrain candidate if FSL missing, decoded meta, activeStreamUrl, or direct watchUrl)
+  const fslCandidate = useMemo(() => findFslCandidate(activeCandidates), [activeCandidates]);
+  const pixeldrainCandidate = useMemo(() => findPixeldrainCandidate(activeCandidates), [activeCandidates]);
+  const decodedMeta = useMemo(() => decodeWatchUrl(activeWatchUrl), [activeWatchUrl]);
 
   // Active server: default to "fsl" if fslCandidate exists, otherwise "pixeldrain" if pixeldrainCandidate exists, else "default"
   const [activeServer, setActiveServer] = useState<"fsl" | "pixeldrain" | "default">(() => {
@@ -397,14 +433,46 @@ export function NativePlayer({
     return (
       fslCandidate?.href ||
       pixeldrainCandidate?.streamUrl ||
-      propStreamUrl ||
+      activeStreamUrl ||
       decodedMeta.streamUrl ||
-      (watchUrl && !watchUrl.includes("hbplay.pages.dev") ? watchUrl : "")
+      (activeWatchUrl && !activeWatchUrl.includes("hbplay.pages.dev") ? activeWatchUrl : "")
     );
-  }, [activeServer, fslCandidate, pixeldrainCandidate, propStreamUrl, decodedMeta, watchUrl]);
+  }, [activeServer, fslCandidate, pixeldrainCandidate, activeStreamUrl, decodedMeta, activeWatchUrl]);
 
   const directStreamUrl = normalizePixeldrainUrl(rawStreamUrl);
   const displayTitle = decodedMeta.title || title;
+
+  // Extract concise clean quality label (e.g. "480P", "720P", "1080P", "4K")
+  const currentQualityLabel = useMemo(() => {
+    return extractQualityLabel(currentQuality);
+  }, [currentQuality]);
+
+  // Available qualities parsed for quality selector menu
+  const qualityOptions = useMemo(() => {
+    if (Array.isArray(availableQualities) && availableQualities.length > 0) {
+      const valid = availableQualities.filter((q) => q && q.url);
+      if (valid.length > 0) {
+        return valid.map((q) => ({
+          id: q.id,
+          label: extractQualityLabel(q.name || q.label),
+          name: q.name || q.label || "HD",
+          url: q.url,
+          size: q.size,
+          unit: q.unit || "",
+        }));
+      }
+    }
+    return [
+      {
+        id: "default-quality",
+        label: currentQualityLabel,
+        name: currentQuality,
+        url: activeWatchUrl || activeStreamUrl,
+        size: undefined,
+        unit: "",
+      },
+    ];
+  }, [availableQualities, currentQualityLabel, currentQuality, activeWatchUrl, activeStreamUrl]);
 
   // Engine: "native" (Universal Codec Transcode Engine) or "web" (HubCloud Web Player)
   const [engine, setEngine] = useState<"native" | "web">("native");
@@ -462,11 +530,22 @@ export function NativePlayer({
   const [hasPlaybackError, setHasPlaybackError] = useState<boolean>(false);
   const [fitMode, setFitMode] = useState<"contain" | "cover" | "fill">("contain");
 
-  const [activeMenu, setActiveMenu] = useState<"speed" | "audio" | "subtitles" | null>(null);
+  const [activeMenu, setActiveMenu] = useState<"speed" | "audio" | "subtitles" | "quality" | null>(null);
   const [doubleTapFeedback, setDoubleTapFeedback] = useState<"left" | "right" | null>(null);
 
-  // Storage key for resume
-  const storageKey = `moviznow_progress_${contentId}`;
+  // Close audio menu if exiting fullscreen
+  useEffect(() => {
+    if (!isFullscreen && activeMenu === "audio") {
+      setActiveMenu(null);
+    }
+  }, [isFullscreen, activeMenu]);
+
+  // Unified storage key for playback progress (movie: contentId; series: contentId + season + episode)
+  const sNum = seasonInfo?.seasonNumber ?? seasonInfo?.number;
+  const eNum = episodeInfo?.episodeNumber ?? episodeInfo?.number;
+  const storageKey = useMemo(() => {
+    return getPlaybackProgressKey(contentId, sNum, eNum);
+  }, [contentId, sNum, eNum]);
   const latestPositionRef = useRef<number>(0);
   const lastSaveTimeRef = useRef<number>(0);
 
@@ -474,11 +553,8 @@ export function NativePlayer({
     if (timeToSave > 3) {
       const rounded = Math.floor(timeToSave);
       latestPositionRef.current = rounded;
-      try {
-        safeStorage.setItem(storageKey, String(rounded));
-        localStorage.setItem(storageKey, String(rounded));
-        lastSaveTimeRef.current = Date.now();
-      } catch {}
+      saveProgress(storageKey, rounded);
+      lastSaveTimeRef.current = Date.now();
     }
   }, [storageKey]);
 
@@ -489,6 +565,137 @@ export function NativePlayer({
       setToastMessage(null);
     }, 2200);
   }, []);
+
+  // Handler to switch stream quality dynamically while preserving exact playback position
+  const handleQualitySelect = useCallback(
+    async (opt: { label: string; name: string; url: string; size?: string; unit?: string }) => {
+      const isCurrentlyActive =
+        opt.label.toUpperCase() === currentQualityLabel.toUpperCase() &&
+        (opt.url === activeWatchUrl || opt.url === activeStreamUrl);
+
+      if (isCurrentlyActive || isSwitchingQuality) {
+        setActiveMenu(null);
+        return;
+      }
+
+      // 1. Unify and save current playback progress
+      const curPos =
+        latestPositionRef.current ||
+        (videoRef.current ? Math.floor(seekOffset + (videoRef.current.currentTime || 0)) : seekOffset);
+      savePlaybackPosition(curPos);
+      setSeekOffset(curPos);
+      setCurrentPosition(curPos);
+      latestPositionRef.current = curPos;
+
+      setActiveMenu(null);
+      setCurrentQuality(opt.name || opt.label);
+
+      const targetUrl = (opt.url || "").trim();
+      const lowerUrl = targetUrl.toLowerCase();
+
+      // 2. Direct or Pixeldrain link check
+      const isDirect =
+        lowerUrl.includes("pixeldrain") ||
+        lowerUrl.includes("pixel.drain") ||
+        lowerUrl.includes("pixeldra.in") ||
+        lowerUrl.includes(".mp4") ||
+        lowerUrl.includes(".mkv") ||
+        lowerUrl.includes("workers.dev");
+
+      if (isDirect) {
+        const directUrl = normalizePixeldrainUrl(targetUrl);
+        setActiveWatchUrl(targetUrl);
+        setActiveStreamUrl(directUrl);
+        setActiveCandidates([{ text: "Direct Stream", href: directUrl }]);
+        setActiveServer("pixeldrain");
+        const isMkv = directUrl.includes(".mkv") || directUrl.toLowerCase().includes("matroska");
+        setStreamMode(isMkv ? "transcode" : "proxy");
+        setHasPlaybackError(false);
+        setStreamAttempt((p) => p + 1);
+        setIsBuffering(true);
+        showToast(`${t("Switched to")} ${opt.label}`);
+        return;
+      }
+
+      // 3. HubCloud or intermediate extraction
+      setIsSwitchingQuality(true);
+      setIsBuffering(true);
+      showToast(`${t("Extracting")} ${opt.label}...`);
+
+      try {
+        const apiBase = getStreamingApiBase();
+        let data: any = null;
+        const doCheck = async (base: string) => {
+          const res = await fetch(`${base}/api/native-player/check`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: targetUrl }),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        };
+
+        try {
+          data = await doCheck(apiBase);
+        } catch {
+          if (apiBase) {
+            data = await doCheck("");
+          }
+        }
+
+        if (data) {
+          const newCandidates = Array.isArray(data.candidates) ? data.candidates : [];
+          const fsl = findFslCandidate(newCandidates);
+          const pixel = findPixeldrainCandidate(newCandidates);
+          const watch = findWatchOnlineCandidate(newCandidates);
+          const chosen = fsl || pixel || watch;
+          const rawStream = fsl
+            ? fsl.href
+            : pixel
+            ? pixel.streamUrl
+            : chosen
+            ? chosen.href
+            : data.streamUrl || targetUrl;
+          const normalizedStream = normalizePixeldrainUrl(rawStream);
+
+          setActiveWatchUrl(data.watchUrl || targetUrl);
+          setActiveStreamUrl(normalizedStream);
+          setActiveCandidates(
+            newCandidates.length > 0
+              ? newCandidates
+              : pixel
+              ? [{ text: pixel.text, href: pixel.streamUrl }]
+              : []
+          );
+          setActiveServer(fsl ? "fsl" : pixel ? "pixeldrain" : "default");
+          const isMkv =
+            normalizedStream.includes(".mkv") ||
+            normalizedStream.toLowerCase().includes("matroska");
+          setStreamMode(isMkv ? "transcode" : "proxy");
+          setHasPlaybackError(false);
+          setStreamAttempt((p) => p + 1);
+          showToast(`${t("Switched to")} ${opt.label}`);
+        } else {
+          showToast(t("Stream extraction failed"));
+        }
+      } catch (err) {
+        console.warn("Quality switch error:", err);
+        showToast(t("Error switching quality"));
+      } finally {
+        setIsSwitchingQuality(false);
+      }
+    },
+    [
+      currentQualityLabel,
+      activeWatchUrl,
+      activeStreamUrl,
+      isSwitchingQuality,
+      seekOffset,
+      savePlaybackPosition,
+      showToast,
+      t,
+    ]
+  );
 
   const hasStartedPlaybackRef = useRef<boolean>(false);
 
@@ -1198,6 +1405,9 @@ export function NativePlayer({
           <div
             onClick={(e) => {
               e.stopPropagation();
+              if (activeMenu) {
+                setActiveMenu(null);
+              }
               resetControlsTimeout();
             }}
             className="relative w-full h-full flex items-center justify-center overflow-hidden bg-black"
@@ -1211,6 +1421,9 @@ export function NativePlayer({
                 preload="auto"
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (activeMenu) {
+                    setActiveMenu(null);
+                  }
                   resetControlsTimeout();
                 }}
                 onTimeUpdate={handleTimeUpdate}
@@ -1424,12 +1637,21 @@ export function NativePlayer({
                   <h2 className="text-sm sm:text-base font-extrabold text-white truncate">
                     {displayTitle}
                   </h2>
-                  <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
-                    {quality}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveMenu(activeMenu === "quality" ? null : "quality");
+                    }}
+                    className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30 transition-all cursor-pointer flex items-center gap-1"
+                    title={t("Stream Quality")}
+                  >
+                    <span>{currentQualityLabel}</span>
+                    {qualityOptions.length > 1 && <span className="text-[8px] opacity-75">▼</span>}
+                  </button>
                   {seasonInfo && episodeInfo && (
                     <span className="text-[10px] font-bold text-zinc-300 bg-zinc-800 px-2 py-0.5 rounded-md">
-                      S{seasonInfo.number}E{episodeInfo.number}
+                      S{seasonInfo.number ?? (seasonInfo as any).seasonNumber}E{episodeInfo.number ?? (episodeInfo as any).episodeNumber}
                     </span>
                   )}
                 </div>
@@ -1708,58 +1930,121 @@ export function NativePlayer({
                   )}
                 </div>
 
-                {/* Right controls: Audio Languages, Subtitles, Speed, Fit, PiP, Fullscreen */}
-                <div className="flex items-center gap-1.5 sm:gap-2">
-                  {/* Audio Language Switcher Menu */}
+                {/* Right controls: Quality, Audio Languages, Subtitles, Speed, Fit, PiP, Fullscreen */}
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                  {/* Quality Switcher Menu under stream */}
                   <div className="relative">
                     <button
                       type="button"
                       onClick={() =>
-                        setActiveMenu(activeMenu === "audio" ? null : "audio")
+                        setActiveMenu(activeMenu === "quality" ? null : "quality")
                       }
-                      className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-1.5 ${
-                        activeMenu === "audio"
+                      className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                        activeMenu === "quality"
                           ? "bg-emerald-500 text-white border-emerald-400"
                           : "bg-zinc-800/80 hover:bg-zinc-700 border-zinc-700/60 text-zinc-200"
                       }`}
-                      title="Audio Language"
+                      title={t("Stream Quality")}
                     >
-                      <Mic className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>
-                        {mediaInfo?.audioTracks?.find((a) => a.id === selectedAudioTrack)?.language || "Audio"}
-                      </span>
+                      <Tv className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>{currentQualityLabel}</span>
+                      {isSwitchingQuality && (
+                        <Loader2 className="w-3 h-3 animate-spin text-emerald-300" />
+                      )}
                     </button>
 
-                    {activeMenu === "audio" && (
-                      <div className="absolute bottom-full right-0 mb-2 w-48 bg-zinc-900/98 border border-zinc-700/90 rounded-2xl p-2.5 shadow-2xl backdrop-blur-2xl z-50 flex flex-col gap-1.5 max-h-64 overflow-y-auto">
-                        <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-2 py-0.5">
-                          {t("Audio Language")}
-                        </span>
-                        {(mediaInfo?.audioTracks && mediaInfo.audioTracks.length > 0
-                          ? mediaInfo.audioTracks
-                          : [{ id: 0, language: "Default", codec: "AAC", title: "Default Audio" }]
-                        ).map((tr) => (
-                          <button
-                            key={tr.id}
-                            onClick={() => handleAudioSelect(tr.id)}
-                            className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between ${
-                              selectedAudioTrack === tr.id
-                                ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/20"
-                                : "text-zinc-200 hover:bg-zinc-800/80"
-                            }`}
-                          >
-                            <div className="flex flex-col">
-                              <span>{tr.language}</span>
-                              <span className="text-[10px] opacity-75 font-normal uppercase">
-                                {tr.codec} Stereo
-                              </span>
-                            </div>
-                            {selectedAudioTrack === tr.id && <Check className="w-4 h-4 shrink-0" />}
-                          </button>
-                        ))}
+                    {activeMenu === "quality" && (
+                      <div className="absolute bottom-full left-0 mb-2 w-48 sm:w-52 max-w-[calc(100vw-2rem)] bg-zinc-900/98 border border-zinc-700/90 rounded-2xl p-2.5 shadow-2xl backdrop-blur-2xl z-50 flex flex-col gap-1.5 max-h-44 sm:max-h-60 overflow-y-auto">
+                        <div className="flex items-center justify-between px-2 py-0.5">
+                          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">
+                            {t("Stream Quality")}
+                          </span>
+                          <span className="text-[10px] text-zinc-500 font-medium">
+                            {qualityOptions.length} {t("options")}
+                          </span>
+                        </div>
+                        {qualityOptions.map((opt, idx) => {
+                          const isCurrent =
+                            opt.label.toUpperCase() === currentQualityLabel.toUpperCase();
+                          return (
+                            <button
+                              key={`${opt.url}-${idx}`}
+                              onClick={() => handleQualitySelect(opt)}
+                              disabled={isSwitchingQuality}
+                              className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
+                                isCurrent
+                                  ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/20"
+                                  : "text-zinc-200 hover:bg-zinc-800/80"
+                              }`}
+                            >
+                              <div className="flex flex-col">
+                                <span className="font-extrabold">{opt.label}</span>
+                                {opt.size && (
+                                  <span className="text-[10px] opacity-75 font-normal">
+                                    {opt.size} {opt.unit || ""}
+                                  </span>
+                                )}
+                              </div>
+                              {isCurrent && <Check className="w-4 h-4 shrink-0 text-white" />}
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
+
+                  {/* Audio Language Switcher Menu (Full Screen Only) */}
+                  {isFullscreen && (
+                    <div className="relative">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setActiveMenu(activeMenu === "audio" ? null : "audio")
+                        }
+                        className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                          activeMenu === "audio"
+                            ? "bg-emerald-500 text-white border-emerald-400"
+                            : "bg-zinc-800/80 hover:bg-zinc-700 border-zinc-700/60 text-zinc-200"
+                        }`}
+                        title={t("Audio Language")}
+                      >
+                        <Mic className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>
+                          {mediaInfo?.audioTracks?.find((a) => a.id === selectedAudioTrack)?.language || "Audio"}
+                        </span>
+                      </button>
+
+                      {activeMenu === "audio" && (
+                        <div className="absolute bottom-full left-0 mb-2 w-48 max-w-[calc(100vw-2rem)] bg-zinc-900/98 border border-zinc-700/90 rounded-2xl p-2.5 shadow-2xl backdrop-blur-2xl z-50 flex flex-col gap-1.5 max-h-44 sm:max-h-60 overflow-y-auto">
+                          <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-2 py-0.5">
+                            {t("Audio Language")}
+                          </span>
+                          {(mediaInfo?.audioTracks && mediaInfo.audioTracks.length > 0
+                            ? mediaInfo.audioTracks
+                            : [{ id: 0, language: "Default", codec: "AAC", title: "Default Audio" }]
+                          ).map((tr) => (
+                            <button
+                              key={tr.id}
+                              onClick={() => handleAudioSelect(tr.id)}
+                              className={`w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between cursor-pointer ${
+                                selectedAudioTrack === tr.id
+                                  ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/20"
+                                  : "text-zinc-200 hover:bg-zinc-800/80"
+                              }`}
+                            >
+                              <div className="flex flex-col">
+                                <span>{tr.language}</span>
+                                <span className="text-[10px] opacity-75 font-normal uppercase">
+                                  {tr.codec} Stereo
+                                </span>
+                              </div>
+                              {selectedAudioTrack === tr.id && <Check className="w-4 h-4 shrink-0" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Enhanced Subtitles Menu */}
                   <div className="relative">
@@ -1784,7 +2069,7 @@ export function NativePlayer({
                     </button>
 
                     {activeMenu === "subtitles" && (
-                      <div className="absolute bottom-full right-0 mb-2 w-52 bg-zinc-900/98 border border-zinc-700/90 rounded-2xl p-2.5 shadow-2xl backdrop-blur-2xl z-50 flex flex-col gap-2 max-h-72 overflow-y-auto">
+                      <div className="absolute bottom-full right-0 mb-2 w-48 sm:w-52 max-w-[calc(100vw-2rem)] bg-zinc-900/98 border border-zinc-700/90 rounded-2xl p-2.5 shadow-2xl backdrop-blur-2xl z-50 flex flex-col gap-2 max-h-44 sm:max-h-60 overflow-y-auto">
                         <div className="flex flex-col gap-1">
                           <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-2 py-0.5">
                             {t("Subtitles")}
@@ -1859,7 +2144,7 @@ export function NativePlayer({
                     </button>
 
                     {activeMenu === "speed" && (
-                      <div className="absolute bottom-full right-0 mb-2 w-36 bg-zinc-900/98 border border-zinc-700/90 rounded-2xl p-2 shadow-2xl backdrop-blur-2xl z-50 flex flex-col gap-1 max-h-56 overflow-y-auto">
+                      <div className="absolute bottom-full right-0 mb-2 w-36 max-w-[calc(100vw-2rem)] bg-zinc-900/98 border border-zinc-700/90 rounded-2xl p-2 shadow-2xl backdrop-blur-2xl z-50 flex flex-col gap-1 max-h-44 sm:max-h-56 overflow-y-auto">
                         <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-2 py-1">
                           {t("Playback Speed")}
                         </span>
