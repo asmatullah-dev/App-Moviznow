@@ -250,6 +250,7 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
         title: "Movie Stream",
         mime: "video/mp4",
         quality: "720p",
+        candidates: [{ text: "Pixeldrain Server", href: resolvedStreamUrl }],
       };
       checkCache.set(url, { data: result, timestamp: Date.now() });
       return res.json(result);

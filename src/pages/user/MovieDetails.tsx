@@ -85,11 +85,11 @@ import ConfirmModal from "../../components/ConfirmModal";
 import SharePreviewModal from "../../components/SharePreviewModal";
 import PlayerFU, { PlayerFUButton, usePlayerFU } from "../../components/PlayerFU";
 import NativePlayer, {
-  useNativePlayerCheck,
   findWatchOnlineCandidate,
   findFslCandidate,
   findPixeldrainCandidate,
   normalizePixeldrainUrl,
+  getStreamingApiBase,
 } from "../../components/nativePlayer";
 import { clsx } from "clsx";
 import { motion, AnimatePresence } from "framer-motion";
@@ -834,9 +834,11 @@ export default function MovieDetails() {
   // Stream availability & IMDb lookup managed cleanly via PlayerFU hook
   const { isAvailable: isStreamAvailable, currentImdbId } = usePlayerFU(mergedContent);
 
-  // 1st Place: Automatically check 720p hubcloud link on any movie for watch online extraction link
-  const autoCheck720Link = useMemo(() => {
-    if (!mergedContent || mergedContent.type === "series") return null;
+  // Native Player Play Movie states and extraction handler
+  const [isExtractingNativeMovie, setIsExtractingNativeMovie] = useState<boolean>(false);
+
+  const movieQualityBadge = useMemo(() => {
+    if (!mergedContent || mergedContent.type === "series") return "720p";
     const links = getLinksArray(mergedContent.movieLinks || (mergedContent as any).links);
     const isHc = (u: string) => {
       if (!u) return false;
@@ -850,18 +852,236 @@ export default function MovieDetails() {
         l.includes("drivehub")
       );
     };
-    // Prioritize 720p hubcloud link
-    const found720 = links.find((l) => isHc(l.url) && /720p?/i.test(l.name || ""));
-    if (found720) return found720;
-    // Fallback to any hubcloud link
-    return links.find((l) => isHc(l.url)) || null;
+    const isPd = (u: string) => {
+      if (!u) return false;
+      const l = u.toLowerCase();
+      return (
+        l.includes("pixeldrain") ||
+        l.includes("pixel.drain") ||
+        l.includes("pixeldra.in")
+      );
+    };
+
+    const hc720 = links.find((l) => isHc(l.url) && (/720p?/i.test(l.name || "") || /720/i.test(l.name || "")));
+    const hc1080 = links.find((l) => isHc(l.url) && (/1080p?/i.test(l.name || "") || /1080/i.test(l.name || "")));
+    const hcAny = links.find((l) => isHc(l.url));
+    const targetLink = hc720 || hc1080 || hcAny || links.find((l) => isPd(l.url));
+
+    if (targetLink?.name) {
+      const match = targetLink.name.match(/\b(480p|720p\s*hevc|720p|1080p\s*hevc|1080p|2160p|4k|hevc)\b/i);
+      if (match) return match[0].toUpperCase();
+    }
+    return "720p";
   }, [mergedContent]);
 
-  const {
-    isAvailable: isNativeStreamAvailable,
-    streamData: nativeStreamData,
-    isLoading: isCheckingNativeStream,
-  } = useNativePlayerCheck(autoCheck720Link?.url);
+  const handleNativePlayMovieClick = async () => {
+    if (!profile) {
+      setShowLoginPrompt(true);
+      return;
+    }
+    if (!canPlay) {
+      if (mergedContent?.status === "selected_content") {
+        setAlertConfig({
+          isOpen: true,
+          title: t("Content Locked"),
+          message: t("You don't have access to this content. Contact Admin."),
+        });
+      } else if (isPending) {
+        setAlertConfig({
+          isOpen: true,
+          title: t("Account Pending"),
+          message: t("Your account activation is pending. Please Get Membership or Add any content to cart to activate your account."),
+        });
+      } else if (isExpired) {
+        setAlertConfig({
+          isOpen: true,
+          title: profile?.role === "trial" ? t("Trial Expired") : t("Membership Expired"),
+          message: profile?.role === "trial"
+            ? t("Your free Trial has expired. Please get Membership to continue watching.")
+            : t("Your membership has expired. Please renew to continue watching."),
+        });
+      } else {
+        setAlertConfig({
+          isOpen: true,
+          title: t("Content Locked"),
+          message: t("This content is locked. Please contact admin to get access to this movie/series."),
+        });
+      }
+      return;
+    }
+
+    if (!mergedContent) return;
+
+    const links = getLinksArray(mergedContent.movieLinks || (mergedContent as any).links);
+    if (!links || links.length === 0) {
+      setAlertConfig({
+        isOpen: true,
+        title: t("No Links Available"),
+        message: t("No stream links are available for this content."),
+      });
+      return;
+    }
+
+    const isHc = (u: string) => {
+      if (!u) return false;
+      const l = u.toLowerCase();
+      return (
+        l.includes("hubcloud") ||
+        l.includes("hubcould") ||
+        l.includes("vcloud") ||
+        l.includes("hubdrive") ||
+        l.includes("moviesdrive") ||
+        l.includes("drivehub")
+      );
+    };
+
+    const isPd = (u: string) => {
+      if (!u) return false;
+      const l = u.toLowerCase();
+      return (
+        l.includes("pixeldrain") ||
+        l.includes("pixel.drain") ||
+        l.includes("pixeldra.in")
+      );
+    };
+
+    // User requirement:
+    // Extract the hubcloud link of 720p or 720p HEVC or 1080p (if 720p not available)
+    // If a movie has only Pixeldrain links not hubcloud links then simply play using Pixeldrain server
+    const hc720 = links.find((l) => isHc(l.url) && (/720p?/i.test(l.name || "") || /720/i.test(l.name || "")));
+    const hc1080 = links.find((l) => isHc(l.url) && (/1080p?/i.test(l.name || "") || /1080/i.test(l.name || "")));
+    const hcAny = links.find((l) => isHc(l.url));
+    const targetHcLink = hc720 || hc1080 || hcAny;
+
+    const pdOnlyLink = links.find((l) => isPd(l.url));
+
+    // If a movie has only Pixeldrain links not hubcloud links then simply play using Pixeldrain server
+    if (!targetHcLink && pdOnlyLink) {
+      const streamUrl = normalizePixeldrainUrl(pdOnlyLink.url);
+      setActiveNativePlayerConfig({
+        watchUrl: pdOnlyLink.url,
+        streamUrl: streamUrl,
+        title: mergedContent.title,
+        quality: pdOnlyLink.name || "HD",
+        contentId: mergedContent.id,
+        poster: mergedContent.posterUrl || mergedContent.backdropUrl,
+        year: mergedContent.year,
+        candidates: [
+          { text: "Pixeldrain Server", href: streamUrl }
+        ],
+      });
+      setIsNativePlayerOpen(true);
+      trackStreamAndCheckRate();
+      if (profile?.uid && mergedContent) {
+        logEvent("link_click", profile.uid, {
+          contentId: mergedContent.id,
+          contentTitle: mergedContent.title,
+          linkName: `Native Player - Pixeldrain Server - ${pdOnlyLink.name || "HD"}`,
+        });
+      }
+      return;
+    }
+
+    if (!targetHcLink) {
+      // Direct stream fallback
+      const directVideoLink = links.find(
+        (l) => l.url && (l.url.includes(".mp4") || l.url.includes(".mkv") || l.url.includes("workers.dev"))
+      );
+      if (directVideoLink) {
+        const streamUrl = normalizePixeldrainUrl(directVideoLink.url);
+        setActiveNativePlayerConfig({
+          watchUrl: directVideoLink.url,
+          streamUrl,
+          title: mergedContent.title,
+          quality: directVideoLink.name || "HD",
+          contentId: mergedContent.id,
+          poster: mergedContent.posterUrl || mergedContent.backdropUrl,
+          year: mergedContent.year,
+          candidates: [{ text: directVideoLink.name || "Direct Stream", href: streamUrl }],
+        });
+        setIsNativePlayerOpen(true);
+        return;
+      }
+
+      setAlertConfig({
+        isOpen: true,
+        title: t("No Stream Available"),
+        message: t("No Hubcloud or Pixeldrain stream links found for this movie."),
+      });
+      return;
+    }
+
+    // Spin loader and extract target HubCloud link
+    setIsExtractingNativeMovie(true);
+    try {
+      const apiBase = getStreamingApiBase();
+      const doCheck = async (base: string) => {
+        const res = await fetch(`${base}/api/native-player/check`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: targetHcLink.url.trim() }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      };
+
+      let checkData: any = null;
+      try {
+        checkData = await doCheck(apiBase);
+      } catch (e) {
+        if (apiBase) {
+          checkData = await doCheck("");
+        } else {
+          throw e;
+        }
+      }
+
+      if (checkData) {
+        const candidates = Array.isArray(checkData.candidates) ? checkData.candidates : [];
+        const fsl = findFslCandidate(candidates);
+        const pixel = findPixeldrainCandidate(candidates);
+        const watch = findWatchOnlineCandidate(candidates);
+
+        // Priority:
+        // Use FSL server to play video, if FSL fails to play in 15 seconds change to Pixeldrain,
+        // and also use Pixeldrain if FSL server is not available!
+        const chosen = fsl || pixel || watch;
+        const rawStream = fsl ? fsl.href : (pixel ? pixel.streamUrl : (chosen ? chosen.href : checkData.streamUrl));
+        const streamUrl = normalizePixeldrainUrl(rawStream);
+
+        setActiveNativePlayerConfig({
+          watchUrl: checkData.watchUrl || targetHcLink.url,
+          streamUrl: streamUrl,
+          title: mergedContent.title,
+          quality: targetHcLink.name || checkData.quality || "720p",
+          contentId: mergedContent.id,
+          poster: mergedContent.posterUrl || mergedContent.backdropUrl,
+          year: mergedContent.year,
+          candidates: candidates.length > 0 ? candidates : (pixel ? [{ text: pixel.text, href: pixel.streamUrl }] : []),
+        });
+        setIsNativePlayerOpen(true);
+        trackStreamAndCheckRate();
+        if (profile?.uid && mergedContent) {
+          logEvent("link_click", profile.uid, {
+            contentId: mergedContent.id,
+            contentTitle: mergedContent.title,
+            linkName: `Native Player - ${fsl ? "FSL Server" : pixel ? "Pixeldrain Server" : "Watch Online"} - ${targetHcLink.name || "720p"}`,
+          });
+        }
+      } else {
+        throw new Error("No data returned from extraction");
+      }
+    } catch (err: any) {
+      console.error("[Native Movie Play extraction failed]:", err);
+      setAlertConfig({
+        isOpen: true,
+        title: t("Playback Error"),
+        message: t("Failed to extract video stream. Please try selecting a link from the links section below."),
+      });
+    } finally {
+      setIsExtractingNativeMovie(false);
+    }
+  };
 
   const loadTmdbImagesForGallery = async () => {
     if (!mergedContent || loadingTmdbGallery) {
@@ -3147,78 +3367,30 @@ export default function MovieDetails() {
                   );
                 })()}
 
-                {/* 1st Place: Native Player Play Movie Button (automatically checked from 720p hubcloud link) */}
-                {isNativeStreamAvailable && (
+                {/* 1st Place: Native Player Play Movie Button - Always shown for movies */}
+                {mergedContent?.type !== "series" && (
                   <button
-                    onClick={() => {
-                      if (!profile) {
-                        setShowLoginPrompt(true);
-                        return;
-                      }
-                      if (!canPlay) {
-                        if (mergedContent?.status === "selected_content") {
-                          setAlertConfig({
-                            isOpen: true,
-                            title: t("Content Locked"),
-                            message: t("You don't have access to this content. Contact Admin."),
-                          });
-                        } else if (isPending) {
-                          setAlertConfig({
-                            isOpen: true,
-                            title: t("Account Pending"),
-                            message: t("Your account activation is pending. Please Get Membership or Add any content to cart to activate your account."),
-                          });
-                        } else if (isExpired) {
-                          setAlertConfig({
-                            isOpen: true,
-                            title: profile?.role === "trial" ? t("Trial Expired") : t("Membership Expired"),
-                            message: profile?.role === "trial"
-                              ? t("Your free Trial has expired. Please get Membership to continue watching.")
-                              : t("Your membership has expired. Please renew to continue watching."),
-                          });
-                        } else {
-                          setAlertConfig({
-                            isOpen: true,
-                            title: t("Content Locked"),
-                            message: t("This content is locked. Please contact admin to get access to this movie/series."),
-                          });
-                        }
-                        return;
-                      }
-                      const fsl720Cand = findFslCandidate(nativeStreamData?.candidates);
-                      const pixel720Cand = findPixeldrainCandidate(nativeStreamData?.candidates);
-                      const chosenCand = fsl720Cand || pixel720Cand;
-                      const streamUrl = chosenCand
-                        ? normalizePixeldrainUrl(chosenCand.href)
-                        : normalizePixeldrainUrl(nativeStreamData?.streamUrl);
-
-                      setActiveNativePlayerConfig({
-                        watchUrl: nativeStreamData?.watchUrl,
-                        streamUrl,
-                        title: mergedContent.title,
-                        quality: nativeStreamData?.quality || "720p",
-                        contentId: mergedContent.id,
-                        poster: mergedContent.posterUrl || mergedContent.backdropUrl,
-                        year: mergedContent.year,
-                        candidates: nativeStreamData?.candidates,
-                      });
-                      setIsNativePlayerOpen(true);
-                      trackStreamAndCheckRate();
-                      if (profile?.uid && mergedContent) {
-                        logEvent("link_click", profile.uid, {
-                          contentId: mergedContent.id,
-                          contentTitle: mergedContent.title,
-                          linkName: "Native Player - 720p Watch Online",
-                        });
-                      }
-                    }}
-                    className="bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:via-teal-400 hover:to-cyan-400 text-white px-6 py-3.5 text-sm sm:text-base rounded-2xl font-black flex items-center gap-2.5 transition-all duration-300 active:scale-95 border border-white/20 shadow-xl shadow-emerald-500/25"
+                    type="button"
+                    onClick={handleNativePlayMovieClick}
+                    disabled={isExtractingNativeMovie}
+                    className={`bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:via-teal-400 hover:to-cyan-400 text-white px-6 py-3.5 text-sm sm:text-base rounded-2xl font-black flex items-center gap-2.5 transition-all duration-300 active:scale-95 border border-white/20 shadow-xl shadow-emerald-500/25 cursor-pointer ${
+                      isExtractingNativeMovie ? "opacity-85 cursor-wait" : ""
+                    }`}
                   >
-                    <Play className="w-5 h-5 fill-current" />
-                    <span>{t('Play Movie')}</span>
-                    <span className="text-[11px] font-bold bg-black/25 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                      {nativeStreamData?.quality || '720p'}
-                    </span>
+                    {isExtractingNativeMovie ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin text-white" />
+                        <span>{t('Extracting Stream...')}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-5 h-5 fill-current" />
+                        <span>{t('Play Movie')}</span>
+                        <span className="text-[11px] font-bold bg-black/25 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                          {movieQualityBadge}
+                        </span>
+                      </>
+                    )}
                   </button>
                 )}
 

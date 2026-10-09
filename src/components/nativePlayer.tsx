@@ -26,6 +26,7 @@ import { useLanguage } from "../contexts/LanguageContext";
 import { safeStorage } from "../utils/safeStorage";
 import { useModalBehavior } from "../hooks/useModalBehavior";
 import { getStreamingApiBase } from "../utils/domains";
+export { getStreamingApiBase };
 import {
   modalBackdropAnimation,
   modalContainerAnimation,
@@ -168,6 +169,7 @@ export function findFslCandidate(
     const h = (c.href || "").toLowerCase();
     return (
       t.includes("fsl") ||
+      h.includes("fsl") ||
       h.includes("cloudflarestorage") ||
       h.includes(".r2.")
     );
@@ -193,6 +195,8 @@ export function findPixeldrainCandidate(
       t.includes("pixel") ||
       h.includes("pixeldrain") ||
       h.includes("pixelserver") ||
+      h.includes("pixel.drain") ||
+      h.includes("pixeldra.in") ||
       t.includes("pdrain")
     );
   });
@@ -360,12 +364,43 @@ export function NativePlayer({
   const fslCandidate = useMemo(() => findFslCandidate(candidates), [candidates]);
   const pixeldrainCandidate = useMemo(() => findPixeldrainCandidate(candidates), [candidates]);
   const decodedMeta = useMemo(() => decodeWatchUrl(watchUrl), [watchUrl]);
-  const rawStreamUrl =
-    fslCandidate?.href ||
-    pixeldrainCandidate?.streamUrl ||
-    propStreamUrl ||
-    decodedMeta.streamUrl ||
-    (watchUrl && !watchUrl.includes("hbplay.pages.dev") ? watchUrl : "");
+
+  // Active server: default to "fsl" if fslCandidate exists, otherwise "pixeldrain" if pixeldrainCandidate exists, else "default"
+  const [activeServer, setActiveServer] = useState<"fsl" | "pixeldrain" | "default">(() => {
+    if (fslCandidate) return "fsl";
+    if (pixeldrainCandidate) return "pixeldrain";
+    return "default";
+  });
+
+  // Keep activeServer in sync when modal opens or candidates change
+  useEffect(() => {
+    if (isOpen) {
+      if (fslCandidate) {
+        setActiveServer("fsl");
+      } else if (pixeldrainCandidate) {
+        setActiveServer("pixeldrain");
+      } else {
+        setActiveServer("default");
+      }
+    }
+  }, [isOpen, fslCandidate, pixeldrainCandidate]);
+
+  const rawStreamUrl = useMemo(() => {
+    if (activeServer === "pixeldrain" && pixeldrainCandidate) {
+      return pixeldrainCandidate.streamUrl || pixeldrainCandidate.href;
+    }
+    if (activeServer === "fsl" && fslCandidate) {
+      return fslCandidate.href;
+    }
+    return (
+      fslCandidate?.href ||
+      pixeldrainCandidate?.streamUrl ||
+      propStreamUrl ||
+      decodedMeta.streamUrl ||
+      (watchUrl && !watchUrl.includes("hbplay.pages.dev") ? watchUrl : "")
+    );
+  }, [activeServer, fslCandidate, pixeldrainCandidate, propStreamUrl, decodedMeta, watchUrl]);
+
   const directStreamUrl = normalizePixeldrainUrl(rawStreamUrl);
   const displayTitle = decodedMeta.title || title;
 
@@ -376,12 +411,13 @@ export function NativePlayer({
     if (!directStreamUrl) return false;
     const lower = directStreamUrl.toLowerCase();
     return (
+      activeServer === "pixeldrain" ||
       lower.includes("pixeldrain") ||
       lower.includes("pixel.drain") ||
       lower.includes(".mkv") ||
       lower.includes("matroska")
     );
-  }, [directStreamUrl]);
+  }, [directStreamUrl, activeServer]);
 
   const [mediaInfo, setMediaInfo] = useState<MediaProbeInfo | null>(null);
   const [streamAttempt, setStreamAttempt] = useState<number>(0);
@@ -452,6 +488,32 @@ export function NativePlayer({
       setToastMessage(null);
     }, 2200);
   }, []);
+
+  const hasStartedPlaybackRef = useRef<boolean>(false);
+
+  // 15-second fallback: if playing on FSL server and it fails to start playing in 15 seconds, change to Pixeldrain
+  useEffect(() => {
+    if (!isOpen || engine !== "native") return;
+    if (activeServer !== "fsl") return;
+    if (!pixeldrainCandidate) return;
+
+    hasStartedPlaybackRef.current = false;
+    const timerId = setTimeout(() => {
+      // If FSL server failed to start playback in 15 seconds
+      if (!hasStartedPlaybackRef.current) {
+        console.warn("[NativePlayer] FSL Server failed to start playback within 15 seconds. Switching to Pixeldrain Server...");
+        showToast(t("FSL server took too long. Switching to Pixeldrain..."));
+        setActiveServer("pixeldrain");
+        setStreamMode("transcode");
+        setStreamAttempt((prev) => prev + 1);
+        setIsBuffering(true);
+      }
+    }, 15000);
+
+    return () => {
+      clearTimeout(timerId);
+    };
+  }, [isOpen, activeServer, pixeldrainCandidate, engine, streamAttempt, showToast, t]);
 
   // Fetch probe media info (exact duration, audio streams, subtitles)
   useEffect(() => {
@@ -757,6 +819,7 @@ export function NativePlayer({
     videoRef.current.playbackRate = playbackSpeed;
     videoRef.current.play().then(() => {
       setIsPlaying(true);
+      hasStartedPlaybackRef.current = true;
     }).catch(() => {
       setIsPlaying(false);
     });
@@ -795,6 +858,16 @@ export function NativePlayer({
 
   const handleVideoError = () => {
     setIsBuffering(false);
+    // If on FSL server and Pixeldrain candidate is available, switch immediately to Pixeldrain!
+    if (activeServer === "fsl" && pixeldrainCandidate) {
+      console.warn("[NativePlayer] FSL server error encountered. Switching to Pixeldrain Server...");
+      showToast(t("FSL server error. Switching to Pixeldrain..."));
+      setActiveServer("pixeldrain");
+      setStreamMode("transcode");
+      setStreamAttempt((prev) => prev + 1);
+      setIsBuffering(true);
+      return;
+    }
     // If proxy failed, automatically switch to transcode mode (Universal Remux/Transcode Engine) and retry once
     if (streamMode === "proxy" && streamAttempt === 0) {
       setStreamMode("transcode");
@@ -1124,6 +1197,7 @@ export function NativePlayer({
                   setIsBuffering(false);
                   setIsPlaying(true);
                   setHasPlaybackError(false);
+                  hasStartedPlaybackRef.current = true;
                 }}
                 onPause={() => {
                   setIsPlaying(false);
@@ -1299,6 +1373,51 @@ export function NativePlayer({
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* Server Switcher Pill if both FSL and Pixeldrain candidates exist */}
+              {fslCandidate && pixeldrainCandidate && (
+                <div className="flex items-center gap-1 bg-zinc-900/90 backdrop-blur-md p-1 rounded-xl border border-zinc-700/60 text-xs shadow-md">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (activeServer !== "fsl") {
+                        setActiveServer("fsl");
+                        setStreamAttempt((p) => p + 1);
+                        setIsBuffering(true);
+                        showToast(t("Switched to FSL Server"));
+                      }
+                    }}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all text-xs cursor-pointer ${
+                      activeServer === "fsl"
+                        ? "bg-emerald-500 text-white shadow-sm"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    FSL
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (activeServer !== "pixeldrain") {
+                        setActiveServer("pixeldrain");
+                        setStreamMode("transcode");
+                        setStreamAttempt((p) => p + 1);
+                        setIsBuffering(true);
+                        showToast(t("Switched to Pixeldrain Server"));
+                      }
+                    }}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all text-xs cursor-pointer ${
+                      activeServer === "pixeldrain"
+                        ? "bg-cyan-500 text-white shadow-sm"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    Pixeldrain
+                  </button>
+                </div>
+              )}
+
               {/* Direct Download Button */}
               {directStreamUrl && (
                 <a
