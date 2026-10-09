@@ -95,6 +95,7 @@ import { emailRouter } from "./_email.js";
 import { tmdbRouter } from "./_tmdb.js";
 import { ordersRouter } from "./_orders.js";
 import { playerFURouter } from "./_playerFU.js";
+import { nativePlayerRouter } from "./_nativePlayer.js";
 import { checkAndSendExpiryNotifications, sendMembershipUpdateNotification, sendOrderApprovedNotification, sendUserStatusEmail } from "./_expiryService.js";
 
 export function isCloudflareHtml(status: number, htmlStr: string): boolean {
@@ -411,6 +412,7 @@ async function startServer() {
   app.use("/api", tmdbRouter);
   app.use("/api/orders", ordersRouter);
   app.use(playerFURouter);
+  app.use(nativePlayerRouter);
 
   // Dynamic build info generated on Vercel or locally
   const SERVER_BUILD_TIME = new Date().toISOString();

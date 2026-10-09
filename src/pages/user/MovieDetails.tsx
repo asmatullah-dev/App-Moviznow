@@ -84,6 +84,7 @@ import AlertModal from "../../components/AlertModal";
 import ConfirmModal from "../../components/ConfirmModal";
 import SharePreviewModal from "../../components/SharePreviewModal";
 import PlayerFU, { PlayerFUButton, usePlayerFU } from "../../components/PlayerFU";
+import NativePlayer, { useNativePlayerCheck, findWatchOnlineCandidate, findFslCandidate } from "../../components/nativePlayer";
 import { clsx } from "clsx";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -318,11 +319,14 @@ export default function MovieDetails() {
     name: string;
     id: string;
     isZip?: boolean;
+    isMkv?: boolean;
     tinyUrl?: string;
     candidates?: { text: string; href: string }[];
     size?: string;
     isCloudflare?: boolean;
     formattedTitle?: string;
+    seasonInfo?: { id?: string; number: number; title?: string };
+    episodeInfo?: { number: number; title: string };
   } | null>(null);
   const [isLinkCopied, setIsLinkCopied] = useState(false);
   const [isPosterExpanded, setIsPosterExpanded] = useState(false);
@@ -333,6 +337,19 @@ export default function MovieDetails() {
   const [isTrailerPopupOpen, setIsTrailerPopupOpen] = useState(false);
   const [isTrailerSelectionOpen, setIsTrailerSelectionOpen] = useState(false);
   const [isPlayerOpen, setIsPlayerOpen] = useState<boolean>(false);
+  const [isNativePlayerOpen, setIsNativePlayerOpen] = useState<boolean>(false);
+  const [activeNativePlayerConfig, setActiveNativePlayerConfig] = useState<{
+    watchUrl?: string;
+    streamUrl?: string;
+    title?: string;
+    quality?: string;
+    contentId?: string;
+    poster?: string;
+    year?: string | number;
+    seasonInfo?: { number: number; title?: string };
+    episodeInfo?: { number: number; title?: string };
+    candidates?: Array<{ text: string; href: string }>;
+  } | null>(null);
   const [showRatePrompt, setShowRatePrompt] = useState(false);
   const [showReportConfirm, setShowReportConfirm] = useState(false);
   const [pendingReportTarget, setPendingReportTarget] = useState<{ link: any; contextTitle?: string } | null>(null);
@@ -769,10 +786,76 @@ export default function MovieDetails() {
     return merged as Content;
   }, [content, cachedMetadata, fullContent, id, contentLoading, isOffline]);
 
+  const getLinksArray = (linksData: any): QualityLinks => {
+    if (!linksData) return [];
+    if (Array.isArray(linksData)) return linksData;
+
+    const parseObject = (obj: any) => {
+      return Object.entries(obj)
+        .map(([name, link]: [string, any], index) => ({
+          id: `parsed-link-${index}`,
+          name,
+          url: link?.url || "",
+          size: link?.size || "",
+          unit: (link?.unit || "MB") as "MB" | "GB",
+        }))
+        .filter((l) => l.url);
+    };
+
+    if (typeof linksData === "object") {
+      return parseObject(linksData);
+    }
+
+    if (typeof linksData === "string") {
+      try {
+        let parsed = JSON.parse(linksData);
+        while (typeof parsed === "string") {
+          parsed = JSON.parse(parsed);
+        }
+        if (Array.isArray(parsed)) return parsed;
+        if (typeof parsed === "object" && parsed !== null) {
+          return parseObject(parsed);
+        }
+      } catch (e) {
+        console.error("Failed to parse linksData", linksData, e);
+      }
+    }
+    return [];
+  };
+
   const { rating: hookRating, ottPlatform: hookOtt } = useImdbRating(mergedContent);
 
   // Stream availability & IMDb lookup managed cleanly via PlayerFU hook
   const { isAvailable: isStreamAvailable, currentImdbId } = usePlayerFU(mergedContent);
+
+  // 1st Place: Automatically check 720p hubcloud link on any movie for watch online extraction link
+  const autoCheck720Link = useMemo(() => {
+    if (!mergedContent || mergedContent.type === "series") return null;
+    const links = getLinksArray(mergedContent.movieLinks || (mergedContent as any).links);
+    const isHc = (u: string) => {
+      if (!u) return false;
+      const l = u.toLowerCase();
+      return (
+        l.includes("hubcloud") ||
+        l.includes("hubcould") ||
+        l.includes("vcloud") ||
+        l.includes("hubdrive") ||
+        l.includes("moviesdrive") ||
+        l.includes("drivehub")
+      );
+    };
+    // Prioritize 720p hubcloud link
+    const found720 = links.find((l) => isHc(l.url) && /720p?/i.test(l.name || ""));
+    if (found720) return found720;
+    // Fallback to any hubcloud link
+    return links.find((l) => isHc(l.url)) || null;
+  }, [mergedContent]);
+
+  const {
+    isAvailable: isNativeStreamAvailable,
+    streamData: nativeStreamData,
+    isLoading: isCheckingNativeStream,
+  } = useNativePlayerCheck(autoCheck720Link?.url);
 
   const loadTmdbImagesForGallery = async () => {
     if (!mergedContent || loadingTmdbGallery) {
@@ -1941,8 +2024,10 @@ export default function MovieDetails() {
     isZip?: boolean,
     tinyUrl?: string,
     isLocked?: boolean,
-    seasonInfo?: { id: string; number: number; title?: string },
+    seasonInfo?: { id?: string; number: number; title?: string },
     formattedTitle?: string,
+    episodeInfo?: { number: number; title: string },
+    isMkv?: boolean,
   ) => {
     // Check eligibility before opening links
     const checkEligibility = () => {
@@ -2072,9 +2157,16 @@ export default function MovieDetails() {
         // If we have a valid cached link within 10 minutes (600,000 ms), use it directly
         if (cached && now - cached.timestamp < 600000 && cached.url && !isHubcloudRawLink(cached.url)) {
           shouldExtract = false;
-          finalUrl = cached.url;
           finalTinyUrl = undefined;
           finalCandidates = cached.candidates;
+          const isPixeldrain = (c: any) => {
+            if (!c || !c.href) return false;
+            const t = (c.text || '').toLowerCase();
+            const h = (c.href || '').toLowerCase();
+            return t.includes('pixel') || h.includes('pixeldrain') || h.includes('pixelserver');
+          };
+          const pixCand = finalCandidates?.find(isPixeldrain);
+          finalUrl = pixCand ? pixCand.href : cached.url;
           finalSize = cached.size;
           hubcloudCacheRef.current[targetUrl] = cached;
         }
@@ -2102,7 +2194,35 @@ export default function MovieDetails() {
                 const data = await res.json();
                 let candidateDirectUrl = data.url;
 
-                // If data.url is still raw or intermediate, check data.candidates for direct links
+                const isPixeldrain = (c: any) => {
+                  if (!c || !c.href) return false;
+                  const t = (c.text || '').toLowerCase();
+                  const h = (c.href || '').toLowerCase();
+                  return t.includes('pixel') || h.includes('pixeldrain') || h.includes('pixelserver');
+                };
+
+                // Priority 1: Select Pixeldrain default for the dropdown!
+                const pixeldrainCand = Array.isArray(data.candidates)
+                  ? data.candidates.find(isPixeldrain)
+                  : null;
+
+                if (pixeldrainCand?.href) {
+                  candidateDirectUrl = pixeldrainCand.href;
+                } else if (Array.isArray(data.candidates) && data.candidates.length > 0) {
+                  // Fallback: check FSL server or first valid candidate
+                  const fslCand = data.candidates.find((c: any) =>
+                    c && c.href && (
+                      (c.text && c.text.toLowerCase().includes("fsl")) ||
+                      c.href.toLowerCase().includes("cloudflarestorage") ||
+                      c.href.toLowerCase().includes(".r2.")
+                    )
+                  );
+                  if (fslCand?.href) {
+                    candidateDirectUrl = fslCand.href;
+                  }
+                }
+
+                // Priority 2: If data.url is still raw or intermediate, check data.candidates for direct links
                 if ((!candidateDirectUrl || candidateDirectUrl === targetUrl || isHubcloudRawLink(candidateDirectUrl)) && Array.isArray(data.candidates) && data.candidates.length > 0) {
                   const directCand = data.candidates.find((c: any) =>
                     c.href && !isHubcloudRawLink(c.href) && !c.href.toLowerCase().includes("hubcloud") && !c.href.toLowerCase().includes("vcloud")
@@ -2115,7 +2235,7 @@ export default function MovieDetails() {
                 if (candidateDirectUrl && candidateDirectUrl !== targetUrl && !isHubcloudRawLink(candidateDirectUrl)) {
                   finalUrl = candidateDirectUrl;
                   finalTinyUrl = undefined;
-                  finalCandidates = Array.isArray(data.candidates)
+                  const filtered = Array.isArray(data.candidates)
                     ? data.candidates.filter((c: any) => {
                         const lowerT = (c.text || '').toLowerCase();
                         const lowerH = (c.href || '').toLowerCase();
@@ -2125,6 +2245,26 @@ export default function MovieDetails() {
                                !lowerT.includes('telegram') && !lowerH.includes('telegram');
                       })
                     : data.candidates;
+
+                  // Sort Pixeldrain to the top so it is selected by default in the dropdown!
+                  finalCandidates = filtered
+                    ? [...filtered].sort((a: any, b: any) => {
+                        const aPix = isPixeldrain(a);
+                        const bPix = isPixeldrain(b);
+                        if (aPix && !bPix) return -1;
+                        if (!aPix && bPix) return 1;
+                        const aFsl = (a.text || '').toLowerCase().includes('fsl') || (a.href || '').includes('cloudflarestorage');
+                        const bFsl = (b.text || '').toLowerCase().includes('fsl') || (b.href || '').includes('cloudflarestorage');
+                        if (aFsl && !bFsl) return -1;
+                        if (!aFsl && bFsl) return 1;
+                        return 0;
+                      })
+                    : filtered;
+
+                  const defaultPix = finalCandidates?.find(isPixeldrain);
+                  if (defaultPix) {
+                    finalUrl = defaultPix.href;
+                  }
                   finalSize = data.size;
 
                   const cacheEntry = {
@@ -2206,10 +2346,13 @@ export default function MovieDetails() {
       name: linkName || "Unknown Link",
       id: linkId || "unknown",
       isZip,
+      isMkv,
       tinyUrl: extractionResult.finalTinyUrl,
       candidates: extractionResult.finalCandidates,
       size: extractionResult.finalSize,
       formattedTitle,
+      seasonInfo,
+      episodeInfo,
     });
   };
 
@@ -2551,43 +2694,6 @@ export default function MovieDetails() {
     .map((l) => l.name)
     .join(", ");
 
-  const getLinksArray = (linksData: any): QualityLinks => {
-    if (!linksData) return [];
-    if (Array.isArray(linksData)) return linksData;
-
-    const parseObject = (obj: any) => {
-      return Object.entries(obj)
-        .map(([name, link]: [string, any], index) => ({
-          id: `parsed-link-${index}`,
-          name,
-          url: link?.url || "",
-          size: link?.size || "",
-          unit: (link?.unit || "MB") as "MB" | "GB",
-        }))
-        .filter((l) => l.url);
-    };
-
-    if (typeof linksData === "object") {
-      return parseObject(linksData);
-    }
-
-    if (typeof linksData === "string") {
-      try {
-        let parsed = JSON.parse(linksData);
-        while (typeof parsed === "string") {
-          parsed = JSON.parse(parsed);
-        }
-        if (Array.isArray(parsed)) return parsed;
-        if (typeof parsed === "object" && parsed !== null) {
-          return parseObject(parsed);
-        }
-      } catch (e) {
-        console.error("Failed to parse linksData", linksData, e);
-      }
-    }
-    return [];
-  };
-
   const renderLinks = (
     links: QualityLinks,
     isZip?: boolean,
@@ -2687,6 +2793,8 @@ export default function MovieDetails() {
                       isLocked,
                       seasonInfo,
                       formattedTitle,
+                      episodeInfo,
+                      isMkv,
                     )
                   }
                   className="flex-1 flex items-center justify-center gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 active:scale-95 text-white py-2.5 px-3 rounded-xl text-xs sm:text-sm font-extrabold shadow-lg shadow-emerald-500/20 border border-emerald-400/30 transition-all cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
@@ -2714,6 +2822,8 @@ export default function MovieDetails() {
                       isLocked,
                       seasonInfo,
                       formattedTitle,
+                      episodeInfo,
+                      isMkv,
                     )
                   }
                   className="flex-1 flex items-center justify-center gap-1.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 active:scale-95 text-white py-2.5 px-3 rounded-xl text-xs sm:text-sm font-extrabold shadow-lg shadow-cyan-600/20 border border-cyan-400/30 transition-all cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
@@ -2747,6 +2857,8 @@ export default function MovieDetails() {
                             isLocked,
                             seasonInfo,
                             formattedTitle,
+                            episodeInfo,
+                            isMkv,
                           );
                           return;
                         }
@@ -3028,6 +3140,75 @@ export default function MovieDetails() {
                     </button>
                   );
                 })()}
+
+                {/* 1st Place: Native Player Play Movie Button (automatically checked from 720p hubcloud link) */}
+                {isNativeStreamAvailable && (
+                  <button
+                    onClick={() => {
+                      if (!profile) {
+                        setShowLoginPrompt(true);
+                        return;
+                      }
+                      if (!canPlay) {
+                        if (mergedContent?.status === "selected_content") {
+                          setAlertConfig({
+                            isOpen: true,
+                            title: t("Content Locked"),
+                            message: t("You don't have access to this content. Contact Admin."),
+                          });
+                        } else if (isPending) {
+                          setAlertConfig({
+                            isOpen: true,
+                            title: t("Account Pending"),
+                            message: t("Your account activation is pending. Please Get Membership or Add any content to cart to activate your account."),
+                          });
+                        } else if (isExpired) {
+                          setAlertConfig({
+                            isOpen: true,
+                            title: profile?.role === "trial" ? t("Trial Expired") : t("Membership Expired"),
+                            message: profile?.role === "trial"
+                              ? t("Your free Trial has expired. Please get Membership to continue watching.")
+                              : t("Your membership has expired. Please renew to continue watching."),
+                          });
+                        } else {
+                          setAlertConfig({
+                            isOpen: true,
+                            title: t("Content Locked"),
+                            message: t("This content is locked. Please contact admin to get access to this movie/series."),
+                          });
+                        }
+                        return;
+                      }
+                      const fsl720Cand = findFslCandidate(nativeStreamData?.candidates);
+                      setActiveNativePlayerConfig({
+                        watchUrl: nativeStreamData?.watchUrl,
+                        streamUrl: fsl720Cand ? fsl720Cand.href : nativeStreamData?.streamUrl,
+                        title: mergedContent.title,
+                        quality: nativeStreamData?.quality || "720p",
+                        contentId: mergedContent.id,
+                        poster: mergedContent.posterUrl || mergedContent.backdropUrl,
+                        year: mergedContent.year,
+                        candidates: nativeStreamData?.candidates,
+                      });
+                      setIsNativePlayerOpen(true);
+                      trackStreamAndCheckRate();
+                      if (profile?.uid && mergedContent) {
+                        logEvent("link_click", profile.uid, {
+                          contentId: mergedContent.id,
+                          contentTitle: mergedContent.title,
+                          linkName: "Native Player - 720p Watch Online",
+                        });
+                      }
+                    }}
+                    className="bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:via-teal-400 hover:to-cyan-400 text-white px-6 py-3.5 text-sm sm:text-base rounded-2xl font-black flex items-center gap-2.5 transition-all duration-300 active:scale-95 border border-white/20 shadow-xl shadow-emerald-500/25"
+                  >
+                    <Play className="w-5 h-5 fill-current" />
+                    <span>{t('Play Movie')}</span>
+                    <span className="text-[11px] font-bold bg-black/25 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                      {nativeStreamData?.quality || '720p'}
+                    </span>
+                  </button>
+                )}
 
                 {/* Instant Play Movie Stream Button - PlayerFU */}
                 {isStreamAvailable && (
@@ -4601,6 +4782,65 @@ export default function MovieDetails() {
                       !linkPopup.url.toLowerCase().includes("vcloud.zip"))
                   ) ? (
                     <>
+                      {/* Place 2: Above Play in Video Player, if extraction found FSL server or watch online, add Play Movie/Season/Episode */}
+                      {(() => {
+                        const fslCandidate = findFslCandidate(linkPopup.candidates);
+                        const watchCandidate = findWatchOnlineCandidate(linkPopup.candidates);
+                        const chosenCandidate = fslCandidate || watchCandidate;
+                        if (!chosenCandidate) return null;
+                        const isEp = Boolean(
+                          linkPopup.episodeInfo ||
+                          /E\d+|Episode\s*\d+/i.test(linkPopup.name)
+                        );
+                        const isSeas = Boolean(
+                          linkPopup.seasonInfo ||
+                          /Season\s*\d+|S\d+/i.test(linkPopup.name) ||
+                          linkPopup.isMkv
+                        );
+                        const playLabel = isEp
+                          ? t("Play Episode")
+                          : isSeas
+                          ? t("Play Season")
+                          : t("Play Movie");
+
+                        const streamUrl = fslCandidate ? fslCandidate.href : chosenCandidate.href;
+
+                        return (
+                          <button
+                            onClick={() => {
+                              setActiveNativePlayerConfig({
+                                watchUrl: chosenCandidate.href,
+                                streamUrl: streamUrl,
+                                title: linkPopup.formattedTitle || linkPopup.name || mergedContent?.title,
+                                quality: linkPopup.name || "HD",
+                                contentId: mergedContent?.id
+                                  ? `${mergedContent.id}_${linkPopup.id}`
+                                  : linkPopup.id,
+                                poster: mergedContent?.posterUrl || mergedContent?.backdropUrl,
+                                year: mergedContent?.year,
+                                seasonInfo: linkPopup.seasonInfo,
+                                episodeInfo: linkPopup.episodeInfo,
+                                candidates: linkPopup.candidates,
+                              });
+                              setIsNativePlayerOpen(true);
+                              trackStreamAndCheckRate();
+                              if (profile?.uid && mergedContent) {
+                                logEvent("link_click", profile.uid, {
+                                  contentId: mergedContent.id,
+                                  contentTitle: mergedContent.title,
+                                  linkName: `Native Player - FSL Server - ${linkPopup.name}`,
+                                });
+                              }
+                              closeLinkPopup();
+                            }}
+                            className="w-full bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:via-teal-400 hover:to-cyan-400 text-white font-black py-3.5 px-6 text-sm sm:text-base rounded-xl transition-all shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2.5 active:scale-[0.99] border border-white/20"
+                          >
+                            <Play className="w-5 h-5 fill-current" />
+                            <span>{playLabel}</span>
+                          </button>
+                        );
+                      })()}
+
                       <button
                         onClick={() => handlePlayExternal("generic")}
                         className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 px-6 text-sm sm:text-base rounded-xl transition-all shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2"
@@ -4991,6 +5231,25 @@ export default function MovieDetails() {
         onClose={() => setIsPlayerOpen(false)}
         content={mergedContent}
         imdbId={currentImdbId}
+      />
+
+      {/* Native Player Stream Modal */}
+      <NativePlayer
+        isOpen={isNativePlayerOpen}
+        onClose={() => {
+          setIsNativePlayerOpen(false);
+          setActiveNativePlayerConfig(null);
+        }}
+        title={activeNativePlayerConfig?.title || mergedContent?.title}
+        watchUrl={activeNativePlayerConfig?.watchUrl}
+        streamUrl={activeNativePlayerConfig?.streamUrl}
+        contentId={activeNativePlayerConfig?.contentId || mergedContent?.id}
+        poster={activeNativePlayerConfig?.poster || mergedContent?.posterUrl || mergedContent?.backdropUrl}
+        year={activeNativePlayerConfig?.year || mergedContent?.year}
+        quality={activeNativePlayerConfig?.quality || "720p"}
+        seasonInfo={activeNativePlayerConfig?.seasonInfo}
+        episodeInfo={activeNativePlayerConfig?.episodeInfo}
+        candidates={activeNativePlayerConfig?.candidates}
       />
       
       <ConfirmModal
