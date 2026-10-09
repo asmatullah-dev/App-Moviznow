@@ -117,8 +117,20 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
     const resumeTime = parseFloat((req.query.t as string) || "0") || 0;
     const initialSpeed = parseFloat((req.query.speed as string) || "1") || 1;
     const rawQuality = (req.query.quality as string || "").trim().toLowerCase();
-    // Default to 1080p instead of broken Auto (which hangs on HEVC IMAX streams in standard browsers)
-    const qualityPref = (!rawQuality || rawQuality === "auto") ? "1080p" : rawQuality;
+    // Don't select auto in quality, if missing then select minimum quality
+    let qualityPref = rawQuality;
+    if (!qualityPref || qualityPref === "auto") {
+      const cached = streamCheckCache.get(imdbId);
+      if (cached && cached.qualities && cached.qualities.length > 0) {
+        const heights = cached.qualities
+          .map((q: any) => Number(q.height) || parseInt(String(q.slug || q.label || "").replace(/\D/g, ""), 10) || 0)
+          .filter((h: number) => h > 0)
+          .sort((a: number, b: number) => a - b);
+        qualityPref = heights.length > 0 ? `${heights[0]}p` : "480p";
+      } else {
+        qualityPref = "480p";
+      }
+    }
     const langPref = (req.query.lang as string || "").trim();
     const autoplay = req.query.autoplay === "1" || req.query.autoplay === "true";
 
@@ -359,6 +371,7 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
               if (q && !q.toLowerCase().startsWith("auto")) {
                 try {
                   localStorage.setItem("moviznow_preferred_quality", q.toLowerCase());
+                  localStorage.setItem("moviznow_previous_quality", q.toLowerCase());
                 } catch(e) {}
               }
               if (window.parent && window.parent !== window) {
@@ -493,15 +506,17 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
       js = js.replace(
         /if\s*\(window\.__PA_PREF_QUALITY__\s*&&\s*hls\.levels\s*&&\s*hls\.levels\.length\)\s*\{[\s\S]*?applied\s*=\s*true;\s*\}\s*\}/g,
         `var qPref = window.__PA_PREF_QUALITY__ || (function(){ try { return localStorage.getItem("moviznow_preferred_quality"); } catch(e){ return ""; } })();
-        if (qPref && String(qPref).toLowerCase() !== "auto" && hls.levels && hls.levels.length) {
-          var bestIdx = findBestQualityIndexForTarget(qPref);
-          if (bestIdx >= 0) {
-            setQualityLevel(bestIdx);
-            applied = true;
-          }
+        var chosenIdx = -1;
+        // Don't select auto in quality! If missing or auto, select minimum quality
+        if (qPref && String(qPref).toLowerCase() !== "auto") {
+          chosenIdx = findBestQualityIndexForTarget(qPref);
         }
-        if (!applied && typeof qualityIsAuto === "function" && qualityIsAuto()) {
-          if (typeof __startAutoPlaybackGuard === "function") __startAutoPlaybackGuard();
+        if (chosenIdx < 0 && typeof findMinimumQualityIndex === "function") {
+          chosenIdx = findMinimumQualityIndex();
+        }
+        if (chosenIdx >= 0) {
+          setQualityLevel(chosenIdx);
+          applied = true;
         }
         if (typeof window.__PA_TRY_PLAY__ === "function") {
           window.__PA_TRY_PLAY__();
@@ -516,7 +531,7 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
         }`
       );
 
-      // 4. Trigger auto playback guard when switching to Auto mode in setQualityLevel (FIXED SYNTAX)
+      // 4. Trigger auto playback guard when switching to Auto mode in setQualityLevel
       js = js.replace(
         /if\s*\(idx\s*<\s*0\)\s*\{[\s\S]*?pinLockedQuality\(\{\s*hard:\s*true\s*\}\);\s*\}/g,
         `if (idx < 0) {
@@ -524,6 +539,8 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
           lockedQualityKey = null;
           imaxMode = false;
           storeQualityLock(null);
+          // Never save preference if selected Auto
+          try { localStorage.removeItem("moviznow_preferred_quality"); } catch(e) {}
           hls.loadLevel = -1;
           hls.nextLevel = -1;
           if (video.paused || !player.classList.contains("has-started")) {
@@ -537,6 +554,7 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
           }
           lockedQualityKey = qualityKeyOf(levels[idx], levels);
           lockedQuality = idx;
+          if (typeof __recordNonAutoQuality === "function") __recordNonAutoQuality(idx, levels[idx]);
           imaxMode = !!lockedQualityKey.imax;
           storeQualityLock(lockedQualityKey);
           pinLockedQuality({ hard: true });
@@ -638,9 +656,36 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
         }
 
         /* MovizNow Smart Quality Fallback & Auto-Play Protection */
+        var __lastSelectedNonAutoIndex = -1;
+        var __lastSelectedNonAutoHeight = 0;
+        function __recordNonAutoQuality(idx, levelObj) {
+          __lastSelectedNonAutoIndex = idx;
+          if (levelObj && levelObj.height) {
+            __lastSelectedNonAutoHeight = Number(levelObj.height);
+            try {
+              localStorage.setItem("moviznow_previous_quality", String(levelObj.height) + "p");
+            } catch(e) {}
+          }
+        }
+
+        function findMinimumQualityIndex() {
+          if (typeof hls === "undefined" || !hls || !hls.levels || !hls.levels.length) return -1;
+          var valid = [];
+          for (var i = 0; i < hls.levels.length; i++) {
+            var l = hls.levels[i];
+            if (typeof levelCanPlay === "function" && !levelCanPlay(l)) continue;
+            var h = Number(l.height) || 0;
+            if (h > 0) valid.push({ i: i, h: h });
+          }
+          if (!valid.length) return 0;
+          valid.sort(function(a, b) { return a.h - b.h; });
+          return valid[0].i;
+        }
+
         function findBestQualityIndexForTarget(targetPrefStr) {
           if (typeof hls === "undefined" || !hls || !hls.levels || !hls.levels.length) return -1;
-          var targetH = parseInt(String(targetPrefStr).replace(/[^0-9]/g, ""), 10) || 1080;
+          var targetH = parseInt(String(targetPrefStr).replace(/[^0-9]/g, ""), 10) || 0;
+          if (!targetH) return findMinimumQualityIndex();
           var valid = [];
           for (var i = 0; i < hls.levels.length; i++) {
             var l = hls.levels[i];
@@ -670,7 +715,7 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
             }
           }
 
-          if (!chosenH) return -1;
+          if (!chosenH) return findMinimumQualityIndex();
 
           var ladder = typeof nearestResolutionLabel === "function" ? (nearestResolutionLabel(chosenH) || (chosenH + "p")) : (chosenH + "p");
           var idx = typeof resolveLockedLevelIndex === "function" ? resolveLockedLevelIndex({ ladder: ladder, fam: "avc", imax: false }) : -1;
@@ -688,21 +733,32 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
           __autoTimer = setTimeout(function() {
             if (typeof qualityIsAuto === "function" && qualityIsAuto()) {
               var vid = document.getElementById("video");
+              // If playback has not started, switch to previous selected quality (not auto), or minimum
               if (vid && (vid.currentTime === 0 || vid.paused || vid.readyState < 3)) {
-                console.warn("[PlayerFU] Auto stream stalled for 15s. Switching to saved preference.");
-                var saved = "1080p";
-                try {
-                  saved = localStorage.getItem("moviznow_preferred_quality") || "1080p";
-                } catch(e) {}
-                var bestIdx = findBestQualityIndexForTarget(saved);
-                if (bestIdx < 0) bestIdx = findBestQualityIndexForTarget("1080p");
-                if (bestIdx < 0) bestIdx = findBestQualityIndexForTarget("720p");
-                if (bestIdx >= 0 && typeof setQualityLevel === "function") {
-                  setQualityLevel(bestIdx);
+                console.warn("[PlayerFU] Auto stream did not start playback. Switching to previous selected quality (or minimum).");
+                var fallbackIdx = -1;
+                // 1. If previous non-auto quality was selected, change to it:
+                if (typeof __lastSelectedNonAutoIndex === "number" && __lastSelectedNonAutoIndex >= 0) {
+                  fallbackIdx = __lastSelectedNonAutoIndex;
+                } else if (__lastSelectedNonAutoHeight > 0) {
+                  fallbackIdx = findBestQualityIndexForTarget(String(__lastSelectedNonAutoHeight) + "p");
+                } else {
+                  var prevSaved = "";
+                  try { prevSaved = localStorage.getItem("moviznow_previous_quality") || ""; } catch(e) {}
+                  if (prevSaved && prevSaved.toLowerCase() !== "auto") {
+                    fallbackIdx = findBestQualityIndexForTarget(prevSaved);
+                  }
+                }
+                // 2. If previous not selected, select minimum quality:
+                if (fallbackIdx < 0) {
+                  fallbackIdx = findMinimumQualityIndex();
+                }
+                if (fallbackIdx >= 0 && typeof setQualityLevel === "function") {
+                  setQualityLevel(fallbackIdx);
                 }
               }
             }
-          }, 15000);
+          }, 3000);
         }
 
         (function() {

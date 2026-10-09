@@ -69,19 +69,19 @@ export function resolveBestQuality(
     return 0;
   };
 
+  const availableHeights = Array.from(
+    new Set((availableQualities || []).map(parseHeight).filter((h) => h > 0))
+  ).sort((a, b) => a - b);
+
+  const minHeight = availableHeights.length > 0 ? availableHeights[0] : 480;
+
   const rawPref = (savedPref || "").trim().toLowerCase();
   let targetHeight = parseHeight(rawPref);
-  if (!targetHeight || rawPref === "auto") {
-    targetHeight = 1080;
-  }
 
-  if (!availableQualities || availableQualities.length === 0) {
-    return `${targetHeight}p`;
+  // Don't select auto in quality; if missing or auto, select minimum quality
+  if (!targetHeight || rawPref === "auto" || rawPref === "") {
+    return `${minHeight}p`;
   }
-
-  const availableHeights = Array.from(
-    new Set(availableQualities.map(parseHeight).filter((h) => h > 0))
-  );
 
   if (availableHeights.length === 0) {
     return `${targetHeight}p`;
@@ -106,7 +106,7 @@ export function resolveBestQuality(
     return `${minHigher}p`;
   }
 
-  return `${targetHeight}p`;
+  return `${minHeight}p`;
 }
 
 export function usePlayerFU(content: PlayerFUContent | null) {
@@ -247,7 +247,7 @@ export function PlayerFUButton({
       disabled={disabled}
       className={
         className ||
-        "bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white px-6 py-3.5 text-sm sm:text-base rounded-2xl font-bold flex items-center gap-2.5 transition-all duration-300 active:scale-95 border border-white/20 shadow-xl shadow-emerald-500/20 disabled:opacity-50 cursor-pointer"
+        "bg-[#ff9000] hover:bg-[#ffa42a] text-black px-6 py-3.5 text-sm sm:text-base rounded-2xl font-black flex items-center gap-2.5 transition-all duration-300 active:scale-95 border border-[#ff9000]/50 shadow-xl shadow-[#ff9000]/30 hover:shadow-[#ff9000]/50 disabled:opacity-50 cursor-pointer"
       }
     >
       <Play className="w-5 h-5 fill-current" />
@@ -296,21 +296,22 @@ export function PlayerFU({
       initialResumeTime = 0;
     }
 
-    // Determine remembered quality preference across all movies with fallback logic
-    let savedPref = "1080p";
+    // Determine remembered quality preference across all movies with fallback logic.
+    // If preference is missing or set to auto, resolveBestQuality automatically selects minimum quality.
+    let savedPref = "";
     try {
       const stored = (
         safeStorage.getItem("moviznow_preferred_quality") ||
         localStorage.getItem("moviznow_preferred_quality") ||
-        "1080p"
+        ""
       )
         .trim()
         .toLowerCase();
-      if (stored) {
+      if (stored && stored !== "auto") {
         savedPref = stored;
       }
     } catch {
-      savedPref = "1080p";
+      savedPref = "";
     }
 
     const preferredQuality = resolveBestQuality(savedPref, streamMeta?.qualities);
@@ -355,15 +356,21 @@ export function PlayerFU({
       } else if (event.data.type === "MOVIZNOW_PLAYER_STATUS") {
         const rawQuality = event.data.quality;
         if (typeof rawQuality === "string" && rawQuality.trim()) {
-          // Extract resolution like 1080p, 720p, 480p, 360p
-          const match = rawQuality.match(/(\d{3,4}p)/i);
-          if (match) {
-            const detectedQ = match[1].toLowerCase();
-            try {
-              safeStorage.setItem("moviznow_preferred_quality", detectedQ);
-              localStorage.setItem("moviznow_preferred_quality", detectedQ);
-            } catch {
-              // Storage fallback
+          const lowerQ = rawQuality.trim().toLowerCase();
+          // Never save preference if selected Auto
+          if (!lowerQ.startsWith("auto")) {
+            // Extract resolution like 1080p, 720p, 480p, 360p
+            const match = lowerQ.match(/(\d{3,4}p)/i);
+            if (match) {
+              const detectedQ = match[1].toLowerCase();
+              try {
+                safeStorage.setItem("moviznow_preferred_quality", detectedQ);
+                localStorage.setItem("moviznow_preferred_quality", detectedQ);
+                safeStorage.setItem("moviznow_previous_quality", detectedQ);
+                localStorage.setItem("moviznow_previous_quality", detectedQ);
+              } catch {
+                // Storage fallback
+              }
             }
           }
         }
