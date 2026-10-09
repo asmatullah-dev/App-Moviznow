@@ -80,6 +80,18 @@ export function parseWatchUrl(watchUrl: string): {
   }
 }
 
+export function normalizePixeldrainUrl(url?: string): string {
+  if (!url || typeof url !== "string") return "";
+  const trimmed = url.trim();
+  const uMatch = trimmed.match(
+    /(?:https?:\/\/)?(?:www\.)?(?:pixeldrain\.(?:dev|com|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i
+  );
+  if (uMatch && uMatch[1]) {
+    return `https://pixeldrain.dev/api/file/${uMatch[1]}`;
+  }
+  return trimmed;
+}
+
 export function findFslCandidate(
   candidates?: Array<{ text?: string; href?: string }>
 ): { text: string; href: string } | null {
@@ -94,7 +106,7 @@ export function findFslCandidate(
       h.includes(".r2.")
     );
   });
-  if (match) {
+  if (match && match.href) {
     return {
       text: match.text || "FSL Server",
       href: match.href,
@@ -105,7 +117,7 @@ export function findFslCandidate(
 
 export function findPixeldrainCandidate(
   candidates?: Array<{ text?: string; href?: string }>
-): { text: string; href: string } | null {
+): { text: string; href: string; streamUrl: string } | null {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
   const match = candidates.find((c) => {
     if (!c || !c.href) return false;
@@ -114,13 +126,16 @@ export function findPixeldrainCandidate(
     return (
       t.includes("pixel") ||
       h.includes("pixeldrain") ||
-      h.includes("pixelserver")
+      h.includes("pixelserver") ||
+      t.includes("pdrain")
     );
   });
-  if (match) {
+  if (match && match.href) {
+    const rawHref = match.href.trim();
     return {
-      text: match.text || "Pixel Server",
-      href: match.href,
+      text: match.text || "Pixeldrain Server",
+      href: rawHref,
+      streamUrl: normalizePixeldrainUrl(rawHref),
     };
   }
   return null;
@@ -137,7 +152,16 @@ export function findWatchCandidate(
     return fslCandidate;
   }
 
-  // 2. Explicit "watch online" or "watch" text
+  // 2. Prioritize Pixeldrain server candidate if FSL is missing
+  const pixelCandidate = findPixeldrainCandidate(candidates);
+  if (pixelCandidate) {
+    return {
+      text: pixelCandidate.text,
+      href: pixelCandidate.streamUrl,
+    };
+  }
+
+  // 3. Explicit "watch online" or "watch" text
   const watchCandidate = candidates.find((c) => {
     if (!c || !c.href) return false;
     const t = (c.text || "").toLowerCase();
@@ -150,14 +174,14 @@ export function findWatchCandidate(
     );
   });
 
-  if (watchCandidate) {
+  if (watchCandidate && watchCandidate.href) {
     return {
       text: watchCandidate.text || "Watch Online",
       href: watchCandidate.href,
     };
   }
 
-  // 3. Any direct video extension candidate
+  // 4. Any direct video extension candidate
   const directVid = candidates.find((c) => {
     if (!c || !c.href) return false;
     const h = c.href.toLowerCase();
@@ -167,7 +191,7 @@ export function findWatchCandidate(
     );
   });
 
-  if (directVid) {
+  if (directVid && directVid.href) {
     return {
       text: directVid.text || "Watch Video",
       href: directVid.href,
@@ -204,25 +228,27 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
       url.includes("workers.dev") ||
       url.includes("cloudflarestorage") ||
       url.includes(".r2.") ||
-      url.includes("pixeldrain.com") ||
+      url.includes("pixeldrain") ||
+      url.includes("pixel.drain") ||
       url.includes(".mp4") ||
       url.includes(".mkv") ||
       url.includes(".webm")
     ) {
-      let resolvedStreamUrl = url;
-      if (url.includes("pixeldrain.com/u/")) {
-        resolvedStreamUrl = url.replace("/u/", "/api/file/");
-      }
-      const isMkv = resolvedStreamUrl.includes(".mkv");
+      const resolvedStreamUrl = normalizePixeldrainUrl(url);
+      const isMkv =
+        resolvedStreamUrl.includes(".mkv") ||
+        url.includes(".mkv") ||
+        url.includes("pixeldrain") ||
+        url.includes("pixel.drain");
       const result: NativeStreamData = {
         hasWatchOnline: true,
         playable: true,
         watchUrl: resolvedStreamUrl,
         streamUrl: resolvedStreamUrl,
-        directUrl: `/api/native-player/stream?url=${encodeURIComponent(resolvedStreamUrl)}`,
+        directUrl: `/api/native-player/stream?url=${encodeURIComponent(resolvedStreamUrl)}${isMkv ? "&mode=transcode" : ""}`,
         sourceUrl: resolvedStreamUrl,
         title: "Movie Stream",
-        mime: isMkv ? "video/x-matroska" : "video/mp4",
+        mime: "video/mp4",
         quality: "720p",
       };
       checkCache.set(url, { data: result, timestamp: Date.now() });
@@ -251,17 +277,19 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
     const cachedHub = getCachedHubcloudData(url);
     if (cachedHub && Array.isArray(cachedHub.candidates) && cachedHub.candidates.length > 0) {
       const fsl = findFslCandidate(cachedHub.candidates);
+      const pixel = findPixeldrainCandidate(cachedHub.candidates);
       const match = findWatchCandidate(cachedHub.candidates);
-      if (match || fsl) {
-        const primary = fsl || match!;
-        const parsed = parseWatchUrl(primary.href);
+      if (fsl || pixel || match) {
+        const rawStream = fsl ? fsl.href : pixel ? pixel.streamUrl : (match ? match.href : "");
+        const streamUrl = normalizePixeldrainUrl(rawStream);
+        const parsed = parseWatchUrl(streamUrl);
         const title = parsed.title || cachedHub.title || "Movie";
 
-        let streamUrl = fsl ? fsl.href : (parsed.streamUrl || primary.href);
-        let watchUrl = primary.href.includes("hbplay.pages.dev")
-          ? primary.href
+        let watchUrl = streamUrl.includes("hbplay.pages.dev")
+          ? streamUrl
           : `https://hbplay.pages.dev/?u=${Buffer.from(streamUrl).toString("base64")}&m=${Buffer.from("video/x-matrosk").toString("base64")}&t=${Buffer.from(title).toString("base64")}`;
 
+        const isMkv = streamUrl.includes(".mkv") || streamUrl.includes("pixeldrain");
         const result: NativeStreamData = {
           hasWatchOnline: true,
           playable: true,
@@ -270,7 +298,7 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
           directUrl: `/api/native-player/stream?url=${encodeURIComponent(streamUrl)}`,
           sourceUrl: streamUrl,
           title,
-          mime: parsed.mime || "video/mp4",
+          mime: parsed.mime || (isMkv ? "video/x-matroska" : "video/mp4"),
           size: cachedHub.size,
           quality: cachedHub.quality || "720p",
           candidates: cachedHub.candidates,
@@ -297,18 +325,20 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
       if (extractRes.ok) {
         const data = await extractRes.json();
         const fsl = findFslCandidate(data.candidates);
+        const pixel = findPixeldrainCandidate(data.candidates);
         const match = findWatchCandidate(data.candidates);
 
-        if (match || fsl) {
-          const primary = fsl || match!;
-          const parsed = parseWatchUrl(primary.href);
+        if (fsl || pixel || match) {
+          const rawStream = fsl ? fsl.href : pixel ? pixel.streamUrl : (match ? match.href : "");
+          const streamUrl = normalizePixeldrainUrl(rawStream);
+          const parsed = parseWatchUrl(streamUrl);
           const title = parsed.title || data.title || data.original_title || "Movie";
 
-          let streamUrl = fsl ? fsl.href : (parsed.streamUrl || primary.href);
-          let watchUrl = primary.href.includes("hbplay.pages.dev")
-            ? primary.href
+          let watchUrl = streamUrl.includes("hbplay.pages.dev")
+            ? streamUrl
             : `https://hbplay.pages.dev/?u=${Buffer.from(streamUrl).toString("base64")}&m=${Buffer.from("video/x-matrosk").toString("base64")}&t=${Buffer.from(title).toString("base64")}`;
 
+          const isMkv = streamUrl.includes(".mkv") || streamUrl.includes("pixeldrain");
           const result: NativeStreamData = {
             hasWatchOnline: true,
             playable: true,
@@ -317,7 +347,7 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
             directUrl: `/api/native-player/stream?url=${encodeURIComponent(streamUrl)}`,
             sourceUrl: streamUrl,
             title,
-            mime: parsed.mime || "video/mp4",
+            mime: parsed.mime || (isMkv ? "video/x-matroska" : "video/mp4"),
             size: data.size,
             quality: data.quality || data.shortQuality || "720p",
             candidates: data.candidates,
@@ -370,13 +400,16 @@ nativePlayerRouter.get(["/api/native-player/resolve", "/native-player/resolve"],
     if (extractRes.ok) {
       const data = await extractRes.json();
       const fsl = findFslCandidate(data.candidates);
+      const pixel = findPixeldrainCandidate(data.candidates);
       const match = findWatchCandidate(data.candidates);
-      const chosen = fsl || match;
+      const chosen = fsl || pixel || match;
       if (chosen) {
-        const parsed = parseWatchUrl(chosen.href);
+        const rawStream = fsl ? fsl.href : pixel ? pixel.streamUrl : chosen.href;
+        const streamUrl = normalizePixeldrainUrl(rawStream);
+        const parsed = parseWatchUrl(streamUrl);
         return res.json({
-          watchUrl: chosen.href,
-          streamUrl: fsl ? fsl.href : (parsed.streamUrl || chosen.href),
+          watchUrl: streamUrl,
+          streamUrl,
           title: parsed.title || data.title,
           mime: parsed.mime,
           quality: data.quality || "720p",
@@ -406,12 +439,25 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       return res.json(cached.data);
     }
 
+    let referer = "";
+    if (targetUrl.includes("hbplay.pages.dev")) {
+      referer = "https://hbplay.pages.dev/";
+    } else if (targetUrl.includes("pixeldrain.dev")) {
+      referer = "https://pixeldrain.dev/";
+    } else if (targetUrl.includes("pixeldrain.com")) {
+      referer = "https://pixeldrain.com/";
+    }
+
+    const headerStr = referer
+      ? `Referer: ${referer}\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`
+      : `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`;
+
     const args = [
       "-v", "quiet",
       "-print_format", "json",
       "-show_format",
       "-show_streams",
-      "-headers", "Referer: https://hbplay.pages.dev/\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n",
+      "-headers", headerStr,
       targetUrl,
     ];
 
@@ -482,7 +528,13 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
         const subtitleStreams = meta.streams?.filter((s: any) => s.codec_type === "subtitle") || [];
 
         const formatName = meta.format?.format_name || "";
-        const isMkv = formatName.includes("matroska") || formatName.includes("webm") || targetUrl.includes(".mkv") || targetUrl.includes("cloudflarestorage");
+        const isMkv =
+          formatName.includes("matroska") ||
+          formatName.includes("webm") ||
+          targetUrl.includes(".mkv") ||
+          targetUrl.includes("cloudflarestorage") ||
+          targetUrl.includes("pixeldrain") ||
+          targetUrl.includes("pixel.drain");
         const vCodec = (videoStream?.codec_name || "").toLowerCase();
         const duration = parseFloat(meta.format?.duration || "0") || 0;
 
@@ -516,8 +568,14 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
           };
         });
 
-        // Browser standard <video> cannot decode HEVC (H.265) or AC3 natively
-        const needsTranscode = vCodec.includes("hevc") || vCodec.includes("h265") || audioStreams.some((a: any) => ["ac3", "eac3", "dts", "truehd"].includes((a.codec_name || "").toLowerCase()));
+        // Browser standard <video> cannot decode MKV containers, HEVC (H.265) or AC3 natively
+        const needsTranscode =
+          isMkv ||
+          vCodec.includes("hevc") ||
+          vCodec.includes("h265") ||
+          audioStreams.some((a: any) =>
+            ["ac3", "eac3", "dts", "truehd"].includes((a.codec_name || "").toLowerCase())
+          );
 
         const resultInfo: MediaProbeInfo = {
           duration,
@@ -631,9 +689,22 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
       return res.json({ ok: true, cues: cached.cues });
     }
 
+    let referer = "";
+    if (targetUrl.includes("hbplay.pages.dev")) {
+      referer = "https://hbplay.pages.dev/";
+    } else if (targetUrl.includes("pixeldrain.dev")) {
+      referer = "https://pixeldrain.dev/";
+    } else if (targetUrl.includes("pixeldrain.com")) {
+      referer = "https://pixeldrain.com/";
+    }
+
+    const subHeaders = referer
+      ? `Referer: ${referer}\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`
+      : `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`;
+
     const ffmpegArgs: string[] = [
       "-headers",
-      "Referer: https://hbplay.pages.dev/\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n",
+      subHeaders,
       "-i", targetUrl,
       "-vn", "-an",
       "-map", `0:s:${subIdx}`,
@@ -689,9 +760,22 @@ nativePlayerRouter.get(["/api/native-player/subtitle", "/native-player/subtitle"
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Cache-Control", "no-cache");
 
+    let referer = "";
+    if (targetUrl.includes("hbplay.pages.dev")) {
+      referer = "https://hbplay.pages.dev/";
+    } else if (targetUrl.includes("pixeldrain.dev")) {
+      referer = "https://pixeldrain.dev/";
+    } else if (targetUrl.includes("pixeldrain.com")) {
+      referer = "https://pixeldrain.com/";
+    }
+
+    const subHeaders = referer
+      ? `Referer: ${referer}\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`
+      : `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`;
+
     const ffmpegArgs: string[] = [
       "-headers",
-      "Referer: https://hbplay.pages.dev/\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n",
+      subHeaders,
     ];
 
     if (ss > 0) {
@@ -734,6 +818,8 @@ async function streamViaProxy(targetUrl: string, req: express.Request, res: expr
     let referer = "";
     if (targetUrl.includes("hbplay.pages.dev")) {
       referer = "https://hbplay.pages.dev/";
+    } else if (targetUrl.includes("pixeldrain.dev")) {
+      referer = "https://pixeldrain.dev/";
     } else if (targetUrl.includes("pixeldrain.com")) {
       referer = "https://pixeldrain.com/";
     }
@@ -856,18 +942,34 @@ nativePlayerRouter.all(
       const ss = parseFloat((req.query.ss as string) || "0") || 0;
       const audioIdx = parseInt((req.query.audio as string) || "0", 10) || 0;
 
-      // When mode is explicitly proxy/raw or if audio/ss are not specified, stream directly with 0 latency
-      if (mode === "proxy" || mode === "raw" || mode === "direct") {
-        return streamViaProxy(targetUrl, req, res);
-      }
-
       const isMkvTarget =
         targetUrl.includes(".mkv") ||
         targetUrl.includes("cloudflarestorage") ||
+        targetUrl.includes("pixeldrain") ||
+        targetUrl.includes("pixel.drain") ||
         targetUrl.toLowerCase().includes("matroska");
 
-      // Activate FFmpeg Universal Remux/Transcode Engine if mode=transcode
-      if (mode === "transcode" || isMkvTarget) {
+      // Handle HEAD requests immediately for browser pre-flight checks
+      if (req.method === "HEAD") {
+        res.setHeader("Content-Type", "video/mp4");
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Headers", "*");
+        return res.status(200).end();
+      }
+
+      // If mode is explicitly raw, stream directly via byte-range proxy
+      if (mode === "raw") {
+        return streamViaProxy(targetUrl, req, res);
+      }
+
+      // If mode is proxy and target is NOT an MKV or Pixeldrain link, stream directly via byte-range proxy
+      if (mode === "proxy" && !isMkvTarget && audioIdx === 0 && ss === 0) {
+        return streamViaProxy(targetUrl, req, res);
+      }
+
+      // Activate FFmpeg Universal Remux/Transcode Engine if mode=transcode or isMkvTarget or audio/seek specified
+      if (mode === "transcode" || isMkvTarget || audioIdx > 0 || ss > 0) {
         let headersSentOrPiping = false;
 
         res.setHeader("Content-Type", "video/mp4");
@@ -881,6 +983,8 @@ nativePlayerRouter.all(
         let referer = "";
         if (targetUrl.includes("hbplay.pages.dev")) {
           referer = "Referer: https://hbplay.pages.dev/\r\n";
+        } else if (targetUrl.includes("pixeldrain.dev") || targetUrl.includes("pixel.drain")) {
+          referer = "Referer: https://pixeldrain.dev/\r\n";
         } else if (targetUrl.includes("pixeldrain.com")) {
           referer = "Referer: https://pixeldrain.com/\r\n";
         }
@@ -905,7 +1009,9 @@ nativePlayerRouter.all(
 
         // Check cached probe info to see if video and audio can be fast-copied (0 CPU, 0 buffering!)
         const cachedProbe = infoCache.get(targetUrl)?.data;
-        const videoIsH264 = cachedProbe?.videoCodec?.includes("h264") || cachedProbe?.videoCodec?.includes("avc");
+        const videoIsH264 = cachedProbe
+          ? (cachedProbe.videoCodec?.includes("h264") || cachedProbe.videoCodec?.includes("avc"))
+          : !targetUrl.toLowerCase().includes("hevc") && !targetUrl.toLowerCase().includes("h265");
         const selectedAudio = cachedProbe?.audioTracks?.find((a: any) => a.id === audioIdx);
         const audioIsAac = (selectedAudio?.codec || "").toLowerCase().includes("aac");
 

@@ -99,6 +99,18 @@ function formatTime(seconds: number): string {
 /**
  * Extract decoded stream info from a watch online link (e.g. hbplay.pages.dev/?u=...)
  */
+export function normalizePixeldrainUrl(url?: string): string {
+  if (!url || typeof url !== "string") return "";
+  const trimmed = url.trim();
+  const uMatch = trimmed.match(
+    /(?:https?:\/\/)?(?:www\.)?(?:pixeldrain\.(?:dev|com|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i
+  );
+  if (uMatch && uMatch[1]) {
+    return `https://pixeldrain.dev/api/file/${uMatch[1]}`;
+  }
+  return trimmed;
+}
+
 export function decodeWatchUrl(watchUrl?: string): {
   streamUrl?: string;
   mime?: string;
@@ -131,13 +143,13 @@ export function decodeWatchUrl(watchUrl?: string): {
     const title = tParam ? decodeBase64(tParam) : undefined;
 
     return {
-      streamUrl: streamUrl && streamUrl.startsWith("http") ? streamUrl : undefined,
+      streamUrl: streamUrl && streamUrl.startsWith("http") ? normalizePixeldrainUrl(streamUrl) : undefined,
       mime,
       title,
     };
   } catch {
     if (watchUrl && (watchUrl.startsWith("http://") || watchUrl.startsWith("https://")) && !watchUrl.includes("hbplay.pages.dev")) {
-      return { streamUrl: watchUrl };
+      return { streamUrl: normalizePixeldrainUrl(watchUrl) };
     }
     return {};
   }
@@ -160,7 +172,7 @@ export function findFslCandidate(
       h.includes(".r2.")
     );
   });
-  if (match) {
+  if (match && match.href) {
     return { text: match.text || "FSL Server", href: match.href };
   }
   return null;
@@ -171,7 +183,7 @@ export function findFslCandidate(
  */
 export function findPixeldrainCandidate(
   candidates?: Array<{ text?: string; href?: string }>
-): { text: string; href: string } | null {
+): { text: string; href: string; streamUrl: string } | null {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
   const match = candidates.find((c) => {
     if (!c || !c.href) return false;
@@ -180,11 +192,17 @@ export function findPixeldrainCandidate(
     return (
       t.includes("pixel") ||
       h.includes("pixeldrain") ||
-      h.includes("pixelserver")
+      h.includes("pixelserver") ||
+      t.includes("pdrain")
     );
   });
-  if (match) {
-    return { text: match.text || "Pixel Server", href: match.href };
+  if (match && match.href) {
+    const rawHref = match.href.trim();
+    return {
+      text: match.text || "Pixeldrain Server",
+      href: rawHref,
+      streamUrl: normalizePixeldrainUrl(rawHref),
+    };
   }
   return null;
 }
@@ -196,11 +214,17 @@ export function findWatchOnlineCandidate(
   candidates?: Array<{ text?: string; href?: string }>
 ): { text: string; href: string } | null {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
-  // Always prioritize FSL Server
+  // 1. Always prioritize FSL Server
   const fsl = findFslCandidate(candidates);
   if (fsl) {
     return fsl;
   }
+  // 2. If FSL Server is missing, prioritize Pixeldrain server
+  const pixel = findPixeldrainCandidate(candidates);
+  if (pixel) {
+    return { text: pixel.text, href: pixel.streamUrl };
+  }
+  // 3. Fallback to watch online, stream, or hbplay
   const match = candidates.find((c) => {
     if (!c || !c.href) return false;
     const t = (c.text || "").toLowerCase();
@@ -212,7 +236,7 @@ export function findWatchOnlineCandidate(
       h.includes("hbplay.pages.dev")
     );
   });
-  if (match) {
+  if (match && match.href) {
     return { text: match.text || "Watch Online", href: match.href };
   }
   return null;
@@ -332,22 +356,44 @@ export function NativePlayer({
   const progressSaveIntervalRef = useRef<any>(null);
   const toastTimeoutRef = useRef<any>(null);
 
-  // Parse direct stream URL (prioritizing FSL candidate, decoded meta, propStreamUrl, or direct watchUrl)
+  // Parse direct stream URL (prioritizing FSL candidate, Pixeldrain candidate if FSL missing, decoded meta, propStreamUrl, or direct watchUrl)
   const fslCandidate = useMemo(() => findFslCandidate(candidates), [candidates]);
+  const pixeldrainCandidate = useMemo(() => findPixeldrainCandidate(candidates), [candidates]);
   const decodedMeta = useMemo(() => decodeWatchUrl(watchUrl), [watchUrl]);
-  const directStreamUrl =
-    propStreamUrl ||
+  const rawStreamUrl =
     fslCandidate?.href ||
+    pixeldrainCandidate?.streamUrl ||
+    propStreamUrl ||
     decodedMeta.streamUrl ||
     (watchUrl && !watchUrl.includes("hbplay.pages.dev") ? watchUrl : "");
+  const directStreamUrl = normalizePixeldrainUrl(rawStreamUrl);
   const displayTitle = decodedMeta.title || title;
 
   // Engine: "native" (Universal Codec Transcode Engine) or "web" (HubCloud Web Player)
   const [engine, setEngine] = useState<"native" | "web">("native");
 
+  const isDirectMkvOrPixeldrain = useMemo(() => {
+    if (!directStreamUrl) return false;
+    const lower = directStreamUrl.toLowerCase();
+    return (
+      lower.includes("pixeldrain") ||
+      lower.includes("pixel.drain") ||
+      lower.includes(".mkv") ||
+      lower.includes("matroska")
+    );
+  }, [directStreamUrl]);
+
   const [mediaInfo, setMediaInfo] = useState<MediaProbeInfo | null>(null);
   const [streamAttempt, setStreamAttempt] = useState<number>(0);
-  const [streamMode, setStreamMode] = useState<"proxy" | "transcode">("proxy");
+  const [streamMode, setStreamMode] = useState<"proxy" | "transcode">(() => {
+    return isDirectMkvOrPixeldrain ? "transcode" : "proxy";
+  });
+
+  useEffect(() => {
+    if (isDirectMkvOrPixeldrain || mediaInfo?.isMkv || mediaInfo?.needsTranscode) {
+      setStreamMode("transcode");
+    }
+  }, [isDirectMkvOrPixeldrain, mediaInfo]);
   const [seekOffset, setSeekOffset] = useState<number>(0);
   const [totalDuration, setTotalDuration] = useState<number>(0);
   const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(0);
@@ -719,6 +765,7 @@ export function NativePlayer({
   const handleRetryPlayback = useCallback(() => {
     setHasPlaybackError(false);
     setIsBuffering(true);
+    setStreamMode("transcode");
     setStreamAttempt((prev) => prev + 1);
 
     const targetTime = latestPositionRef.current || currentPosition;
@@ -748,8 +795,8 @@ export function NativePlayer({
 
   const handleVideoError = () => {
     setIsBuffering(false);
-    // If proxy failed on an MKV or transcode stream, try transcode once before showing notice
-    if (streamMode === "proxy" && (directStreamUrl.includes(".mkv") || mediaInfo?.needsTranscode) && streamAttempt === 0) {
+    // If proxy failed, automatically switch to transcode mode (Universal Remux/Transcode Engine) and retry once
+    if (streamMode === "proxy" && streamAttempt === 0) {
       setStreamMode("transcode");
       setStreamAttempt(1);
       setIsBuffering(true);

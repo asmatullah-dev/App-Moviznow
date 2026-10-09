@@ -84,7 +84,13 @@ import AlertModal from "../../components/AlertModal";
 import ConfirmModal from "../../components/ConfirmModal";
 import SharePreviewModal from "../../components/SharePreviewModal";
 import PlayerFU, { PlayerFUButton, usePlayerFU } from "../../components/PlayerFU";
-import NativePlayer, { useNativePlayerCheck, findWatchOnlineCandidate, findFslCandidate } from "../../components/nativePlayer";
+import NativePlayer, {
+  useNativePlayerCheck,
+  findWatchOnlineCandidate,
+  findFslCandidate,
+  findPixeldrainCandidate,
+  normalizePixeldrainUrl,
+} from "../../components/nativePlayer";
 import { clsx } from "clsx";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -3180,9 +3186,15 @@ export default function MovieDetails() {
                         return;
                       }
                       const fsl720Cand = findFslCandidate(nativeStreamData?.candidates);
+                      const pixel720Cand = findPixeldrainCandidate(nativeStreamData?.candidates);
+                      const chosenCand = fsl720Cand || pixel720Cand;
+                      const streamUrl = chosenCand
+                        ? normalizePixeldrainUrl(chosenCand.href)
+                        : normalizePixeldrainUrl(nativeStreamData?.streamUrl);
+
                       setActiveNativePlayerConfig({
                         watchUrl: nativeStreamData?.watchUrl,
-                        streamUrl: fsl720Cand ? fsl720Cand.href : nativeStreamData?.streamUrl,
+                        streamUrl,
                         title: mergedContent.title,
                         quality: nativeStreamData?.quality || "720p",
                         contentId: mergedContent.id,
@@ -4785,8 +4797,9 @@ export default function MovieDetails() {
                       {/* Place 2: Above Play in Video Player, if extraction found FSL server or watch online, add Play Movie/Season/Episode */}
                       {(() => {
                         const fslCandidate = findFslCandidate(linkPopup.candidates);
+                        const pixelCandidate = findPixeldrainCandidate(linkPopup.candidates);
                         const watchCandidate = findWatchOnlineCandidate(linkPopup.candidates);
-                        const chosenCandidate = fslCandidate || watchCandidate;
+                        const chosenCandidate = fslCandidate || pixelCandidate || watchCandidate;
                         if (!chosenCandidate) return null;
                         const isEp = Boolean(
                           linkPopup.episodeInfo ||
@@ -4803,7 +4816,9 @@ export default function MovieDetails() {
                           ? t("Play Season")
                           : t("Play Movie");
 
-                        const streamUrl = fslCandidate ? fslCandidate.href : chosenCandidate.href;
+                        const streamUrl = normalizePixeldrainUrl(
+                          fslCandidate ? fslCandidate.href : chosenCandidate.href
+                        );
 
                         return (
                           <button
