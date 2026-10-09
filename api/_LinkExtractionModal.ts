@@ -647,7 +647,7 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
     }
   });
 
-  async function performExtraction(url: string, checkOnly: boolean, depth = 0, isVcloud = false, force = false): Promise<any> {
+  export async function performExtraction(url: string, checkOnly: boolean, depth = 0, isVcloud = false, force = false): Promise<any> {
     try {
       if (depth > 2) return { url, candidates: [], size: "" };
       const headers = {

@@ -1,6 +1,11 @@
 # Production container for Google Cloud Run
 FROM node:22-slim
 
+# Install ffmpeg and ffprobe for native media player probe and transcoding
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
+
 # Set working directory
 WORKDIR /app
 
