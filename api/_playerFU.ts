@@ -216,14 +216,36 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
             video.addEventListener("loadedmetadata", doResume);
             video.addEventListener("canplay", doResume);
 
-            // Unmute on first user touch/click if video was autostarted muted
-            var unmuteOnTouch = function() {
-              if (video && video.muted) {
-                video.muted = false;
+            // Auto-start playback helper with muted fallback
+            var startPlayback = function() {
+              if (video && video.paused) {
+                var p = video.play();
+                if (p && typeof p.catch === "function") {
+                  p.catch(function() {
+                    video.muted = true;
+                    video.play().catch(function() {});
+                  });
+                }
               }
             };
-            document.addEventListener("click", unmuteOnTouch, { once: true });
-            document.addEventListener("touchend", unmuteOnTouch, { once: true });
+
+            video.addEventListener("canplay", startPlayback);
+            video.addEventListener("loadeddata", startPlayback);
+
+            // Start playback or unmute on first user touch/click
+            var handleUserInteraction = function() {
+              if (video) {
+                if (video.paused) {
+                  startPlayback();
+                }
+                if (video.muted) {
+                  video.muted = false;
+                }
+              }
+            };
+            document.addEventListener("click", handleUserInteraction);
+            document.addEventListener("touchend", handleUserInteraction);
+            document.addEventListener("pointerdown", handleUserInteraction);
 
             // Periodic progress saving every 2 seconds
             var lastSave = 0;
@@ -411,7 +433,33 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
       js = js.replace(/videoPreference:\s*\{\s*videoCodec:\s*["']hvc1["']\s*\}/g, 'videoPreference: { videoCodec: "avc1" }');
       js = js.replace(/videoPreference:\s*IS_IOS\s*\|\|\s*IS_TOUCH\s*\?\s*\{\s*videoCodec:\s*"avc1"\s*\}\s*:\s*\{\s*videoCodec:\s*"hvc1"\s*\}/g, 'videoPreference: { videoCodec: "avc1" }');
       js = js.replace(/const\s+MSE_HEVC_OK\s*=[\s\S]*?MediaSource\.isTypeSupported\([^)]+\)\);/g, 'const MSE_HEVC_OK = false;');
-      js = js.replace(/function rewriteUrl\(u\)\s*\{[\s\S]*?return\s+s\.startsWith\("\/"\)\s*\?\s*BASE_SERVER\s*\+\s*s\s*:\s*s;\s*\}/, 'function rewriteUrl(u) { if (!u) return ""; var s = String(u); if (s.startsWith("/range/")) return "/api/stream" + s; return s.startsWith("/") ? BASE_SERVER + s : s; }');
+      js = js.replace(
+        /function rewriteUrl\(u\)\s*\{[\s\S]*?return\s+s\.startsWith\("\/"\)\s*\?\s*BASE_SERVER\s*\+\s*s\s*:\s*s;\s*\}/,
+        `function rewriteUrl(u) {
+          if (!u) return "";
+          var s = String(u);
+          if (s.startsWith("/range/")) return "/api/stream" + s;
+          if (s.startsWith("/api/range/")) return "/api/stream" + s.slice(4);
+          var rIdx = s.indexOf("/range/");
+          if (rIdx !== -1 && !s.includes("/api/stream/range/")) {
+            return "/api/stream" + s.slice(rIdx);
+          }
+          return s.startsWith("/") ? BASE_SERVER + s : s;
+        }`
+      );
+
+      // EdgeLoader: Ensure all HLS requests (manifest, sub-playlists, fragments, subtitles) route through /api/stream/range/
+      js = js.replace(
+        /const\s+EdgeLoader\s*=\s*class\s+extends\s+Hls\.DefaultConfig\.loader\s*\{[\s\S]*?super\.load\(context,\s*config,\s*callbacks\);\s*\}\s*\};/,
+        `const EdgeLoader = class extends Hls.DefaultConfig.loader {
+          load(context, config, callbacks) {
+            if (context && context.url) {
+              context.url = rewriteUrl(context.url);
+            }
+            super.load(context, config, callbacks);
+          }
+        };`
+      );
 
       // Auto-play fallback fix: if unmuted autoplay is blocked by browser, fallback to muted autoplay so video starts immediately
       js = js.replace(
@@ -426,10 +474,12 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
               });
             }
           };
+          window.__PA_TRY_PLAY__ = tryPlay;
           videoEl.addEventListener("loadedmetadata", tryPlay, { once: true });
           videoEl.addEventListener("canplay", tryPlay, { once: true });
           setTimeout(tryPlay, 300);
           setTimeout(tryPlay, 800);
+          setTimeout(tryPlay, 1500);
         }`
       );
 
@@ -439,7 +489,7 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
         'if (screen && screen.orientation && typeof screen.orientation.lock === "function")'
       );
 
-      // 3. Patch MANIFEST_PARSED quality selection to use fallback resolution logic
+      // 3. Patch MANIFEST_PARSED quality selection to use fallback resolution logic and kick off playback
       js = js.replace(
         /if\s*\(window\.__PA_PREF_QUALITY__\s*&&\s*hls\.levels\s*&&\s*hls\.levels\.length\)\s*\{[\s\S]*?applied\s*=\s*true;\s*\}\s*\}/g,
         `var qPref = window.__PA_PREF_QUALITY__ || (function(){ try { return localStorage.getItem("moviznow_preferred_quality"); } catch(e){ return ""; } })();
@@ -452,12 +502,23 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
         }
         if (!applied && typeof qualityIsAuto === "function" && qualityIsAuto()) {
           if (typeof __startAutoPlaybackGuard === "function") __startAutoPlaybackGuard();
+        }
+        if (typeof window.__PA_TRY_PLAY__ === "function") {
+          window.__PA_TRY_PLAY__();
+        } else if (video && video.paused) {
+          var autoP = video.play();
+          if (autoP && typeof autoP.catch === "function") {
+            autoP.catch(function() {
+              video.muted = true;
+              video.play().catch(function(){});
+            });
+          }
         }`
       );
 
-      // 4. Trigger auto playback guard when switching to Auto mode in setQualityLevel
+      // 4. Trigger auto playback guard when switching to Auto mode in setQualityLevel (FIXED SYNTAX)
       js = js.replace(
-        /if\s*\(idx\s*<\s*0\)\s*\{\s*lockedQuality\s*=\s*-1;[\s\S]*?hls\.currentLevel\s*=\s*-1;\s*\}\s*\}/g,
+        /if\s*\(idx\s*<\s*0\)\s*\{[\s\S]*?pinLockedQuality\(\{\s*hard:\s*true\s*\}\);\s*\}/g,
         `if (idx < 0) {
           lockedQuality = -1;
           lockedQualityKey = null;
@@ -474,6 +535,11 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
             clearTimeout(__autoTimer);
             __autoTimer = null;
           }
+          lockedQualityKey = qualityKeyOf(levels[idx], levels);
+          lockedQuality = idx;
+          imaxMode = !!lockedQualityKey.imax;
+          storeQualityLock(lockedQualityKey);
+          pinLockedQuality({ hard: true });
         }`
       );
 
@@ -735,22 +801,25 @@ play4uRouter.all(["/range/*", "/api/stream/range/*", "/api/range/*"], async (req
     }
 
     // If upstream returns an HLS m3u8 playlist, rewrite child /range/ URLs to /api/stream/range/ so all audio, subtitle and video segments proxy through our API seamlessly
-    const contentType = (upstreamRes.headers.get("content-type") || "").toLowerCase();
     const contentLength = parseInt(upstreamRes.headers.get("content-length") || "0", 10);
-    const isPlaylist = contentType.includes("mpegurl") || contentType.includes("application/vnd.apple.mpegurl") || (contentLength > 0 && contentLength < 350000);
 
-    if (upstreamRes.status === 200 && isPlaylist) {
-      const text = await upstreamRes.text();
-      if (text.includes("#EXTM3U")) {
+    if (upstreamRes.status === 200 && (!contentLength || contentLength < 500000)) {
+      const arrayBuf = await upstreamRes.arrayBuffer();
+      const buf = Buffer.from(arrayBuf);
+      const head = buf.subarray(0, 7).toString("utf-8");
+      if (head === "#EXTM3U") {
+        const text = buf.toString("utf-8");
         const rewritten = text
-          .replace(/(URI=["'])\/range\//g, '$1/api/stream/range/')
-          .replace(/(\n)\/range\//g, '$1/api/stream/range/');
+          .replace(/(URI=["'])(?:https?:\/\/[^\/]+)?\/range\//g, '$1/api/stream/range/')
+          .replace(/(URI=["'])\/api\/range\//g, '$1/api/stream/range/')
+          .replace(/(\r?\n)(?:https?:\/\/[^\/\r\n]+)?\/range\//g, '$1/api/stream/range/')
+          .replace(/(\r?\n)\/api\/range\//g, '$1/api/stream/range/');
         res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
         res.setHeader("Content-Length", Buffer.byteLength(rewritten).toString());
         return res.send(rewritten);
       }
-      res.setHeader("Content-Length", Buffer.byteLength(text).toString());
-      return res.send(text);
+      res.setHeader("Content-Length", buf.length.toString());
+      return res.send(buf);
     }
 
     const nodeStream = Readable.fromWeb(upstreamRes.body as any);

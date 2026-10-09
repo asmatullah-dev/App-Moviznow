@@ -1,14 +1,14 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "5.4.19",
-  "versionUpdatedAt": "Oct 09, 2026, 05:50 AM (PKT)",
+  "version": "5.4.20",
+  "versionUpdatedAt": "Oct 09, 2026, 01:54 PM (PKT)",
   "type": "module",
   "engines": {
     "node": "24.x"
   },
   "scripts": {
-    "dev": "tsx api/index.ts",
+    "dev": "tsx watch api/index.ts",
     "start": "tsx api/index.ts",
     "build": "vite build && (mv dist/index.html dist/app.html || true)",
     "preview": "vite preview",
@@ -70,5 +70,5 @@
     "vite": "^6.2.0",
     "vite-plugin-pwa": "^1.2.0"
   },
-  "versionTimestamp": 1791507026538
+  "versionTimestamp": 1791536084033
 }
