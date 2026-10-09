@@ -1,0 +1,17 @@
+{
+  "projects": {
+    "default": "app-moviznow"
+  },
+  "targets": {
+    "app-moviznow": {
+      "hosting": {
+        "auth": [
+          "app-moviznow"
+        ],
+        "api": [
+          "api-moviznow"
+        ]
+      }
+    }
+  }
+}

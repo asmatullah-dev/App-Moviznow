@@ -253,6 +253,7 @@ export interface Content {
   secondTitle?: string; // Alternative / Dubbed title
   description: string;
   posterUrl: string;
+  backdropUrl?: string; // Optional TMDB/Hero backdrop image
   trailerUrl: string;
   trailerTitle?: string; // Added trailerTitle
   trailerYoutubeTitle?: string; // Added trailerYoutubeTitle

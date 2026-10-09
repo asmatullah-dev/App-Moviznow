@@ -393,6 +393,39 @@ async function startServer() {
     next();
   });
 
+  // Global CORS headers for cross-domain streaming and API requests
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, POST, PUT, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length, Content-Type");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(204);
+    }
+    next();
+  });
+
+  // Redirect raw site visits to api.moviznow.com or auth.moviznow.com directly to MovizNow.com
+  app.use((req, res, next) => {
+    const host = (req.headers.host || req.hostname || "").toLowerCase();
+    const isSubdomainTarget = host.includes("api.moviznow.com") || host.includes("auth.moviznow.com");
+
+    if (isSubdomainTarget) {
+      const p = req.path.toLowerCase();
+      const isApiRoute =
+        (p.startsWith("/api") && p !== "/api" && p !== "/api/") ||
+        p.startsWith("/native-player") ||
+        p.startsWith("/stream") ||
+        p.startsWith("/range");
+      const isAuthRoute = p.startsWith("/__") || p.startsWith("/auth");
+
+      if (!isApiRoute && !isAuthRoute) {
+        return res.redirect(302, "https://moviznow.com");
+      }
+    }
+    next();
+  });
+
   app.get("/ads.txt", (req, res) => {
     res.setHeader("Content-Type", "text/plain; charset=utf-8");
     res.setHeader("Cache-Control", "public, max-age=86400");

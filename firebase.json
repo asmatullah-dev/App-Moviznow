@@ -1,0 +1,84 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "hosting": [
+    {
+      "target": "auth",
+      "public": "public",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "redirects": [
+        {
+          "source": "/",
+          "destination": "https://moviznow.com",
+          "type": 302
+        }
+      ]
+    },
+    {
+      "target": "api",
+      "public": "public",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "headers": [
+        {
+          "source": "/**",
+          "headers": [
+            { "key": "Access-Control-Allow-Origin", "value": "*" },
+            { "key": "Access-Control-Allow-Methods", "value": "GET, HEAD, POST, PUT, DELETE, OPTIONS" },
+            { "key": "Access-Control-Allow-Headers", "value": "*" },
+            { "key": "Access-Control-Expose-Headers", "value": "Content-Range, Accept-Ranges, Content-Length, Content-Type" }
+          ]
+        }
+      ],
+      "redirects": [
+        {
+          "source": "/",
+          "destination": "https://moviznow.com",
+          "type": 302
+        }
+      ],
+      "rewrites": [
+        {
+          "source": "/api/**",
+          "run": {
+            "serviceId": "moviznow",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "/native-player/**",
+          "run": {
+            "serviceId": "moviznow",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "/stream/**",
+          "run": {
+            "serviceId": "moviznow",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "/range/**",
+          "run": {
+            "serviceId": "moviznow",
+            "region": "asia-southeast1"
+          }
+        },
+        {
+          "source": "**",
+          "destination": "https://moviznow.com"
+        }
+      ]
+    }
+  ]
+}

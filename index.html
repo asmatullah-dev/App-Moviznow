@@ -93,6 +93,18 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
     
     <script>
+      // Immediately redirect raw visits to api.moviznow.com or auth.moviznow.com to MovizNow.com
+      (function() {
+        try {
+          var h = window.location.hostname.toLowerCase();
+          var p = window.location.pathname.toLowerCase();
+          if ((h === 'api.moviznow.com' || h === 'auth.moviznow.com') && !p.startsWith('/api') && !p.startsWith('/__')) {
+            window.location.replace('https://moviznow.com' + (p !== '/' ? p : ''));
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <script>
       // Apply theme on load
       (function() {
         try {

@@ -15,7 +15,7 @@ import {
   Tv,
   Film,
   Download,
-  Sliders,
+  Ratio,
   Check,
   Layers,
   Subtitles,
@@ -25,6 +25,7 @@ import {
 import { useLanguage } from "../contexts/LanguageContext";
 import { safeStorage } from "../utils/safeStorage";
 import { useModalBehavior } from "../hooks/useModalBehavior";
+import { getStreamingApiBase } from "../utils/domains";
 import {
   modalBackdropAnimation,
   modalContainerAnimation,
@@ -221,8 +222,9 @@ export function useNativePlayerCheck(hubcloudUrl?: string) {
     let isMounted = true;
     setIsLoading(true);
 
+    const apiBase = getStreamingApiBase();
     const controller = new AbortController();
-    fetch("/api/native-player/check", {
+    fetch(`${apiBase}/api/native-player/check`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: trimmedUrl }),
@@ -322,12 +324,24 @@ export function NativePlayer({
   const [fitMode, setFitMode] = useState<"contain" | "cover" | "fill">("contain");
 
   const [activeMenu, setActiveMenu] = useState<"speed" | "audio" | "subtitles" | null>(null);
-  const [showResumeBanner, setShowResumeBanner] = useState<boolean>(false);
-  const [savedResumeTime, setSavedResumeTime] = useState<number>(0);
   const [doubleTapFeedback, setDoubleTapFeedback] = useState<"left" | "right" | null>(null);
 
   // Storage key for resume
   const storageKey = `moviznow_progress_${contentId}`;
+  const latestPositionRef = useRef<number>(0);
+  const lastSaveTimeRef = useRef<number>(0);
+
+  const savePlaybackPosition = useCallback((timeToSave: number) => {
+    if (timeToSave > 3) {
+      const rounded = Math.floor(timeToSave);
+      latestPositionRef.current = rounded;
+      try {
+        safeStorage.setItem(storageKey, String(rounded));
+        localStorage.setItem(storageKey, String(rounded));
+        lastSaveTimeRef.current = Date.now();
+      } catch {}
+    }
+  }, [storageKey]);
 
   const showToast = useCallback((msg: string) => {
     setToastMessage(msg);
@@ -342,7 +356,8 @@ export function NativePlayer({
     if (!isOpen || !directStreamUrl) return;
 
     let isMounted = true;
-    fetch(`/api/native-player/info?url=${encodeURIComponent(directStreamUrl)}`)
+    const apiBase = getStreamingApiBase();
+    fetch(`${apiBase}/api/native-player/info?url=${encodeURIComponent(directStreamUrl)}`)
       .then((res) => res.json())
       .then((data: MediaProbeInfo) => {
         if (!isMounted) return;
@@ -360,20 +375,23 @@ export function NativePlayer({
     };
   }, [isOpen, directStreamUrl]);
 
-  // Initial resume detection
+  // Initial auto-resume detection (automatically resume from saved progress without asking)
   useEffect(() => {
     if (!isOpen) return;
     try {
       const saved = safeStorage.getItem(storageKey) || localStorage.getItem(storageKey);
       if (saved) {
         const time = parseFloat(saved);
-        if (!isNaN(time) && time > 15) {
-          setSavedResumeTime(time);
-          setShowResumeBanner(true);
+        if (!isNaN(time) && time > 5) {
+          const roundedTime = Math.floor(time);
+          latestPositionRef.current = roundedTime;
+          setSeekOffset(roundedTime);
+          setCurrentPosition(roundedTime);
+          showToast(`${t("Resumed from")} ${formatTime(roundedTime)}`);
         }
       }
     } catch {}
-  }, [isOpen, storageKey]);
+  }, [isOpen, storageKey, t, showToast]);
 
   // Construct stream URL with seek offset and audio track
   const currentStreamSrc = useMemo(() => {
@@ -389,12 +407,20 @@ export function NativePlayer({
       params.set("audio", String(selectedAudioTrack));
     }
 
-    return `/api/native-player/stream?${params.toString()}`;
+    const apiBase = getStreamingApiBase();
+    return `${apiBase}/api/native-player/stream?${params.toString()}`;
   }, [directStreamUrl, seekOffset, selectedAudioTrack]);
+
+  const controlsShownAtRef = useRef<number>(Date.now());
 
   // Handle Controls Auto-Hide
   const resetControlsTimeout = useCallback(() => {
-    setIsControlsVisible(true);
+    setIsControlsVisible((prev) => {
+      if (!prev) {
+        controlsShownAtRef.current = Date.now();
+      }
+      return true;
+    });
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     if (isPlaying) {
       controlsTimeoutRef.current = setTimeout(() => {
@@ -409,6 +435,7 @@ export function NativePlayer({
       resetControlsTimeout();
     } else {
       setIsControlsVisible(true);
+      controlsShownAtRef.current = Date.now();
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     }
     return () => {
@@ -416,25 +443,43 @@ export function NativePlayer({
     };
   }, [isPlaying, resetControlsTimeout]);
 
-  // Save progress periodically
+  // Prevent changing duration on 1st click when menu/controls are hidden
+  const canSeekNow = useCallback((): boolean => {
+    if (!isControlsVisible || Date.now() - controlsShownAtRef.current < 500) {
+      resetControlsTimeout();
+      return false;
+    }
+    return true;
+  }, [isControlsVisible, resetControlsTimeout]);
+
+  // Remember new position every 5 to 10 seconds during playback
   useEffect(() => {
     if (!isOpen) return;
     progressSaveIntervalRef.current = setInterval(() => {
       if (videoRef.current && !videoRef.current.paused) {
         const time = Math.floor(seekOffset + (videoRef.current.currentTime || 0));
-        if (time > 5) {
-          try {
-            safeStorage.setItem(storageKey, String(time));
-            localStorage.setItem(storageKey, String(time));
-          } catch {}
+        if (time > 3) {
+          savePlaybackPosition(time);
         }
       }
-    }, 3000);
+    }, 5000);
 
     return () => {
       if (progressSaveIntervalRef.current) clearInterval(progressSaveIntervalRef.current);
     };
-  }, [isOpen, storageKey, seekOffset]);
+  }, [isOpen, savePlaybackPosition, seekOffset]);
+
+  // Save latest progress on exit / unmount
+  useEffect(() => {
+    return () => {
+      if (latestPositionRef.current > 3) {
+        try {
+          safeStorage.setItem(storageKey, String(latestPositionRef.current));
+          localStorage.setItem(storageKey, String(latestPositionRef.current));
+        } catch {}
+      }
+    };
+  }, [storageKey]);
 
   // Sync volume & speed to HTML5 video element
   useEffect(() => {
@@ -551,6 +596,13 @@ export function NativePlayer({
     if (!videoRef.current) return;
     const current = seekOffset + videoRef.current.currentTime;
     setCurrentPosition(current);
+    latestPositionRef.current = Math.floor(current);
+
+    // Keep remembering new position every 5 to 10 seconds while playing
+    const now = Date.now();
+    if (now - lastSaveTimeRef.current >= 5000) {
+      savePlaybackPosition(current);
+    }
 
     // If time is actively advancing, stream is playing and NOT buffering!
     if (!videoRef.current.paused) {
@@ -596,14 +648,37 @@ export function NativePlayer({
     setHasPlaybackError(true);
   };
 
-  // Play/Pause ONLY triggered by button or space/k shortcut
+  // Play/Pause: resumes seamlessly from remembered position if stopped/interrupted
   const togglePlay = () => {
     if (engine === "web") return;
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
-      videoRef.current.play().catch(() => {});
+      // Resuming playback after video was stopped/paused
+      const rememberedTarget = latestPositionRef.current || currentPosition;
+      const currentVidPos = Math.floor(seekOffset + (videoRef.current.currentTime || 0));
+
+      // If video connection dropped, reset to 0, ended, or drifted > 3s from remembered position:
+      if (
+        videoRef.current.ended ||
+        videoRef.current.error ||
+        videoRef.current.readyState < 2 ||
+        (rememberedTarget > 3 && Math.abs(currentVidPos - rememberedTarget) > 3)
+      ) {
+        executeSeek(rememberedTarget > 0 ? rememberedTarget : currentVidPos);
+      } else {
+        videoRef.current.play().then(() => {
+          setIsPlaying(true);
+        }).catch((err) => {
+          console.warn("[Video play error - seeking to remembered position]:", err);
+          executeSeek(rememberedTarget > 0 ? rememberedTarget : currentVidPos);
+        });
+      }
       setIsPlaying(true);
     } else {
+      // Stopping / pausing playback: save current position immediately
+      const current = Math.floor(seekOffset + (videoRef.current.currentTime || 0));
+      latestPositionRef.current = current;
+      savePlaybackPosition(current);
       videoRef.current.pause();
       setIsPlaying(false);
     }
@@ -618,6 +693,8 @@ export function NativePlayer({
     setIsBuffering(true);
     setSeekOffset(clampedTarget);
     setCurrentPosition(clampedTarget);
+    latestPositionRef.current = Math.floor(clampedTarget);
+    savePlaybackPosition(clampedTarget);
     if (videoRef.current) {
       videoRef.current.currentTime = 0;
     }
@@ -632,8 +709,34 @@ export function NativePlayer({
   };
 
   const handleScrubberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // When menu is hidden, don't change duration on 1st click
+    if (!canSeekNow()) {
+      return;
+    }
     const val = parseFloat(e.target.value);
     executeSeek(val);
+  };
+
+  const handleToggleFitMode = () => {
+    setFitMode((prev) => {
+      let next: "contain" | "cover" | "fill";
+      if (prev === "contain") {
+        next = "cover";
+      } else if (prev === "cover") {
+        next = "fill";
+      } else {
+        next = "contain";
+      }
+      const label =
+        next === "contain"
+          ? "Fit"
+          : next === "cover"
+          ? "Cover"
+          : "Fill";
+      showToast(`${t("Aspect Ratio")}: ${label}`);
+      return next;
+    });
+    resetControlsTimeout();
   };
 
   const toggleFullscreen = async () => {
@@ -725,7 +828,8 @@ export function NativePlayer({
     const sub = mediaInfo?.subtitleTracks.find((s) => s.id === subId);
     showToast(`Loading ${sub?.language || "English"} Subtitles...`);
 
-    fetch(`/api/native-player/subtitles?url=${encodeURIComponent(directStreamUrl)}&sub=${subId}`)
+    const apiBase = getStreamingApiBase();
+    fetch(`${apiBase}/api/native-player/subtitles?url=${encodeURIComponent(directStreamUrl)}&sub=${subId}`)
       .then((r) => r.json())
       .then((res) => {
         if (res.cues && Array.isArray(res.cues)) {
@@ -753,6 +857,12 @@ export function NativePlayer({
     const touch = e.changedTouches[0];
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
+
+    // When menu is hidden, 1st tap ONLY shows the menu and never changes duration
+    if (!canSeekNow()) {
+      lastTapRef.current = { time: 0, x: 0 };
+      return;
+    }
 
     const diff = now - lastTapRef.current.time;
     if (diff < 300) {
@@ -838,8 +948,32 @@ export function NativePlayer({
                   setIsPlaying(true);
                   setHasPlaybackError(false);
                 }}
-                onPause={() => setIsPlaying(false)}
-                onError={handleVideoError}
+                onPause={() => {
+                  setIsPlaying(false);
+                  if (videoRef.current) {
+                    const pos = Math.floor(seekOffset + (videoRef.current.currentTime || 0));
+                    latestPositionRef.current = pos;
+                    savePlaybackPosition(pos);
+                  }
+                }}
+                onEnded={() => {
+                  setIsPlaying(false);
+                  if (videoRef.current) {
+                    const pos = Math.floor(seekOffset + (videoRef.current.currentTime || 0));
+                    latestPositionRef.current = pos;
+                    savePlaybackPosition(pos);
+                  }
+                }}
+                onError={() => {
+                  if (videoRef.current) {
+                    const pos = Math.floor(seekOffset + (videoRef.current.currentTime || 0));
+                    if (pos > 0) {
+                      latestPositionRef.current = pos;
+                      savePlaybackPosition(pos);
+                    }
+                  }
+                  handleVideoError();
+                }}
                 className={`w-full h-full cursor-default transition-all duration-300 ${
                   fitMode === "cover"
                     ? "object-cover"
@@ -932,43 +1066,6 @@ export function NativePlayer({
               )}
             </AnimatePresence>
 
-            {/* Resume Toast Banner */}
-            <AnimatePresence>
-              {showResumeBanner && engine === "native" && (
-                <motion.div
-                  initial={{ opacity: 0, y: -20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -20 }}
-                  className="absolute top-20 left-1/2 -translate-x-1/2 z-40 bg-zinc-900/95 border border-emerald-500/40 rounded-2xl p-4 shadow-2xl flex items-center gap-4 text-white text-xs sm:text-sm backdrop-blur-lg"
-                >
-                  <div>
-                    <span className="font-bold text-emerald-400">
-                      {t("Resume Playback")}
-                    </span>
-                    <p className="text-zinc-300 text-[11px] sm:text-xs">
-                      {t("Continue from")} {formatTime(savedResumeTime)}?
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        executeSeek(savedResumeTime);
-                        setShowResumeBanner(false);
-                      }}
-                      className="bg-emerald-500 hover:bg-emerald-400 text-white font-bold px-3 py-1.5 rounded-xl transition-all"
-                    >
-                      {t("Resume")}
-                    </button>
-                    <button
-                      onClick={() => setShowResumeBanner(false)}
-                      className="bg-zinc-800 hover:bg-zinc-700 text-zinc-400 font-medium px-3 py-1.5 rounded-xl transition-all"
-                    >
-                      {t("Dismiss")}
-                    </button>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
 
             {/* Playback Error Fallback Card */}
             {hasPlaybackError && engine === "native" && (
@@ -988,7 +1085,7 @@ export function NativePlayer({
                   <button
                     onClick={() => {
                       setHasPlaybackError(false);
-                      executeSeek(currentPosition);
+                      executeSeek(latestPositionRef.current || currentPosition);
                     }}
                     className="bg-emerald-500 hover:bg-emerald-400 text-white font-bold py-2.5 px-5 rounded-xl text-sm flex items-center gap-2 shadow-lg shadow-emerald-500/20 transition-all"
                   >
@@ -1079,6 +1176,39 @@ export function NativePlayer({
             </div>
           </div>
 
+          {/* Subtle Mini Progress Bar at the bottom edge when controls are hidden */}
+          {engine === "native" && (
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                resetControlsTimeout();
+              }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                resetControlsTimeout();
+              }}
+              className={`absolute bottom-0 inset-x-0 h-1 sm:h-1.5 z-20 cursor-pointer transition-opacity duration-300 ${
+                !isControlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+              }`}
+              title="Click to show controls"
+            >
+              {/* Unplayed blurred black background */}
+              <div className="absolute inset-0 bg-black/85 backdrop-blur-md border-t border-white/20" />
+              {/* Buffer Bar */}
+              <div
+                className="absolute h-full bg-zinc-600/60 transition-all pointer-events-none"
+                style={{ width: `${Math.min(100, bufferedPercent)}%` }}
+              />
+              {/* Watched Progress Bar */}
+              <div
+                className="absolute h-full bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_8px_rgba(16,185,129,0.7)] transition-all pointer-events-none"
+                style={{
+                  width: `${totalDuration > 0 ? (currentPosition / totalDuration) * 100 : 0}%`,
+                }}
+              />
+            </div>
+          )}
+
           {/* Bottom Controls Bar */}
           {engine === "native" && (
             <div
@@ -1091,28 +1221,78 @@ export function NativePlayer({
                 <span className="text-[11px] sm:text-xs font-mono font-bold text-zinc-300 min-w-[45px] text-right">
                   {formatTime(currentPosition)}
                 </span>
-                <div className="relative flex-1 flex items-center h-4 cursor-pointer group">
+                <div
+                  className="relative flex-1 flex items-center h-5 cursor-pointer group"
+                  onClick={(e) => {
+                    if (!canSeekNow()) {
+                      e.stopPropagation();
+                      return;
+                    }
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const clickX = e.clientX - rect.left;
+                    const pct = Math.max(0, Math.min(1, clickX / rect.width));
+                    const target = pct * (totalDuration || 100);
+                    executeSeek(target);
+                  }}
+                  onPointerDown={(e) => {
+                    if (!canSeekNow()) {
+                      e.stopPropagation();
+                    }
+                  }}
+                >
+                  {/* Unplayed progress bar location with blur black background */}
+                  <div
+                    className="absolute inset-x-0 h-2 group-hover:h-2.5 bg-black/80 backdrop-blur-md rounded-full border border-white/20 shadow-inner ring-1 ring-black/50 pointer-events-none transition-all"
+                  />
+
                   {/* Buffer Bar */}
                   <div
-                    className="absolute h-1.5 bg-zinc-700/70 rounded-full pointer-events-none transition-all"
+                    className="absolute h-2 group-hover:h-2.5 bg-zinc-600/60 rounded-full pointer-events-none transition-all"
                     style={{ width: `${Math.min(100, bufferedPercent)}%` }}
                   />
-                  {/* Played Progress Bar */}
+
+                  {/* Played / Watched Progress Bar */}
                   <div
-                    className="absolute h-1.5 bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full pointer-events-none transition-all group-hover:h-2"
+                    className="absolute h-2 group-hover:h-2.5 bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full pointer-events-none transition-all shadow-[0_0_10px_rgba(16,185,129,0.6)]"
                     style={{
                       width: `${totalDuration > 0 ? (currentPosition / totalDuration) * 100 : 0}%`,
                     }}
                   />
-                  {/* Styled Range input */}
+
+                  {/* Scrubber thumb circle */}
+                  <div
+                    className={`absolute w-3.5 h-3.5 -ml-1.75 bg-white rounded-full shadow-[0_0_8px_rgba(16,185,129,0.9)] border-2 border-emerald-500 pointer-events-none transition-transform duration-100 ${
+                      isControlsVisible ? "scale-100" : "scale-0"
+                    } group-hover:scale-125`}
+                    style={{
+                      left: `${totalDuration > 0 ? (currentPosition / totalDuration) * 100 : 0}%`,
+                    }}
+                  />
+
+                  {/* Styled Range input (only interactive when controls are shown) */}
                   <input
                     type="range"
                     min={0}
                     max={totalDuration || 100}
                     step={1}
                     value={currentPosition}
+                    disabled={!isControlsVisible || Date.now() - controlsShownAtRef.current < 500}
                     onChange={handleScrubberChange}
-                    className="w-full h-1.5 opacity-0 cursor-pointer z-10"
+                    onClick={(e) => {
+                      if (!canSeekNow()) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }
+                    }}
+                    onPointerDown={(e) => {
+                      if (!canSeekNow()) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                      }
+                    }}
+                    className={`w-full h-3 opacity-0 cursor-pointer z-10 ${
+                      !isControlsVisible ? "pointer-events-none" : ""
+                    }`}
                   />
                 </div>
                 <span className="text-[11px] sm:text-xs font-mono font-bold text-zinc-400 min-w-[45px]">
@@ -1367,18 +1547,21 @@ export function NativePlayer({
                     )}
                   </div>
 
-                  {/* Fit Mode Toggle */}
+                  {/* Screen Aspect / Fit Mode Toggle */}
                   <button
                     type="button"
-                    onClick={() => {
-                      setFitMode((prev) =>
-                        prev === "contain" ? "cover" : prev === "cover" ? "fill" : "contain"
-                      );
-                    }}
-                    className="p-2 rounded-xl bg-zinc-800/80 hover:bg-zinc-700 text-zinc-200 transition-all hidden sm:flex"
-                    title={`Fit Mode: ${fitMode}`}
+                    onClick={handleToggleFitMode}
+                    className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 ${
+                      fitMode !== "contain"
+                        ? "bg-emerald-500 hover:bg-emerald-400 text-white border-emerald-400 shadow-md shadow-emerald-500/25"
+                        : "bg-zinc-800/80 hover:bg-zinc-700 border-zinc-700/60 text-zinc-200"
+                    }`}
+                    title={`Screen Aspect: ${fitMode === "contain" ? "Fit (16:9)" : fitMode === "cover" ? "Cover" : "Fill"}`}
                   >
-                    <Sliders className="w-4 h-4" />
+                    <Ratio className="w-3.5 h-3.5" />
+                    <span className="text-[11px] font-bold capitalize">
+                      {fitMode === "contain" ? "Fit" : fitMode === "cover" ? "Cover" : "Fill"}
+                    </span>
                   </button>
 
                   {/* Picture in Picture */}

@@ -4,6 +4,7 @@ import { Play, X } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 import { safeStorage } from "../utils/safeStorage";
 import { useModalBehavior } from "../hooks/useModalBehavior";
+import { getStreamingApiBase } from "../utils/domains";
 import {
   modalBackdropAnimation,
   modalContainerAnimation,
@@ -144,7 +145,8 @@ export function usePlayerFU(content: PlayerFUContent | null) {
     let isMounted = true;
     setIsLoading(true);
 
-    fetch(`/api/stream/check?imdbId=${currentImdbId}`)
+    const apiBase = getStreamingApiBase();
+    fetch(`${apiBase}/api/stream/check?imdbId=${currentImdbId}`)
       .then((res) => res.json())
       .then((data) => {
         if (!isMounted) return;
@@ -304,7 +306,8 @@ export function PlayerFU({
     }
 
     // Construct immutable URL for this session with explicit quality & speed preferences
-    const stableUrl = `/api/stream/player/${content.id}?imdb=${encodeURIComponent(
+    const apiBase = getStreamingApiBase();
+    const stableUrl = `${apiBase}/api/stream/player/${content.id}?imdb=${encodeURIComponent(
       imdbId,
     )}&t=${initialResumeTime}&quality=${encodeURIComponent(preferredQuality)}&speed=${encodeURIComponent(savedSpeed)}&autoplay=1`;
     setActiveIframeSrc(stableUrl);

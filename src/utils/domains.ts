@@ -136,3 +136,24 @@ export function getFilmyflyDomain(): string {
 export function setFilmyflyDomain(domain: string): void {
   safeStorage.setItem('custom_filmyfly_domain', domain.trim());
 }
+
+/**
+ * Streaming API base domain: automatically routes stream and probe requests to
+ * https://api.moviznow.com in production, or uses VITE_STREAM_API_URL if configured,
+ * otherwise falls back to relative "" for local/preview development.
+ */
+export function getStreamingApiBase(): string {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname.toLowerCase();
+    // In production on moviznow.com, route streams directly to api.moviznow.com
+    if (host.includes('moviznow.com')) {
+      return 'https://api.moviznow.com';
+    }
+  }
+  const envUrl = (import.meta.env.VITE_STREAM_API_URL || import.meta.env.VITE_API_URL || '') as string;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+  return '';
+}
+
