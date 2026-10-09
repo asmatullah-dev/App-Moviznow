@@ -146,37 +146,58 @@ export function usePlayerFU(content: PlayerFUContent | null) {
     setIsLoading(true);
 
     const apiBase = getStreamingApiBase();
-    fetch(`${apiBase}/api/stream/check?imdbId=${currentImdbId}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (!isMounted) return;
-        const exists = Boolean(data.exists);
-        const meta: StreamMetadata | null = exists
-          ? {
-              qualities: data.qualities || [],
-              languages: data.languages || [],
-              print_name: data.print_name || "",
-              runtime_minutes: data.runtime_minutes || 0,
-              hasImax: Boolean(data.hasImax),
-            }
-          : null;
+    const handleSuccess = (data: any) => {
+      if (!isMounted) return;
+      const exists = Boolean(data && data.exists);
+      const meta: StreamMetadata | null = exists
+        ? {
+            qualities: data.qualities || [],
+            languages: data.languages || [],
+            print_name: data.print_name || "",
+            runtime_minutes: data.runtime_minutes || 0,
+            hasImax: Boolean(data.hasImax),
+          }
+        : null;
 
-        streamCheckCache.set(currentImdbId, {
-          exists,
-          meta,
-          timestamp: Date.now(),
-        });
+      streamCheckCache.set(currentImdbId, {
+        exists,
+        meta,
+        timestamp: Date.now(),
+      });
 
-        setIsAvailable(exists);
-        setStreamMeta(meta);
-      })
-      .catch(() => {
-        if (!isMounted) return;
-        setIsAvailable(false);
-        setStreamMeta(null);
-      })
-      .finally(() => {
-        if (isMounted) setIsLoading(false);
+      setIsAvailable(exists);
+      setStreamMeta(meta);
+      setIsLoading(false);
+    };
+
+    const doFetch = (base: string) => {
+      return fetch(`${base}/api/stream/check?imdbId=${currentImdbId}`).then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      });
+    };
+
+    doFetch(apiBase)
+      .then(handleSuccess)
+      .catch((err) => {
+        if (apiBase) {
+          // Fallback to relative endpoint on current host
+          doFetch("")
+            .then(handleSuccess)
+            .catch(() => {
+              if (isMounted) {
+                setIsAvailable(false);
+                setStreamMeta(null);
+                setIsLoading(false);
+              }
+            });
+          return;
+        }
+        if (isMounted) {
+          setIsAvailable(false);
+          setStreamMeta(null);
+          setIsLoading(false);
+        }
       });
 
     return () => {

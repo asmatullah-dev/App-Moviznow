@@ -224,21 +224,40 @@ export function useNativePlayerCheck(hubcloudUrl?: string) {
 
     const apiBase = getStreamingApiBase();
     const controller = new AbortController();
-    fetch(`${apiBase}/api/native-player/check`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: trimmedUrl }),
-      signal: controller.signal,
-    })
-      .then((res) => res.json())
-      .then((resData: NativeStreamData) => {
-        if (isMounted) {
-          watchCheckCache.set(trimmedUrl, { data: resData, timestamp: Date.now() });
-          setData(resData);
-          setIsLoading(false);
-        }
-      })
+
+    const doFetch = (base: string) => {
+      return fetch(`${base}/api/native-player/check`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: trimmedUrl }),
+        signal: controller.signal,
+      }).then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      });
+    };
+
+    const handleSuccess = (resData: NativeStreamData) => {
+      if (isMounted) {
+        watchCheckCache.set(trimmedUrl, { data: resData, timestamp: Date.now() });
+        setData(resData);
+        setIsLoading(false);
+      }
+    };
+
+    doFetch(apiBase)
+      .then(handleSuccess)
       .catch((err) => {
+        if (apiBase && !controller.signal.aborted) {
+          doFetch("")
+            .then(handleSuccess)
+            .catch((fallbackErr) => {
+              if (isMounted && fallbackErr.name !== "AbortError") {
+                setIsLoading(false);
+              }
+            });
+          return;
+        }
         if (isMounted && err.name !== "AbortError") {
           setIsLoading(false);
         }
