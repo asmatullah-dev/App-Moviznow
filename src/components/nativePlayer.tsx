@@ -34,14 +34,25 @@ import {
 } from "../utils/modalAnimations";
 
 export interface NativeStreamData {
-  hasWatchOnline: boolean;
+  hasWatchOnline?: boolean;
+  playable?: boolean;
   watchUrl?: string;
   streamUrl?: string;
+  directUrl?: string;
+  sourceUrl?: string;
   title?: string;
   mime?: string;
   size?: string;
   quality?: string;
   candidates?: Array<{ text: string; href: string }>;
+  duration?: number;
+  format?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  needsTranscode?: boolean;
+  isHls?: boolean;
+  audioTracks?: Array<any>;
+  subtitleTracks?: Array<any>;
 }
 
 export interface NativePlayerProps {
@@ -99,6 +110,7 @@ export function decodeWatchUrl(watchUrl?: string): {
     const uParam = parsed.searchParams.get("u");
     const mParam = parsed.searchParams.get("m");
     const tParam = parsed.searchParams.get("t");
+    const urlParam = parsed.searchParams.get("url");
 
     const decodeBase64 = (s: string) => {
       let clean = s.replace(/-/g, "+").replace(/_/g, "/").replace(/\s/g, "");
@@ -106,7 +118,15 @@ export function decodeWatchUrl(watchUrl?: string): {
       return atob(clean);
     };
 
-    const streamUrl = uParam ? decodeBase64(uParam) : undefined;
+    let streamUrl = uParam ? decodeBase64(uParam) : undefined;
+    if (!streamUrl && urlParam) {
+      streamUrl = urlParam.startsWith("http") ? urlParam : decodeBase64(urlParam);
+    }
+    if (!streamUrl && (watchUrl.startsWith("http://") || watchUrl.startsWith("https://"))) {
+      if (!watchUrl.includes("hbplay.pages.dev")) {
+        streamUrl = watchUrl;
+      }
+    }
     const mime = mParam ? decodeBase64(mParam) : undefined;
     const title = tParam ? decodeBase64(tParam) : undefined;
 
@@ -116,6 +136,9 @@ export function decodeWatchUrl(watchUrl?: string): {
       title,
     };
   } catch {
+    if (watchUrl && (watchUrl.startsWith("http://") || watchUrl.startsWith("https://")) && !watchUrl.includes("hbplay.pages.dev")) {
+      return { streamUrl: watchUrl };
+    }
     return {};
   }
 }
@@ -237,10 +260,18 @@ export function useNativePlayerCheck(hubcloudUrl?: string) {
       });
     };
 
-    const handleSuccess = (resData: NativeStreamData) => {
+    const handleSuccess = (resData: any) => {
       if (isMounted) {
-        watchCheckCache.set(trimmedUrl, { data: resData, timestamp: Date.now() });
-        setData(resData);
+        const stream = resData?.streamUrl || resData?.sourceUrl || resData?.directUrl;
+        const normalized: NativeStreamData = {
+          ...resData,
+          hasWatchOnline: Boolean(resData?.hasWatchOnline || resData?.playable || stream),
+          streamUrl: stream,
+          watchUrl: resData?.watchUrl || stream,
+          playable: resData?.playable !== undefined ? resData.playable : Boolean(stream),
+        };
+        watchCheckCache.set(trimmedUrl, { data: normalized, timestamp: Date.now() });
+        setData(normalized);
         setIsLoading(false);
       }
     };
@@ -270,7 +301,7 @@ export function useNativePlayerCheck(hubcloudUrl?: string) {
   }, [hubcloudUrl]);
 
   return {
-    isAvailable: Boolean(data?.hasWatchOnline),
+    isAvailable: Boolean(data?.hasWatchOnline || data?.playable || data?.streamUrl),
     streamData: data,
     isLoading,
   };
@@ -301,16 +332,22 @@ export function NativePlayer({
   const progressSaveIntervalRef = useRef<any>(null);
   const toastTimeoutRef = useRef<any>(null);
 
-  // Parse direct stream URL (prioritizing FSL candidate)
+  // Parse direct stream URL (prioritizing FSL candidate, decoded meta, propStreamUrl, or direct watchUrl)
   const fslCandidate = useMemo(() => findFslCandidate(candidates), [candidates]);
   const decodedMeta = useMemo(() => decodeWatchUrl(watchUrl), [watchUrl]);
-  const directStreamUrl = fslCandidate?.href || propStreamUrl || decodedMeta.streamUrl || "";
+  const directStreamUrl =
+    propStreamUrl ||
+    fslCandidate?.href ||
+    decodedMeta.streamUrl ||
+    (watchUrl && !watchUrl.includes("hbplay.pages.dev") ? watchUrl : "");
   const displayTitle = decodedMeta.title || title;
 
   // Engine: "native" (Universal Codec Transcode Engine) or "web" (HubCloud Web Player)
   const [engine, setEngine] = useState<"native" | "web">("native");
 
   const [mediaInfo, setMediaInfo] = useState<MediaProbeInfo | null>(null);
+  const [streamAttempt, setStreamAttempt] = useState<number>(0);
+  const [streamMode, setStreamMode] = useState<"proxy" | "transcode">("proxy");
   const [seekOffset, setSeekOffset] = useState<number>(0);
   const [totalDuration, setTotalDuration] = useState<number>(0);
   const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(0);
@@ -417,18 +454,21 @@ export function NativePlayer({
     if (!directStreamUrl) return "";
     const params = new URLSearchParams();
     params.set("url", directStreamUrl);
-    params.set("mode", "transcode");
+    params.set("mode", streamMode);
 
-    if (seekOffset > 0) {
+    if (streamMode === "transcode" && seekOffset > 0) {
       params.set("ss", String(seekOffset));
     }
     if (selectedAudioTrack > 0) {
       params.set("audio", String(selectedAudioTrack));
     }
+    if (streamAttempt > 0) {
+      params.set("_r", String(streamAttempt));
+    }
 
     const apiBase = getStreamingApiBase();
     return `${apiBase}/api/native-player/stream?${params.toString()}`;
-  }, [directStreamUrl, seekOffset, selectedAudioTrack]);
+  }, [directStreamUrl, streamMode, seekOffset, selectedAudioTrack, streamAttempt]);
 
   const controlsShownAtRef = useRef<number>(Date.now());
 
@@ -613,7 +653,10 @@ export function NativePlayer({
   // Video Event Handlers
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
-    const current = seekOffset + videoRef.current.currentTime;
+    const current =
+      streamMode === "transcode"
+        ? seekOffset + videoRef.current.currentTime
+        : videoRef.current.currentTime;
     setCurrentPosition(current);
     latestPositionRef.current = Math.floor(current);
 
@@ -643,7 +686,8 @@ export function NativePlayer({
       const bufferedEnd = videoRef.current.buffered.end(videoRef.current.buffered.length - 1);
       const effectiveDuration = totalDuration || videoRef.current.duration;
       if (effectiveDuration > 0) {
-        setBufferedPercent(((seekOffset + bufferedEnd) / effectiveDuration) * 100);
+        const bufferedPos = streamMode === "transcode" ? seekOffset + bufferedEnd : bufferedEnd;
+        setBufferedPercent((bufferedPos / effectiveDuration) * 100);
       }
     }
   };
@@ -656,14 +700,61 @@ export function NativePlayer({
     setIsBuffering(false);
     setHasPlaybackError(false);
 
+    // If resuming in proxy mode, seek to remembered position
+    const savedTarget = latestPositionRef.current || currentPosition;
+    if (streamMode === "proxy" && savedTarget > 3) {
+      try {
+        videoRef.current.currentTime = savedTarget;
+      } catch {}
+    }
+
     videoRef.current.playbackRate = playbackSpeed;
-    videoRef.current.play().catch(() => {
+    videoRef.current.play().then(() => {
+      setIsPlaying(true);
+    }).catch(() => {
       setIsPlaying(false);
     });
   };
 
+  const handleRetryPlayback = useCallback(() => {
+    setHasPlaybackError(false);
+    setIsBuffering(true);
+    setStreamAttempt((prev) => prev + 1);
+
+    const targetTime = latestPositionRef.current || currentPosition;
+    if (videoRef.current) {
+      try {
+        videoRef.current.load();
+        const p = videoRef.current.play();
+        if (p !== undefined) {
+          p.then(() => {
+            setIsPlaying(true);
+            setIsBuffering(false);
+            if (targetTime > 0) {
+              try {
+                videoRef.current!.currentTime = targetTime;
+              } catch {}
+            }
+          }).catch(() => {
+            setIsPlaying(false);
+            setIsBuffering(false);
+          });
+        }
+      } catch (e) {
+        console.warn("[Retry playback error]:", e);
+      }
+    }
+  }, [currentPosition]);
+
   const handleVideoError = () => {
     setIsBuffering(false);
+    // If proxy failed on an MKV or transcode stream, try transcode once before showing notice
+    if (streamMode === "proxy" && (directStreamUrl.includes(".mkv") || mediaInfo?.needsTranscode) && streamAttempt === 0) {
+      setStreamMode("transcode");
+      setStreamAttempt(1);
+      setIsBuffering(true);
+      return;
+    }
     setHasPlaybackError(true);
   };
 
@@ -674,7 +765,11 @@ export function NativePlayer({
     if (videoRef.current.paused) {
       // Resuming playback after video was stopped/paused
       const rememberedTarget = latestPositionRef.current || currentPosition;
-      const currentVidPos = Math.floor(seekOffset + (videoRef.current.currentTime || 0));
+      const currentVidPos = Math.floor(
+        streamMode === "transcode"
+          ? seekOffset + (videoRef.current.currentTime || 0)
+          : videoRef.current.currentTime || 0
+      );
 
       // If video connection dropped, reset to 0, ended, or drifted > 3s from remembered position:
       if (
@@ -695,7 +790,11 @@ export function NativePlayer({
       setIsPlaying(true);
     } else {
       // Stopping / pausing playback: save current position immediately
-      const current = Math.floor(seekOffset + (videoRef.current.currentTime || 0));
+      const current = Math.floor(
+        streamMode === "transcode"
+          ? seekOffset + (videoRef.current.currentTime || 0)
+          : videoRef.current.currentTime || 0
+      );
       latestPositionRef.current = current;
       savePlaybackPosition(current);
       videoRef.current.pause();
@@ -710,12 +809,24 @@ export function NativePlayer({
     const clampedTarget = Math.max(0, Math.min(duration, targetSeconds));
 
     setIsBuffering(true);
-    setSeekOffset(clampedTarget);
     setCurrentPosition(clampedTarget);
     latestPositionRef.current = Math.floor(clampedTarget);
     savePlaybackPosition(clampedTarget);
-    if (videoRef.current) {
-      videoRef.current.currentTime = 0;
+
+    if (streamMode === "transcode") {
+      setSeekOffset(clampedTarget);
+      if (videoRef.current) {
+        videoRef.current.currentTime = 0;
+      }
+    } else {
+      if (videoRef.current) {
+        try {
+          videoRef.current.currentTime = clampedTarget;
+          setIsBuffering(false);
+        } catch {
+          setSeekOffset(clampedTarget);
+        }
+      }
     }
     resetControlsTimeout();
   };
@@ -1088,54 +1199,26 @@ export function NativePlayer({
 
             {/* Playback Error Fallback Card */}
             {hasPlaybackError && engine === "native" && (
-              <div className="absolute inset-0 bg-black/85 flex flex-col items-center justify-center p-6 text-center z-30">
-                <div className="w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-500 mb-4">
-                  <Tv className="w-8 h-8" />
+              <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-30">
+                <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-500 mb-4">
+                  <Tv className="w-7 h-7" />
                 </div>
-                <h3 className="text-lg font-black text-white mb-2">
+                <h3 className="text-base sm:text-lg font-black text-white mb-2">
                   {t("Playback Notice")}
                 </h3>
-                <p className="text-zinc-400 text-xs sm:text-sm max-w-md mb-6 leading-relaxed">
-                  {t(
-                    "Video playback encountered a temporary network delay. You can retry playback or switch to Web Player."
-                  )}
+                <p className="text-zinc-400 text-xs sm:text-sm max-w-sm mb-6 leading-relaxed">
+                  {t("Video playback encountered a temporary network delay. Tap retry to reconnect.")}
                 </p>
-                <div className="flex flex-wrap items-center justify-center gap-3">
+                <div className="flex items-center justify-center">
                   <button
-                    onClick={() => {
-                      setHasPlaybackError(false);
-                      executeSeek(latestPositionRef.current || currentPosition);
-                    }}
-                    className="bg-emerald-500 hover:bg-emerald-400 text-white font-bold py-2.5 px-5 rounded-xl text-sm flex items-center gap-2 shadow-lg shadow-emerald-500/20 transition-all"
+                    type="button"
+                    onClick={handleRetryPlayback}
+                    className="p-3.5 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-white rounded-2xl shadow-lg shadow-emerald-500/25 transition-all flex items-center justify-center cursor-pointer"
+                    title={t("Retry")}
+                    aria-label={t("Retry")}
                   >
-                    <RefreshCw className="w-4 h-4" />
-                    <span>{t("Retry Playback")}</span>
+                    <RefreshCw className="w-5 h-5" />
                   </button>
-                  <button
-                    onClick={() => {
-                      setEngine("web");
-                      setHasPlaybackError(false);
-                    }}
-                    className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold py-2.5 px-4 rounded-xl text-sm transition-all"
-                  >
-                    <span>{t("Web Player")}</span>
-                  </button>
-                  {directStreamUrl && (
-                    <a
-                      href={`vlc://${directStreamUrl}`}
-                      className="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2.5 px-4 rounded-xl text-sm flex items-center gap-2 transition-all"
-                    >
-                      <span>VLC Player</span>
-                    </a>
-                  )}
-                  {directStreamUrl && (
-                    <a
-                      href={`intent:${directStreamUrl}#Intent;package=com.mxtech.videoplayer.ad;type=video/*;end`}
-                      className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2.5 px-4 rounded-xl text-sm flex items-center gap-2 transition-all"
-                    >
-                      <span>MX Player</span>
-                    </a>
-                  )}
                 </div>
               </div>
             )}

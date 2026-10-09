@@ -8,13 +8,24 @@ export const nativePlayerRouter = express.Router();
 
 export interface NativeStreamData {
   hasWatchOnline: boolean;
+  playable?: boolean;
   watchUrl?: string;
   streamUrl?: string;
+  directUrl?: string;
+  sourceUrl?: string;
   title?: string;
   mime?: string;
   size?: string;
   quality?: string;
   candidates?: Array<{ text: string; href: string }>;
+  duration?: number;
+  format?: string;
+  videoCodec?: string;
+  audioCodec?: string;
+  needsTranscode?: boolean;
+  isHls?: boolean;
+  audioTracks?: Array<{ id: number; language: string; codec: string; title: string }>;
+  subtitleTracks?: Array<{ id: number; language: string; title: string }>;
 }
 
 export interface MediaProbeInfo {
@@ -27,6 +38,7 @@ export interface MediaProbeInfo {
   audioTracks: Array<{ id: number; language: string; codec: string; title: string }>;
   subtitleTracks: Array<{ id: number; language: string; title: string }>;
   needsTranscode: boolean;
+  playable?: boolean;
 }
 
 export function decodeBase64Safe(input?: string): string {
@@ -187,7 +199,55 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
       return res.json(cached.data);
     }
 
-    // 1. Check in-memory Hubcloud extraction cache
+    // 1. Direct watch or stream URL check (workers.dev, R2, Pixeldrain, raw video links, hbplay)
+    if (
+      url.includes("workers.dev") ||
+      url.includes("cloudflarestorage") ||
+      url.includes(".r2.") ||
+      url.includes("pixeldrain.com") ||
+      url.includes(".mp4") ||
+      url.includes(".mkv") ||
+      url.includes(".webm")
+    ) {
+      let resolvedStreamUrl = url;
+      if (url.includes("pixeldrain.com/u/")) {
+        resolvedStreamUrl = url.replace("/u/", "/api/file/");
+      }
+      const isMkv = resolvedStreamUrl.includes(".mkv");
+      const result: NativeStreamData = {
+        hasWatchOnline: true,
+        playable: true,
+        watchUrl: resolvedStreamUrl,
+        streamUrl: resolvedStreamUrl,
+        directUrl: `/api/native-player/stream?url=${encodeURIComponent(resolvedStreamUrl)}`,
+        sourceUrl: resolvedStreamUrl,
+        title: "Movie Stream",
+        mime: isMkv ? "video/x-matroska" : "video/mp4",
+        quality: "720p",
+      };
+      checkCache.set(url, { data: result, timestamp: Date.now() });
+      return res.json(result);
+    }
+
+    if (url.includes("hbplay.pages.dev") || url.includes("?u=")) {
+      const parsed = parseWatchUrl(url);
+      const stream = parsed.streamUrl || url;
+      const result: NativeStreamData = {
+        hasWatchOnline: true,
+        playable: true,
+        watchUrl: url,
+        streamUrl: stream,
+        directUrl: `/api/native-player/stream?url=${encodeURIComponent(stream)}`,
+        sourceUrl: stream,
+        title: parsed.title || "Movie",
+        mime: parsed.mime || "video/mp4",
+        quality: "720p",
+      };
+      checkCache.set(url, { data: result, timestamp: Date.now() });
+      return res.json(result);
+    }
+
+    // 2. Check in-memory Hubcloud extraction cache
     const cachedHub = getCachedHubcloudData(url);
     if (cachedHub && Array.isArray(cachedHub.candidates) && cachedHub.candidates.length > 0) {
       const fsl = findFslCandidate(cachedHub.candidates);
@@ -204,8 +264,11 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
 
         const result: NativeStreamData = {
           hasWatchOnline: true,
+          playable: true,
           watchUrl,
           streamUrl,
+          directUrl: `/api/native-player/stream?url=${encodeURIComponent(streamUrl)}`,
+          sourceUrl: streamUrl,
           title,
           mime: parsed.mime || "video/mp4",
           size: cachedHub.size,
@@ -215,20 +278,6 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
         checkCache.set(url, { data: result, timestamp: Date.now() });
         return res.json(result);
       }
-    }
-
-    // 2. Direct watch URL check
-    if (url.includes("hbplay.pages.dev") || url.includes("?u=")) {
-      const parsed = parseWatchUrl(url);
-      const result: NativeStreamData = {
-        hasWatchOnline: true,
-        watchUrl: url,
-        streamUrl: parsed.streamUrl,
-        title: parsed.title || "Movie",
-        mime: parsed.mime || "video/mp4",
-      };
-      checkCache.set(url, { data: result, timestamp: Date.now() });
-      return res.json(result);
     }
 
     // 3. Perform server extraction call
@@ -262,8 +311,11 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
 
           const result: NativeStreamData = {
             hasWatchOnline: true,
+            playable: true,
             watchUrl,
             streamUrl,
+            directUrl: `/api/native-player/stream?url=${encodeURIComponent(streamUrl)}`,
+            sourceUrl: streamUrl,
             title,
             mime: parsed.mime || "video/mp4",
             size: data.size,
@@ -278,7 +330,7 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
       clearTimeout(timeout);
     }
 
-    const noResult: NativeStreamData = { hasWatchOnline: false };
+    const noResult: NativeStreamData = { hasWatchOnline: false, playable: false };
     checkCache.set(url, { data: noResult, timestamp: Date.now() });
     return res.json(noResult);
   } catch (err: any) {
@@ -363,9 +415,39 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       targetUrl,
     ];
 
+    let probeTimeout: any = null;
+    let finished = false;
+
     const child = spawn("ffprobe", args);
     let output = "";
     let errorOutput = "";
+
+    const finishProbe = (data: MediaProbeInfo) => {
+      if (finished) return;
+      finished = true;
+      if (probeTimeout) clearTimeout(probeTimeout);
+      try {
+        child.kill("SIGKILL");
+      } catch {}
+      infoCache.set(targetUrl, { data, timestamp: Date.now() });
+      return res.json(data);
+    };
+
+    probeTimeout = setTimeout(() => {
+      const isMkv = targetUrl.includes(".mkv") || targetUrl.includes("cloudflarestorage") || targetUrl.includes("matroska");
+      finishProbe({
+        duration: 0,
+        format: isMkv ? "matroska,webm" : "mp4",
+        videoCodec: "h264",
+        width: 1280,
+        height: 720,
+        isMkv,
+        audioTracks: [{ id: 0, language: "Stereo", codec: "aac", title: "Audio Track" }],
+        subtitleTracks: [],
+        needsTranscode: false,
+        playable: true,
+      });
+    }, 5000);
 
     child.stdout.on("data", (d) => {
       output += d.toString();
@@ -378,19 +460,19 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
     child.on("close", (code) => {
       if (code !== 0 || !output) {
         console.warn("[ffprobe exit code]:", code, errorOutput.slice(0, 200));
-        // Fallback info
-        const fallback: MediaProbeInfo = {
+        const isMkv = targetUrl.includes(".mkv") || targetUrl.includes("cloudflarestorage") || targetUrl.includes("matroska");
+        return finishProbe({
           duration: 0,
-          format: targetUrl.includes(".mkv") ? "matroska,webm" : "mp4",
-          videoCodec: "unknown",
+          format: isMkv ? "matroska,webm" : "mp4",
+          videoCodec: "h264",
           width: 1280,
           height: 720,
-          isMkv: targetUrl.includes(".mkv") || targetUrl.includes("cloudflarestorage"),
+          isMkv,
           audioTracks: [{ id: 0, language: "Default", codec: "aac", title: "Audio Track" }],
           subtitleTracks: [],
-          needsTranscode: targetUrl.includes(".mkv") || targetUrl.includes("cloudflarestorage"),
-        };
-        return res.json(fallback);
+          needsTranscode: false,
+          playable: true,
+        });
       }
 
       try {
@@ -434,41 +516,55 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
           };
         });
 
-        // Browser standard <video> cannot decode MKV or HEVC (H.265) or AC3 natively
-        const needsTranscode = isMkv || vCodec.includes("hevc") || vCodec.includes("h265") || audioStreams.some((a: any) => ["ac3", "eac3", "dts", "truehd"].includes((a.codec_name || "").toLowerCase()));
+        // Browser standard <video> cannot decode HEVC (H.265) or AC3 natively
+        const needsTranscode = vCodec.includes("hevc") || vCodec.includes("h265") || audioStreams.some((a: any) => ["ac3", "eac3", "dts", "truehd"].includes((a.codec_name || "").toLowerCase()));
 
         const resultInfo: MediaProbeInfo = {
           duration,
           format: formatName,
-          videoCodec: vCodec,
+          videoCodec: vCodec || "h264",
           width: videoStream?.width || 1280,
           height: videoStream?.height || 720,
           isMkv,
           audioTracks: audioTracks.length > 0 ? audioTracks : [{ id: 0, language: "Stereo", codec: "aac", title: "Audio" }],
           subtitleTracks,
           needsTranscode,
+          playable: true,
         };
 
-        infoCache.set(targetUrl, { data: resultInfo, timestamp: Date.now() });
-        return res.json(resultInfo);
+        return finishProbe(resultInfo);
       } catch (parseErr: any) {
         console.error("[ffprobe parse error]:", parseErr);
-        return res.status(500).json({ error: "Failed to parse stream metadata" });
+        const isMkv = targetUrl.includes(".mkv") || targetUrl.includes("cloudflarestorage");
+        return finishProbe({
+          duration: 0,
+          format: isMkv ? "matroska,webm" : "mp4",
+          videoCodec: "h264",
+          width: 1280,
+          height: 720,
+          isMkv,
+          audioTracks: [{ id: 0, language: "Stereo", codec: "aac", title: "Audio" }],
+          subtitleTracks: [],
+          needsTranscode: false,
+          playable: true,
+        });
       }
     });
 
     child.on("error", (err) => {
       console.warn("[ffprobe error]:", err);
-      return res.json({
+      const isMkv = targetUrl.includes(".mkv") || targetUrl.includes("cloudflarestorage");
+      return finishProbe({
         duration: 0,
-        format: "unknown",
-        videoCodec: "unknown",
+        format: isMkv ? "matroska,webm" : "mp4",
+        videoCodec: "h264",
         width: 1280,
         height: 720,
-        isMkv: targetUrl.includes(".mkv"),
-        audioTracks: [],
+        isMkv,
+        audioTracks: [{ id: 0, language: "Stereo", codec: "aac", title: "Audio" }],
         subtitleTracks: [],
-        needsTranscode: true,
+        needsTranscode: false,
+        playable: true,
       });
     });
   } catch (err: any) {
@@ -631,137 +727,44 @@ nativePlayerRouter.get(["/api/native-player/subtitle", "/native-player/subtitle"
 });
 
 /**
- * 5. Media Stream Engine (Universal MKV/HEVC/AC3 Transcode + Direct Byte-Range Proxy)
+ * Helper to stream media directly via HTTP byte ranges (supports instant seek, 0 CPU overhead)
  */
-nativePlayerRouter.options(["/api/native-player/stream", "/native-player/stream"], (_req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "*");
-  res.setHeader("Access-Control-Max-Age", "86400");
-  res.sendStatus(204);
-});
-
-nativePlayerRouter.all(["/api/native-player/stream", "/native-player/stream"], async (req, res) => {
+async function streamViaProxy(targetUrl: string, req: express.Request, res: express.Response) {
   try {
-    const targetUrl = (req.query.url as string || "").trim();
-    if (!targetUrl || !targetUrl.startsWith("http")) {
-      return res.status(400).send("Invalid stream URL");
+    let referer = "";
+    if (targetUrl.includes("hbplay.pages.dev")) {
+      referer = "https://hbplay.pages.dev/";
+    } else if (targetUrl.includes("pixeldrain.com")) {
+      referer = "https://pixeldrain.com/";
     }
 
-    const mode = (req.query.mode as string || "").toLowerCase();
-    const ss = parseFloat((req.query.ss as string) || "0") || 0;
-    const audioIdx = parseInt((req.query.audio as string) || "0", 10) || 0;
-
-    const isMkvTarget =
-      targetUrl.includes(".mkv") ||
-      targetUrl.includes("cloudflarestorage") ||
-      targetUrl.toLowerCase().includes("matroska");
-
-    // Activate FFmpeg Universal Remux/Transcode Engine if mode=transcode OR if file is an MKV/FSL server stream
-    if (mode === "transcode" || (mode !== "raw" && isMkvTarget)) {
-      res.setHeader("Content-Type", "video/mp4");
-      res.setHeader("Content-Disposition", "inline");
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Headers", "*");
-      res.setHeader("Accept-Ranges", "none");
-      res.setHeader("Connection", "keep-alive");
-      res.setHeader("Cache-Control", "no-cache, no-store");
-
-      const ffmpegArgs: string[] = [
-        "-headers",
-        "Referer: https://hbplay.pages.dev/\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n",
-      ];
-
-      // Instant seeking support with fast input seek
-      if (ss > 0) {
-        ffmpegArgs.push("-ss", String(ss));
-      }
-
-      ffmpegArgs.push("-i", targetUrl);
-
-      // Map video and specified audio stream
-      ffmpegArgs.push(
-        "-map", "0:v:0",
-        "-map", `0:a:${audioIdx}?`
-      );
-
-      // Check cached probe info to see if video and audio can be fast-copied (0 CPU, 0 buffering!)
-      const cachedProbe = infoCache.get(targetUrl)?.data;
-      const videoIsH264 = cachedProbe?.videoCodec?.includes("h264") || cachedProbe?.videoCodec?.includes("avc");
-      const selectedAudio = cachedProbe?.audioTracks?.find((a: any) => a.id === audioIdx);
-      const audioIsAac = (selectedAudio?.codec || "").toLowerCase().includes("aac");
-
-      if (videoIsH264) {
-        // Blazing-fast stream remux copy - 0 CPU, 0 delay, completely stops 5-10s buffering
-        ffmpegArgs.push("-c:v", "copy");
-      } else {
-        // Highly optimized ultrafast multi-threaded H.264 transcoding
-        ffmpegArgs.push(
-          "-c:v", "libx264",
-          "-preset", "ultrafast",
-          "-tune", "zerolatency",
-          "-threads", "0",
-          "-g", "48",
-          "-keyint_min", "24",
-          "-crf", "23",
-          "-pix_fmt", "yuv420p"
-        );
-      }
-
-      if (audioIsAac) {
-        ffmpegArgs.push("-c:a", "copy");
-      } else {
-        ffmpegArgs.push(
-          "-c:a", "aac",
-          "-b:a", "128k",
-          "-ac", "2"
-        );
-      }
-
-      // Continuous low-latency MP4 streaming flags with immediate packet flushing
-      ffmpegArgs.push(
-        "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-        "-flush_packets", "1",
-        "-f", "mp4",
-        "pipe:1"
-      );
-
-      const child = spawn("ffmpeg", ffmpegArgs, {
-        stdio: ["ignore", "pipe", "ignore"],
-      });
-
-      child.stdout.pipe(res);
-
-      req.on("close", () => {
-        try {
-          child.kill("SIGKILL");
-        } catch {}
-      });
-
-      child.on("error", (err) => {
-        console.warn("[FFmpeg transcode stream error]:", err);
-        if (!res.headersSent) res.status(500).send("Stream transcode error");
-      });
-      return;
-    }
-
-    // Direct byte-range proxy for standard MP4 files
     const forwardHeaders: Record<string, string> = {
       "User-Agent":
         (req.headers["user-agent"] as string) ||
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "Referer": "https://hbplay.pages.dev/",
       "Accept": (req.headers.accept as string) || "*/*",
     };
+    if (referer) {
+      forwardHeaders["Referer"] = referer;
+    }
 
     if (req.headers.range) {
       forwardHeaders["Range"] = req.headers.range as string;
     }
 
-    const upstreamRes = await fetch(targetUrl, {
+    let upstreamRes = await fetch(targetUrl, {
       method: req.method,
       headers: forwardHeaders,
     });
+
+    // If upstream returned 403 or 401 with referer, retry without referer
+    if ((upstreamRes.status === 403 || upstreamRes.status === 401) && forwardHeaders["Referer"]) {
+      delete forwardHeaders["Referer"];
+      upstreamRes = await fetch(targetUrl, {
+        method: req.method,
+        headers: forwardHeaders,
+      });
+    }
 
     res.status(upstreamRes.status);
 
@@ -781,7 +784,8 @@ nativePlayerRouter.all(["/api/native-player/stream", "/native-player/stream"], a
       }
     }
 
-    res.setHeader("Content-Type", "video/mp4");
+    const upstreamType = upstreamRes.headers.get("content-type");
+    res.setHeader("Content-Type", upstreamType && upstreamType.startsWith("video/") ? upstreamType : "video/mp4");
     res.setHeader("Content-Disposition", "inline");
     res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -812,7 +816,181 @@ nativePlayerRouter.all(["/api/native-player/stream", "/native-player/stream"], a
       res.status(502).send("Upstream video streaming error");
     }
   }
-});
+}
+
+/**
+ * 5. Media Stream Engine (Universal MKV/HEVC/AC3 Transcode + Direct Byte-Range Proxy)
+ */
+nativePlayerRouter.options(
+  [
+    "/api/native-player/stream",
+    "/native-player/stream",
+    "/api/native-player/proxy",
+    "/native-player/proxy",
+  ],
+  (_req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges, Content-Type");
+    res.setHeader("Access-Control-Max-Age", "86400");
+    res.sendStatus(204);
+  }
+);
+
+nativePlayerRouter.all(
+  [
+    "/api/native-player/stream",
+    "/native-player/stream",
+    "/api/native-player/proxy",
+    "/native-player/proxy",
+  ],
+  async (req, res) => {
+    try {
+      const targetUrl = (req.query.url as string || "").trim();
+      if (!targetUrl || !targetUrl.startsWith("http")) {
+        return res.status(400).send("Invalid stream URL");
+      }
+
+      const mode = (req.query.mode as string || "proxy").toLowerCase();
+      const ss = parseFloat((req.query.ss as string) || "0") || 0;
+      const audioIdx = parseInt((req.query.audio as string) || "0", 10) || 0;
+
+      // When mode is explicitly proxy/raw or if audio/ss are not specified, stream directly with 0 latency
+      if (mode === "proxy" || mode === "raw" || mode === "direct") {
+        return streamViaProxy(targetUrl, req, res);
+      }
+
+      const isMkvTarget =
+        targetUrl.includes(".mkv") ||
+        targetUrl.includes("cloudflarestorage") ||
+        targetUrl.toLowerCase().includes("matroska");
+
+      // Activate FFmpeg Universal Remux/Transcode Engine if mode=transcode
+      if (mode === "transcode" || isMkvTarget) {
+        let headersSentOrPiping = false;
+
+        res.setHeader("Content-Type", "video/mp4");
+        res.setHeader("Content-Disposition", "inline");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Headers", "*");
+        res.setHeader("Accept-Ranges", "none");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("Cache-Control", "no-cache, no-store");
+
+        let referer = "";
+        if (targetUrl.includes("hbplay.pages.dev")) {
+          referer = "Referer: https://hbplay.pages.dev/\r\n";
+        } else if (targetUrl.includes("pixeldrain.com")) {
+          referer = "Referer: https://pixeldrain.com/\r\n";
+        }
+
+        const ffmpegArgs: string[] = [
+          "-headers",
+          `${referer}User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`,
+        ];
+
+        // Instant seeking support with fast input seek
+        if (ss > 0) {
+          ffmpegArgs.push("-ss", String(ss));
+        }
+
+        ffmpegArgs.push("-i", targetUrl);
+
+        // Map video and specified audio stream
+        ffmpegArgs.push(
+          "-map", "0:v:0",
+          "-map", `0:a:${audioIdx}?`
+        );
+
+        // Check cached probe info to see if video and audio can be fast-copied (0 CPU, 0 buffering!)
+        const cachedProbe = infoCache.get(targetUrl)?.data;
+        const videoIsH264 = cachedProbe?.videoCodec?.includes("h264") || cachedProbe?.videoCodec?.includes("avc");
+        const selectedAudio = cachedProbe?.audioTracks?.find((a: any) => a.id === audioIdx);
+        const audioIsAac = (selectedAudio?.codec || "").toLowerCase().includes("aac");
+
+        if (videoIsH264) {
+          ffmpegArgs.push("-c:v", "copy");
+        } else {
+          ffmpegArgs.push(
+            "-c:v", "libx264",
+            "-preset", "ultrafast",
+            "-tune", "zerolatency",
+            "-threads", "0",
+            "-g", "48",
+            "-keyint_min", "24",
+            "-crf", "23",
+            "-pix_fmt", "yuv420p"
+          );
+        }
+
+        if (audioIsAac) {
+          ffmpegArgs.push("-c:a", "copy");
+        } else {
+          ffmpegArgs.push(
+            "-c:a", "aac",
+            "-b:a", "128k",
+            "-ac", "2"
+          );
+        }
+
+        ffmpegArgs.push(
+          "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+          "-flush_packets", "1",
+          "-f", "mp4",
+          "pipe:1"
+        );
+
+        let child: any;
+        try {
+          child = spawn("ffmpeg", ffmpegArgs, {
+            stdio: ["ignore", "pipe", "ignore"],
+          });
+        } catch (spawnErr) {
+          console.warn("[FFmpeg spawn failed, falling back to proxy]:", spawnErr);
+          return streamViaProxy(targetUrl, req, res);
+        }
+
+        child.stdout.on("data", () => {
+          headersSentOrPiping = true;
+        });
+
+        child.stdout.pipe(res);
+
+        req.on("close", () => {
+          try {
+            child.kill("SIGKILL");
+          } catch {}
+        });
+
+        child.on("error", (err: any) => {
+          console.warn("[FFmpeg transcode stream error, falling back to proxy]:", err);
+          if (!headersSentOrPiping && !res.headersSent) {
+            return streamViaProxy(targetUrl, req, res);
+          } else if (!res.writableEnded) {
+            res.end();
+          }
+        });
+
+        child.on("close", (code: number) => {
+          if (code !== 0 && !headersSentOrPiping && !res.headersSent) {
+            console.warn("[FFmpeg exited with non-zero before piping, falling back to proxy]:", code);
+            return streamViaProxy(targetUrl, req, res);
+          }
+        });
+        return;
+      }
+
+      // Default fallback: direct stream via proxy
+      return streamViaProxy(targetUrl, req, res);
+    } catch (err: any) {
+      console.error("[NativePlayer Stream Route Error]:", err);
+      if (!res.headersSent) {
+        res.status(502).send("Upstream video streaming error");
+      }
+    }
+  }
+);
 
 /**
  * 6. Embeddable masked Native Player HTML view
