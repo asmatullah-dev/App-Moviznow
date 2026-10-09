@@ -138,24 +138,23 @@ export function setFilmyflyDomain(domain: string): void {
 }
 
 /**
- * Streaming API base domain: routes requests to https://api.moviznow.com
- * when running on moviznow.com (or uses VITE_STREAM_API_URL if configured).
- * Automatic fallbacks in PlayerFU and nativePlayer ensure playback works even if DNS is propagating.
+ * Streaming API base domain: defaults to relative "" so all player and stream
+ * requests route reliably on the same origin (moviznow.com) through active server rewrites.
+ * Automatically clears any stale api.moviznow.com overrides from storage to prevent network errors.
  */
 export function getStreamingApiBase(): string {
-  const envUrl = (import.meta.env.VITE_STREAM_API_URL || import.meta.env.VITE_API_URL || '') as string;
-  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
-    return envUrl.trim().replace(/\/+$/, '');
-  }
   if (typeof window !== 'undefined') {
-    const custom = safeStorage.getItem('custom_stream_api_url');
-    if (custom && custom.trim()) {
-      return custom.trim().replace(/\/+$/, '');
-    }
-    const host = window.location.hostname.toLowerCase();
-    if (host.includes('moviznow.com') && host !== 'api.moviznow.com') {
-      return 'https://api.moviznow.com';
-    }
+    try {
+      const stored = safeStorage.getItem('custom_stream_api_url') || localStorage.getItem('custom_stream_api_url');
+      if (stored && (stored.includes('api.moviznow.com') || stored.includes('api-moviznow'))) {
+        safeStorage.removeItem('custom_stream_api_url');
+        localStorage.removeItem('custom_stream_api_url');
+      }
+    } catch {}
+  }
+  const envUrl = (import.meta.env.VITE_STREAM_API_URL || import.meta.env.VITE_API_URL || '') as string;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim() && !envUrl.includes('api.moviznow.com')) {
+    return envUrl.trim().replace(/\/+$/, '');
   }
   return '';
 }

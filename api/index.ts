@@ -405,10 +405,10 @@ async function startServer() {
     next();
   });
 
-  // Redirect raw site visits to api.moviznow.com or auth.moviznow.com directly to MovizNow.com
+  // Redirect raw site visits to auth.moviznow.com directly to MovizNow.com
   app.use((req, res, next) => {
     const host = (req.headers.host || req.hostname || "").toLowerCase();
-    const isSubdomainTarget = host.includes("api.moviznow.com") || host.includes("auth.moviznow.com");
+    const isSubdomainTarget = host.includes("auth.moviznow.com");
 
     if (isSubdomainTarget) {
       const p = req.path.toLowerCase();
