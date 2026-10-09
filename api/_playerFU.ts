@@ -168,8 +168,10 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
       html = html.replace("<head>", '<head>\n<meta name="referrer" content="origin-when-cross-origin">');
     }
 
-    // Rewrite any edge CDN URLs (e.g. https://uprising.best/range/...) to our proxy /range/
-    html = html.replace(/https:\/\/[a-zA-Z0-9.-]+\/range\//g, '/range/');
+    // Rewrite any edge CDN URLs (e.g. https://uprising.best/range/...) to our proxy /api/stream/range/
+    html = html.replace(/https:\/\/[a-zA-Z0-9.-]+\/range\//g, '/api/stream/range/');
+    html = html.replace(/"m3u8_path"\s*:\s*"\/range\//g, '"m3u8_path":"/api/stream/range/');
+    html = html.replace(/"video_url"\s*:\s*"\/range\//g, '"video_url":"/api/stream/range/');
 
     // 1. Rewrite assets to our own proxy endpoint so play4u.org NEVER appears in the browser network tab
     html = html.replace(/(href|src)=["']\/assets\//gi, '$1="/api/stream/player/assets/');
@@ -213,6 +215,15 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
 
             video.addEventListener("loadedmetadata", doResume);
             video.addEventListener("canplay", doResume);
+
+            // Unmute on first user touch/click if video was autostarted muted
+            var unmuteOnTouch = function() {
+              if (video && video.muted) {
+                video.muted = false;
+              }
+            };
+            document.addEventListener("click", unmuteOnTouch, { once: true });
+            document.addEventListener("touchend", unmuteOnTouch, { once: true });
 
             // Periodic progress saving every 2 seconds
             var lastSave = 0;
@@ -397,10 +408,10 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
       let js = await response.text();
 
       // 1. Prefer AVC/H.264 over HEVC so video plays instantly on all browsers without buffering/stalling
+      js = js.replace(/videoPreference:\s*\{\s*videoCodec:\s*["']hvc1["']\s*\}/g, 'videoPreference: { videoCodec: "avc1" }');
       js = js.replace(/videoPreference:\s*IS_IOS\s*\|\|\s*IS_TOUCH\s*\?\s*\{\s*videoCodec:\s*"avc1"\s*\}\s*:\s*\{\s*videoCodec:\s*"hvc1"\s*\}/g, 'videoPreference: { videoCodec: "avc1" }');
-      js = js.replace(/const\s+MSE_HEVC_OK\s*=\s*[\s\S]*?MediaSource\.isTypeSupported\([^)]+\)\);/g, 'const MSE_HEVC_OK = false;');
-      js = js.replace(/const\s+preferFam\s*=\s*IS_IOS\s*\|\|\s*IS_TOUCH\s*\|\|\s*!MSE_HEVC_OK\s*\?\s*"avc"\s*:\s*"hevc";/g, 'const preferFam = "avc";');
-      js = js.replace(/const\s+preferAvc\s*=\s*IS_IOS\s*\|\|\s*IS_TOUCH\s*\|\|\s*!MSE_HEVC_OK;/g, 'const preferAvc = true;');
+      js = js.replace(/const\s+MSE_HEVC_OK\s*=[\s\S]*?MediaSource\.isTypeSupported\([^)]+\)\);/g, 'const MSE_HEVC_OK = false;');
+      js = js.replace(/function rewriteUrl\(u\)\s*\{[\s\S]*?return\s+s\.startsWith\("\/"\)\s*\?\s*BASE_SERVER\s*\+\s*s\s*:\s*s;\s*\}/, 'function rewriteUrl(u) { if (!u) return ""; var s = String(u); if (s.startsWith("/range/")) return "/api/stream" + s; return s.startsWith("/") ? BASE_SERVER + s : s; }');
 
       // Auto-play fallback fix: if unmuted autoplay is blocked by browser, fallback to muted autoplay so video starts immediately
       js = js.replace(
@@ -668,7 +679,7 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
 });
 
 // 4. Media Range & Segment Proxy (Streams video/audio/subtitles from upstream edge CDN with required Referer)
-play4uRouter.options(["/range/*", "/api/stream/range/*"], (_req, res) => {
+play4uRouter.options(["/range/*", "/api/stream/range/*", "/api/range/*"], (_req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "*");
@@ -676,9 +687,9 @@ play4uRouter.options(["/range/*", "/api/stream/range/*"], (_req, res) => {
   res.sendStatus(204);
 });
 
-play4uRouter.all(["/range/*", "/api/stream/range/*"], async (req, res) => {
+play4uRouter.all(["/range/*", "/api/stream/range/*", "/api/range/*"], async (req, res) => {
   try {
-    const upstreamPath = req.originalUrl.replace(/^\/api\/stream/, "");
+    const upstreamPath = req.originalUrl.replace(/^\/api\/stream/, "").replace(/^\/api/, "");
     const upstreamUrl = `https://uprising.best${upstreamPath}`;
 
     const forwardHeaders: Record<string, string> = {
@@ -721,6 +732,25 @@ play4uRouter.all(["/range/*", "/api/stream/range/*"], async (req, res) => {
 
     if (!upstreamRes.body || req.method === "HEAD") {
       return res.end();
+    }
+
+    // If upstream returns an HLS m3u8 playlist, rewrite child /range/ URLs to /api/stream/range/ so all audio, subtitle and video segments proxy through our API seamlessly
+    const contentType = (upstreamRes.headers.get("content-type") || "").toLowerCase();
+    const contentLength = parseInt(upstreamRes.headers.get("content-length") || "0", 10);
+    const isPlaylist = contentType.includes("mpegurl") || contentType.includes("application/vnd.apple.mpegurl") || (contentLength > 0 && contentLength < 350000);
+
+    if (upstreamRes.status === 200 && isPlaylist) {
+      const text = await upstreamRes.text();
+      if (text.includes("#EXTM3U")) {
+        const rewritten = text
+          .replace(/(URI=["'])\/range\//g, '$1/api/stream/range/')
+          .replace(/(\n)\/range\//g, '$1/api/stream/range/');
+        res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
+        res.setHeader("Content-Length", Buffer.byteLength(rewritten).toString());
+        return res.send(rewritten);
+      }
+      res.setHeader("Content-Length", Buffer.byteLength(text).toString());
+      return res.send(text);
     }
 
     const nodeStream = Readable.fromWeb(upstreamRes.body as any);

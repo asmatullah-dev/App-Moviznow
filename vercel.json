@@ -59,6 +59,18 @@
       "destination": "/api/index.ts"
     },
     {
+      "source": "/range/(.*)",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/stream/(.*)",
+      "destination": "/api/index.ts"
+    },
+    {
+      "source": "/native-player/(.*)",
+      "destination": "/api/index.ts"
+    },
+    {
       "source": "/movie/(.*)",
       "destination": "/api/index.ts"
     },

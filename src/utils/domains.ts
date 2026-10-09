@@ -138,9 +138,9 @@ export function setFilmyflyDomain(domain: string): void {
 }
 
 /**
- * Streaming API base domain: uses VITE_STREAM_API_URL if configured, or stored
- * custom override if set, otherwise defaults to relative "" so all player and stream
- * requests route reliably via the current host (e.g. moviznow.com) through active rewrites.
+ * Streaming API base domain: routes requests to https://api.moviznow.com
+ * when running on moviznow.com (or uses VITE_STREAM_API_URL if configured).
+ * Automatic fallbacks in PlayerFU and nativePlayer ensure playback works even if DNS is propagating.
  */
 export function getStreamingApiBase(): string {
   const envUrl = (import.meta.env.VITE_STREAM_API_URL || import.meta.env.VITE_API_URL || '') as string;
@@ -151,6 +151,10 @@ export function getStreamingApiBase(): string {
     const custom = safeStorage.getItem('custom_stream_api_url');
     if (custom && custom.trim()) {
       return custom.trim().replace(/\/+$/, '');
+    }
+    const host = window.location.hostname.toLowerCase();
+    if (host.includes('moviznow.com') && host !== 'api.moviznow.com') {
+      return 'https://api.moviznow.com';
     }
   }
   return '';
