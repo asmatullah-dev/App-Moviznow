@@ -509,23 +509,31 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       pixeldrainId = pdMatch[1];
     }
 
-    let isMkv = targetUrl.toLowerCase().includes(".mkv") || targetUrl.toLowerCase().includes("matroska");
+    let isMkv = isPixeldrain || targetUrl.toLowerCase().includes(".mkv") || targetUrl.toLowerCase().includes("matroska");
     let needsTranscode = isMkv;
 
     if (isPixeldrain && pixeldrainId) {
       try {
-        const pdInfoRes = await fetch(`https://pixeldrain.com/api/file/${pixeldrainId}/info`, {
-          signal: AbortSignal.timeout(3000),
+        const primaryHost = targetUrl.includes("pixeldrain.dev") ? "pixeldrain.dev" : "pixeldrain.com";
+        const secondaryHost = primaryHost === "pixeldrain.dev" ? "pixeldrain.com" : "pixeldrain.dev";
+        const pdInfoRes = await fetch(`https://${primaryHost}/api/file/${pixeldrainId}/info`, {
+          signal: AbortSignal.timeout(2000),
         }).catch(() =>
-          fetch(`https://pixeldrain.dev/api/file/${pixeldrainId}/info`, {
-            signal: AbortSignal.timeout(3000),
+          fetch(`https://${secondaryHost}/api/file/${pixeldrainId}/info`, {
+            signal: AbortSignal.timeout(2000),
           })
         );
         if (pdInfoRes && pdInfoRes.ok) {
           const pdInfo: any = await pdInfoRes.json();
+          const mime = (pdInfo.mime_type || "").toLowerCase();
+          const fname = (pdInfo.name || "").toLowerCase();
           if (
-            pdInfo.mime_type === "video/matroska" ||
-            (pdInfo.name && pdInfo.name.toLowerCase().endsWith(".mkv"))
+            mime.includes("matroska") ||
+            fname.endsWith(".mkv") ||
+            fname.includes("mkv") ||
+            fname.includes("hevc") ||
+            fname.includes("h265") ||
+            mime.includes("hevc")
           ) {
             isMkv = true;
             needsTranscode = true;
@@ -1021,8 +1029,9 @@ async function streamViaProxy(rawTargetUrl: string, req: express.Request, res: e
       }
     }
 
-    const upstreamType = upstreamRes.headers.get("content-type");
-    res.setHeader("Content-Type", upstreamType && upstreamType.startsWith("video/") ? upstreamType : "video/mp4");
+    const upstreamType = upstreamRes.headers.get("content-type") || "";
+    const isMatroska = upstreamType.includes("matroska") || upstreamType.includes("octet-stream");
+    res.setHeader("Content-Type", !isMatroska && upstreamType.startsWith("video/") ? upstreamType : "video/mp4");
     res.setHeader("Content-Disposition", "inline");
     res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Access-Control-Allow-Origin", "*");
@@ -1097,7 +1106,13 @@ nativePlayerRouter.all(
       const audioIdx = parseInt((req.query.audio as string) || "0", 10) || 0;
 
       const cachedProbe = infoCache.get(targetUrl)?.data;
+      const isPixeldrain =
+        targetUrl.toLowerCase().includes("pixeldrain") ||
+        targetUrl.toLowerCase().includes("pixel.drain") ||
+        targetUrl.toLowerCase().includes("pixeldra.in");
+
       const isMkvTarget =
+        isPixeldrain ||
         targetUrl.toLowerCase().includes(".mkv") ||
         targetUrl.toLowerCase().includes("matroska") ||
         Boolean(cachedProbe?.isMkv) ||
@@ -1172,7 +1187,7 @@ nativePlayerRouter.all(
         const cachedProbe = infoCache.get(targetUrl)?.data;
         const videoIsH264 = cachedProbe
           ? (cachedProbe.videoCodec?.includes("h264") || cachedProbe.videoCodec?.includes("avc"))
-          : !targetUrl.toLowerCase().includes("hevc") && !targetUrl.toLowerCase().includes("h265");
+          : !isPixeldrain && !targetUrl.toLowerCase().includes("hevc") && !targetUrl.toLowerCase().includes("h265");
         const selectedAudio = cachedProbe?.audioTracks?.find((a: any) => a.id === audioIdx);
         const audioIsAac = (selectedAudio?.codec || "").toLowerCase().includes("aac");
 

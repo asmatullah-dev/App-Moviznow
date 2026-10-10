@@ -199,7 +199,7 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
           opacity: 1 !important;
         }
 
-        /* Slim progress bar pinned at bottom edge when controls/menu are hidden (as in nativePlayer with PlayerFU amber color) */
+        /* Subtle Mini Progress Bar at the bottom edge when controls/menu are hidden (as in nativePlayer with PlayerFU signature amber color) */
         .player-mini-progress,
         #playerMiniProgress {
           position: absolute !important;
@@ -208,66 +208,88 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
           right: 0 !important;
           width: 100% !important;
           height: 4px !important;
-          background: rgba(0, 0, 0, 0.85) !important;
-          backdrop-filter: blur(8px) !important;
-          -webkit-backdrop-filter: blur(8px) !important;
-          border-top: 1px solid rgba(255, 255, 255, 0.18) !important;
-          z-index: 40 !important;
-          pointer-events: auto !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          z-index: 50 !important;
           cursor: pointer !important;
-          opacity: 0;
-          transition: opacity 0.25s ease, height 0.15s ease !important;
+          pointer-events: auto !important;
+          opacity: 0 !important;
+          transition: opacity 0.3s ease, height 0.15s ease !important;
         }
         @media (min-width: 640px) {
           .player-mini-progress,
           #playerMiniProgress {
-            height: 5px !important;
+            height: 6px !important;
           }
         }
         .player-mini-progress:hover,
         #playerMiniProgress:hover {
-          height: 7px !important;
+          height: 8px !important;
         }
-        /* When controls/menu are hidden or idle, show the mini progress bar */
-        .player.idle .player-mini-progress,
-        .player.idle #playerMiniProgress,
-        .player:not(.show-controls).idle .player-mini-progress,
-        .player:not(.show-controls).idle #playerMiniProgress,
-        body.hide-controls .player-mini-progress,
-        body.hide-controls #playerMiniProgress {
+
+        /* Unplayed blurred black background */
+        .player-mini-progress .player-mini-bg,
+        #playerMiniProgress .player-mini-bg {
+          position: absolute !important;
+          inset: 0 !important;
+          background: rgba(0, 0, 0, 0.85) !important;
+          backdrop-filter: blur(8px) !important;
+          -webkit-backdrop-filter: blur(8px) !important;
+          border-top: 1px solid rgba(255, 255, 255, 0.2) !important;
+          pointer-events: none !important;
+        }
+
+        /* Buffer Bar (zinc-600/60) */
+        .player-mini-progress .player-mini-buffered,
+        #playerMiniProgress .player-mini-buffered {
+          position: absolute !important;
+          top: 0 !important;
+          bottom: 0 !important;
+          left: 0 !important;
+          width: 0% !important;
+          background: rgba(113, 113, 122, 0.6) !important;
+          transition: width 0.2s ease !important;
+          pointer-events: none !important;
+        }
+
+        /* Watched Progress Bar with PlayerFU signature amber color (#ff9000 gradient) */
+        .player-mini-progress .player-mini-played,
+        #playerMiniProgress .player-mini-played {
+          position: absolute !important;
+          top: 0 !important;
+          bottom: 0 !important;
+          left: 0 !important;
+          width: 0% !important;
+          background: linear-gradient(90deg, #ff7a00, #ff9000, #ffa42a) !important;
+          box-shadow: 0 0 10px rgba(255, 144, 0, 0.85) !important;
+          transition: width 0.15s ease !important;
+          pointer-events: none !important;
+        }
+
+        /* SHOW mini progress bar when controls/menu are hidden (player is idle) */
+        .player-mini-progress.is-visible,
+        #playerMiniProgress.is-visible,
+        .player.idle .player-mini-progress:not(.is-hidden),
+        .player.idle #playerMiniProgress:not(.is-hidden),
+        body.hide-controls .player .player-mini-progress:not(.is-hidden),
+        body.hide-controls .player #playerMiniProgress:not(.is-hidden) {
           opacity: 1 !important;
           pointer-events: auto !important;
         }
-        /* When controls/menu are active and visible, hide mini progress bar so it never overlaps the main timeline */
+
+        /* STRICTLY HIDE mini progress bar when controls or menu are showing */
+        .player-mini-progress.is-hidden,
+        #playerMiniProgress.is-hidden,
         .player:not(.idle) .player-mini-progress,
         .player:not(.idle) #playerMiniProgress,
         .player.show-controls .player-mini-progress,
-        .player.show-controls #playerMiniProgress {
+        .player.show-controls #playerMiniProgress,
+        .ps-sheet.open ~ .player-mini-progress,
+        .ps-sheet.open ~ #playerMiniProgress,
+        .ps-backdrop.visible ~ .player-mini-progress,
+        .ps-backdrop.visible ~ #playerMiniProgress {
           opacity: 0 !important;
           pointer-events: none !important;
-        }
-        .player-mini-buffered,
-        #playerMiniBuffered {
-          position: absolute !important;
-          top: 0 !important;
-          left: 0 !important;
-          height: 100% !important;
-          background: rgba(255, 255, 255, 0.35) !important;
-          width: 0%;
-          pointer-events: none !important;
-          transition: width 0.2s linear !important;
-        }
-        .player-mini-played,
-        #playerMiniPlayed {
-          position: absolute !important;
-          top: 0 !important;
-          left: 0 !important;
-          height: 100% !important;
-          background: linear-gradient(90deg, #ff7a00, #ffaa00) !important;
-          box-shadow: 0 0 10px rgba(255, 144, 0, 0.85) !important;
-          width: 0%;
-          pointer-events: none !important;
-          transition: width 0.15s linear !important;
         }
 
         /* Center play/pause circle button styling */
@@ -512,28 +534,58 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
             document.addEventListener("touchend", handleFirstInteraction, true);
             document.addEventListener("pointerdown", handleFirstInteraction, true);
 
-            // Periodic progress saving every 2 seconds
+            // Periodic progress saving and real-time message posting
             var lastSave = 0;
-            video.addEventListener("timeupdate", function() {
-              var now = Date.now();
-              if (now - lastSave >= 2000 && video.currentTime > 2) {
-                lastSave = now;
-                var cur = Math.floor(video.currentTime);
-                var dur = Math.floor(video.duration || 0);
+            function reportProgress() {
+              var cur = Math.floor(video.currentTime || 0);
+              var dur = Math.floor(video.duration || 0);
+              var pct = dur > 0 ? (cur / dur) * 100 : 0;
+              var realPlayed = document.getElementById("progressPlayed");
+              if (realPlayed && realPlayed.style.width) {
+                var parsedPct = parseFloat(realPlayed.style.width);
+                if (!isNaN(parsedPct) && parsedPct > 0) pct = parsedPct;
+              }
+
+              var bufferedPct = 0;
+              if (video.buffered && video.buffered.length > 0 && dur > 0) {
                 try {
-                  localStorage.setItem(storageKey, cur.toString());
-                  if (window.parent && window.parent !== window) {
-                    window.parent.postMessage({
-                      type: "MOVIZNOW_PLAYBACK_PROGRESS",
-                      contentId: contentId,
-                      currentTime: cur,
-                      duration: dur,
-                      percent: dur > 0 ? (cur / dur) * 100 : 0
-                    }, "*");
-                  }
+                  var bEnd = video.buffered.end(video.buffered.length - 1);
+                  bufferedPct = Math.min(100, Math.max(0, (bEnd / dur) * 100));
                 } catch(e) {}
               }
-            });
+
+              var now = Date.now();
+              if (now - lastSave >= 2000 && cur > 2) {
+                lastSave = now;
+                try {
+                  localStorage.setItem(storageKey, cur.toString());
+                } catch(e) {}
+              }
+
+              if (window.parent && window.parent !== window) {
+                try {
+                  var isCtrlVis = true;
+                  var pEl = document.getElementById("player") || document.querySelector(".player");
+                  if (pEl && pEl.classList.contains("idle")) isCtrlVis = false;
+                  window.parent.postMessage({
+                    type: "MOVIZNOW_PLAYBACK_PROGRESS",
+                    contentId: rawContentId,
+                    cleanContentId: cleanContentId,
+                    currentTime: cur,
+                    duration: dur,
+                    percent: pct,
+                    bufferedPercent: bufferedPct,
+                    isControlsVisible: isCtrlVis
+                  }, "*");
+                } catch(e) {}
+              }
+            }
+
+            video.addEventListener("timeupdate", reportProgress);
+            video.addEventListener("loadedmetadata", reportProgress);
+            video.addEventListener("durationchange", reportProgress);
+            video.addEventListener("play", reportProgress);
+            video.addEventListener("pause", reportProgress);
 
             // Apply & persist playback speed preferences
             var currentSpeed = 1;
@@ -701,53 +753,79 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
                 bar.className = "player-mini-progress";
                 bar.id = "playerMiniProgress";
                 bar.title = "Click to show controls";
-                bar.innerHTML = '<div class="player-mini-buffered" id="playerMiniBuffered"></div><div class="player-mini-played" id="playerMiniPlayed"></div>';
+                bar.innerHTML = '<div class="player-mini-bg" id="playerMiniBg"></div><div class="player-mini-buffered" id="playerMiniBuffered"></div><div class="player-mini-played" id="playerMiniPlayed"></div>';
                 player.appendChild(bar);
 
                 var wakeControls = function(e) {
-                  e.stopPropagation();
-                  if (player) {
+                  if (e && e.stopPropagation) e.stopPropagation();
+                  if (typeof resetIdle === "function") {
+                    resetIdle();
+                  } else if (player) {
                     player.classList.remove("idle");
-                    player.classList.add("show-controls");
-                    var controls = document.getElementById("controls");
-                    if (controls) controls.style.opacity = "1";
-                    setTimeout(function() {
-                      player.classList.remove("show-controls");
-                    }, 3500);
                   }
+                  syncMiniProgressVisibility();
                 };
 
-                ['click', 'pointerdown', 'touchend'].forEach(function(evt) {
-                  bar.addEventListener(evt, wakeControls, { passive: true });
-                });
+                var handleSeekAndWake = function(e) {
+                  if (e && e.stopPropagation) e.stopPropagation();
+                  var rect = bar.getBoundingClientRect();
+                  if (rect.width > 0) {
+                    var clickX = e.clientX - rect.left;
+                    var clickPct = Math.max(0, Math.min(1, clickX / rect.width));
+                    var vid = document.getElementById("video") || document.querySelector("video");
+                    if (vid && vid.duration && isFinite(vid.duration)) {
+                      try {
+                        vid.currentTime = clickPct * vid.duration;
+                      } catch(err) {}
+                    }
+                  }
+                  wakeControls(e);
+                };
+
+                bar.addEventListener("click", handleSeekAndWake);
+                bar.addEventListener("pointerdown", wakeControls, { passive: true });
+                bar.addEventListener("touchend", wakeControls, { passive: true });
               }
             }
             ensureMiniProgressBar();
             setInterval(ensureMiniProgressBar, 400);
 
+            var lastReportedControlState = null;
             function syncMiniProgressVisibility() {
               var bar = document.getElementById("playerMiniProgress");
-              var controls = document.getElementById("controls") || document.querySelector(".controls");
               var player = document.getElementById("player") || document.querySelector(".player");
               if (!bar || !player) return;
 
+              // In Play4U, when controls or menu are showing, player does NOT have idle class.
+              // When idle auto-hides controls into hidden menu mode, player HAS idle class.
               var isIdle = player.classList.contains("idle") || document.body.classList.contains("hide-controls");
-              var controlsHidden = false;
-              if (controls) {
-                var cOpacity = window.getComputedStyle(controls).opacity;
-                var cDisplay = window.getComputedStyle(controls).display;
-                var cVis = window.getComputedStyle(controls).visibility;
-                if (cOpacity === "0" || cDisplay === "none" || cVis === "hidden") {
-                  controlsHidden = true;
-                }
+              var psSheet = document.getElementById("psSheet") || document.querySelector(".ps-sheet");
+              var isSheetOpen = psSheet ? (psSheet.classList.contains("open") || psSheet.getAttribute("aria-hidden") === "false") : false;
+              var isBackdropOpen = Boolean(document.querySelector(".ps-backdrop.visible"));
+
+              // Menu or controls are showing if NOT idle OR a sheet/menu is open
+              var isShowing = (!isIdle) || isSheetOpen || isBackdropOpen || player.classList.contains("show-controls");
+
+              if (isShowing) {
+                // DO NOT show bottom progress bar when menu or controls are showing!
+                bar.classList.add("is-hidden");
+                bar.classList.remove("is-visible");
+              } else {
+                // Show bottom progress bar when menu and controls are hidden (idle mode)
+                bar.classList.remove("is-hidden");
+                bar.classList.add("is-visible");
               }
 
-              if (isIdle || controlsHidden) {
-                bar.style.opacity = "1";
-                bar.style.pointerEvents = "auto";
-              } else {
-                bar.style.opacity = "0";
-                bar.style.pointerEvents = "none";
+              if (lastReportedControlState !== isShowing) {
+                lastReportedControlState = isShowing;
+                if (window.parent && window.parent !== window) {
+                  try {
+                    window.parent.postMessage({
+                      type: "MOVIZNOW_CONTROLS_VISIBILITY",
+                      visible: isShowing
+                    }, "*");
+                  } catch(e) {}
+                }
               }
             }
 
@@ -771,11 +849,48 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
               syncMiniProgressVisibility();
             }
 
+            // Immediately sync on player events and user interactions
+            ["mousemove", "mousedown", "pointerdown", "touchstart", "keydown", "click"].forEach(function(evt) {
+              window.addEventListener(evt, syncMiniProgressVisibility, { passive: true });
+            });
+
+            var playerStage = document.getElementById("player") || document.querySelector(".player");
+            if (playerStage && window.MutationObserver) {
+              var observer = new MutationObserver(syncMiniProgressVisibility);
+              observer.observe(playerStage, { attributes: true, attributeFilter: ["class"] });
+            }
+
             video.addEventListener("timeupdate", updateMiniProgress);
             video.addEventListener("progress", updateMiniProgress);
             video.addEventListener("seeking", updateMiniProgress);
             video.addEventListener("seeked", updateMiniProgress);
+            video.addEventListener("pause", syncMiniProgressVisibility);
+            video.addEventListener("play", syncMiniProgressVisibility);
             setInterval(updateMiniProgress, 250);
+
+            // Listen for wake controls & seek requests from parent window
+            window.addEventListener("message", function(e) {
+              if (!e.data) return;
+              if (e.data.type === "MOVIZNOW_WAKE_CONTROLS") {
+                var player = document.getElementById("player") || document.querySelector(".player");
+                if (player) {
+                  player.classList.remove("idle");
+                  player.classList.add("show-controls");
+                  var controls = document.getElementById("controls");
+                  if (controls) controls.style.opacity = "1";
+                  setTimeout(function() {
+                    player.classList.remove("show-controls");
+                  }, 3500);
+                }
+              } else if (e.data.type === "MOVIZNOW_SEEK" && typeof e.data.percent === "number") {
+                var vid = document.getElementById("video") || document.querySelector("video");
+                if (vid && vid.duration && isFinite(vid.duration)) {
+                  try {
+                    vid.currentTime = e.data.percent * vid.duration;
+                  } catch(err) {}
+                }
+              }
+            });
 
             // Mutual exclusivity for center circle Play vs Pause icons
             function syncCenterButtonIcons() {

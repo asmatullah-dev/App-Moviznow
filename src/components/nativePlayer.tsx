@@ -479,7 +479,12 @@ export function NativePlayer({
   const isDirectMkv = useMemo(() => {
     if (!directStreamUrl) return false;
     const lower = directStreamUrl.toLowerCase();
+    const isPd =
+      lower.includes("pixeldrain") ||
+      lower.includes("pixel.drain") ||
+      lower.includes("pixeldra.in");
     return (
+      isPd ||
       lower.includes(".mkv") ||
       lower.includes("matroska") ||
       Boolean(mediaInfo?.isMkv) ||
@@ -799,28 +804,6 @@ export function NativePlayer({
     ]
   );
 
-  // Initial preferred quality extraction if availableQualities contains preferred quality (e.g. 480p)
-  useEffect(() => {
-    if (!isOpen || !Array.isArray(availableQualities) || availableQualities.length <= 1) return;
-    const prefQ = getPreferredQuality();
-    const prefLabel = extractQualityLabel(prefQ);
-    const curLabel = extractQualityLabel(currentQuality);
-
-    if (hasExtractedPrefRef.current !== contentKey && prefLabel !== curLabel) {
-      const matchOpt = findBestQualityLink(availableQualities, prefQ);
-      if (matchOpt && matchOpt.url && (matchOpt.url !== activeWatchUrl || prefLabel !== curLabel)) {
-        hasExtractedPrefRef.current = contentKey;
-        handleQualitySelect({
-          label: extractQualityLabel(matchOpt.name || matchOpt.label),
-          name: matchOpt.name || matchOpt.label || prefLabel,
-          url: matchOpt.url,
-          size: matchOpt.size,
-          unit: matchOpt.unit,
-        });
-      }
-    }
-  }, [isOpen, contentKey, availableQualities, currentQuality, activeWatchUrl, handleQualitySelect]);
-
   const hasStartedPlaybackRef = useRef<boolean>(false);
 
   // 15-second fallback: if playing on FSL server and it fails to start playing in 15 seconds, change to Pixeldrain
@@ -836,7 +819,8 @@ export function NativePlayer({
         console.warn("[NativePlayer] FSL Server failed to start playback within 15 seconds. Switching to Pixeldrain Server...");
         showToast(t("FSL server took too long. Switching to Pixeldrain..."));
         setActiveServer("pixeldrain");
-        setStreamMode("proxy");
+        const needsTc = isDirectMkv || mediaInfo?.isMkv || mediaInfo?.needsTranscode;
+        setStreamMode(needsTc ? "transcode" : "proxy");
         setHasPlaybackError(false);
         setStreamAttempt((prev) => prev + 1);
         setIsBuffering(true);
@@ -846,7 +830,7 @@ export function NativePlayer({
     return () => {
       clearTimeout(timerId);
     };
-  }, [isOpen, activeServer, pixeldrainCandidate, engine, streamAttempt, showToast, t]);
+  }, [isOpen, activeServer, pixeldrainCandidate, engine, isDirectMkv, mediaInfo, streamAttempt, showToast, t]);
 
   // Fetch probe media info (exact duration, audio streams, subtitles)
   useEffect(() => {

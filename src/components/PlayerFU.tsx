@@ -282,16 +282,59 @@ export function PlayerFU({
 
   // Snapshot the iframe URL once when opened so it NEVER changes during active playback
   const [activeIframeSrc, setActiveIframeSrc] = useState<string>("");
+  const [playbackProgress, setPlaybackProgress] = useState<{
+    currentTime: number;
+    duration: number;
+    percent: number;
+    bufferedPercent: number;
+  }>({
+    currentTime: 0,
+    duration: 0,
+    percent: 0,
+    bufferedPercent: 0,
+  });
+  const [isControlsVisible, setIsControlsVisible] = useState<boolean>(true);
+  const controlsTimeoutRef = useRef<any>(null);
+
+  const resetControlsTimeout = useCallback(() => {
+    setIsControlsVisible(true);
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    controlsTimeoutRef.current = setTimeout(() => {
+      setIsControlsVisible(false);
+    }, 3500);
+  }, []);
+
+  useEffect(() => {
+    if (isOpen) {
+      resetControlsTimeout();
+    }
+    return () => {
+      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    };
+  }, [isOpen, resetControlsTimeout]);
 
   useEffect(() => {
     if (!isOpen || !content?.id || !imdbId) {
       setActiveIframeSrc("");
+      setPlaybackProgress({ currentTime: 0, duration: 0, percent: 0, bufferedPercent: 0 });
       return;
     }
 
     // Determine initial resume time once from unified storage key
     const progressKey = getPlaybackProgressKey(content.id, season, episode);
     const initialResumeTime = getSavedProgress(progressKey);
+    const estDuration = streamMeta?.runtime_minutes ? streamMeta.runtime_minutes * 60 : 0;
+    if (initialResumeTime > 0) {
+      setPlaybackProgress((prev) => ({
+        ...prev,
+        currentTime: initialResumeTime,
+        duration: prev.duration || estDuration,
+        percent:
+          (prev.duration || estDuration) > 0
+            ? Math.min(100, (initialResumeTime / (prev.duration || estDuration)) * 100)
+            : 0,
+      }));
+    }
 
     // Determine remembered quality preference across all movies with fallback logic.
     // If preference is missing or set to auto, resolveBestQuality automatically selects minimum quality.
@@ -322,13 +365,36 @@ export function PlayerFU({
     const progressKey = getPlaybackProgressKey(content.id, season, episode);
 
     const handleMessage = (event: MessageEvent) => {
-      if (!event.data || event.data.contentId !== content.id) return;
+      if (!event.data) return;
 
       if (event.data.type === "MOVIZNOW_PLAYBACK_PROGRESS") {
-        const { currentTime } = event.data;
+        const { currentTime, duration, percent, bufferedPercent } = event.data;
         if (typeof currentTime === "number" && currentTime > 2) {
           saveProgress(progressKey, currentTime);
         }
+        setPlaybackProgress((prev) => {
+          const curTime = typeof currentTime === "number" ? currentTime : prev.currentTime;
+          const dur =
+            typeof duration === "number" && duration > 0
+              ? duration
+              : prev.duration || (streamMeta?.runtime_minutes ? streamMeta.runtime_minutes * 60 : 0);
+          const pct =
+            typeof percent === "number" && percent >= 0
+              ? percent
+              : dur > 0
+              ? (curTime / dur) * 100
+              : prev.percent;
+          const bufPct =
+            typeof bufferedPercent === "number" ? bufferedPercent : prev.bufferedPercent;
+          return {
+            currentTime: curTime,
+            duration: dur,
+            percent: Math.min(100, Math.max(0, pct)),
+            bufferedPercent: Math.min(100, Math.max(0, bufPct)),
+          };
+        });
+      } else if (event.data.type === "MOVIZNOW_CONTROLS_VISIBILITY") {
+        setIsControlsVisible(Boolean(event.data.visible));
       } else if (event.data.type === "MOVIZNOW_PLAYER_STATUS") {
         const rawQuality = event.data.quality;
         if (typeof rawQuality === "string" && rawQuality.trim()) {
@@ -350,7 +416,7 @@ export function PlayerFU({
     return () => {
       window.removeEventListener("message", handleMessage);
     };
-  }, [isOpen, content?.id, season, episode]);
+  }, [isOpen, content?.id, season, episode, streamMeta?.runtime_minutes]);
 
   // Handle ESC key to close modal
   useEffect(() => {
@@ -453,13 +519,20 @@ export function PlayerFU({
             {...modalContainerAnimation}
             style={modalGpuStyle}
             className="relative w-full max-w-6xl aspect-video bg-black rounded-2xl overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.8)] ring-1 ring-white/10 z-10 transform-gpu flex flex-col"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              resetControlsTimeout();
+            }}
+            onMouseMove={resetControlsTimeout}
+            onTouchStart={resetControlsTimeout}
           >
             {/* Floating Minimalist Close Button */}
             <button
               type="button"
               onClick={onClose}
-              className="absolute top-3 right-3 z-50 p-2 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white transition-all backdrop-blur-md border border-white/20 shadow-xl group cursor-pointer"
+              className={`absolute top-3 right-3 z-50 p-2 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white transition-all backdrop-blur-md border border-white/20 shadow-xl group cursor-pointer ${
+                isControlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+              }`}
               title={t("Close Player")}
               aria-label={t("Close Player")}
             >
@@ -481,6 +554,58 @@ export function PlayerFU({
                   <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
                 </div>
               )}
+            </div>
+
+            {/* Subtle Mini Progress Bar at the bottom edge when controls/menu are hidden (identical to nativePlayer, with PlayerFU signature amber color) */}
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                setIsControlsVisible(true);
+                const iframe = document.querySelector<HTMLIFrameElement>('iframe[title*="Player"]');
+                if (iframe && iframe.contentWindow) {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  if (rect.width > 0) {
+                    const clickX = e.clientX - rect.left;
+                    const pct = Math.max(0, Math.min(1, clickX / rect.width));
+                    iframe.contentWindow.postMessage({ type: "MOVIZNOW_SEEK", percent: pct }, "*");
+                  }
+                  iframe.contentWindow.postMessage({ type: "MOVIZNOW_WAKE_CONTROLS" }, "*");
+                }
+              }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                setIsControlsVisible(true);
+                const iframe = document.querySelector<HTMLIFrameElement>('iframe[title*="Player"]');
+                if (iframe && iframe.contentWindow) {
+                  iframe.contentWindow.postMessage({ type: "MOVIZNOW_WAKE_CONTROLS" }, "*");
+                }
+              }}
+              className={`absolute bottom-0 inset-x-0 h-1 sm:h-1.5 z-40 cursor-pointer transition-opacity duration-300 ${
+                !isControlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+              }`}
+              title={t("Click to show controls")}
+            >
+              {/* Unplayed blurred black background */}
+              <div className="absolute inset-0 bg-black/85 backdrop-blur-md border-t border-white/20" />
+              {/* Buffer Bar (matching nativePlayer) */}
+              <div
+                className="absolute h-full bg-zinc-600/60 transition-all pointer-events-none"
+                style={{ width: `${Math.min(100, playbackProgress.bufferedPercent)}%` }}
+              />
+              {/* Watched Progress Bar with PlayerFU signature amber color */}
+              <div
+                className="absolute h-full bg-gradient-to-r from-[#ff7a00] via-[#ff9000] to-[#ffa42a] shadow-[0_0_8px_rgba(255,144,0,0.85)] transition-all pointer-events-none"
+                style={{
+                  width: `${Math.min(
+                    100,
+                    playbackProgress.percent > 0
+                      ? playbackProgress.percent
+                      : playbackProgress.duration > 0
+                      ? (playbackProgress.currentTime / playbackProgress.duration) * 100
+                      : 0
+                  )}%`,
+                }}
+              />
             </div>
           </motion.div>
         </motion.div>
