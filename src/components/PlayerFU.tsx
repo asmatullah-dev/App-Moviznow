@@ -305,7 +305,7 @@ export function PlayerFU({
     const apiBase = getStreamingApiBase();
     let stableUrl = `${apiBase}/api/stream/player/${content.id}?imdb=${encodeURIComponent(
       imdbId,
-    )}&t=${initialResumeTime}&quality=${encodeURIComponent(preferredQuality)}&speed=${encodeURIComponent(savedSpeed)}&lang=hi&autoplay=1`;
+    )}&t=${initialResumeTime}&quality=${encodeURIComponent(preferredQuality)}&speed=${encodeURIComponent(savedSpeed)}&lang=hi&autoplay=1&_v=2`;
     if (season !== undefined && season !== null) {
       stableUrl += `&season=${encodeURIComponent(String(season))}`;
     }

@@ -199,116 +199,178 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
           opacity: 1 !important;
         }
 
-        /* Slim progress bar pinned at bottom when controls/menu are hidden (identical to nativePlayer with PlayerFU amber color) */
-        .player-mini-progress {
-          position: absolute;
-          bottom: 0;
-          left: 0;
-          right: 0;
-          width: 100%;
-          height: 3px;
-          background: rgba(0, 0, 0, 0.65);
-          z-index: 15;
-          pointer-events: auto;
-          cursor: pointer;
+        /* Subtle Mini Progress Bar at bottom edge when controls/menu are hidden (identical to nativePlayer with PlayerFU amber color) */
+        .player-mini-progress,
+        #playerMiniProgress {
+          position: absolute !important;
+          bottom: 0 !important;
+          left: 0 !important;
+          right: 0 !important;
+          width: 100% !important;
+          height: 5px !important;
+          z-index: 99999 !important;
+          cursor: pointer !important;
+          pointer-events: none;
           opacity: 0;
-          transition: opacity 0.25s ease, height 0.15s ease;
-        }
-        .player-mini-progress:hover {
-          height: 5px;
-        }
-        /* When controls/menu are hidden or idle, show the mini progress bar */
-        .player.idle .player-mini-progress,
-        .player:not(.show-controls).idle .player-mini-progress,
-        body.hide-controls .player-mini-progress {
-          opacity: 1;
-          pointer-events: auto;
-        }
-        /* When controls/menu are visible, hide mini progress bar so it never overlaps the main timeline */
-        .player:not(.idle) .player-mini-progress,
-        .player.show-controls .player-mini-progress {
-          opacity: 0;
-          pointer-events: none;
-        }
-        .player-mini-buffered {
-          position: absolute;
-          top: 0;
-          left: 0;
-          height: 100%;
-          background: rgba(255, 255, 255, 0.3);
-          width: 0%;
-          pointer-events: none;
-          transition: width 0.2s linear;
-        }
-        .player-mini-played {
-          position: absolute;
-          top: 0;
-          left: 0;
-          height: 100%;
-          background: var(--accent, #ff9000);
-          box-shadow: 0 0 8px rgba(255, 144, 0, 0.7);
-          width: 0%;
-          pointer-events: none;
-          transition: width 0.15s linear;
+          transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), height 0.15s ease !important;
         }
 
-        /* Unify Play button size to match Pause button size & perfectly center play icon */
-        body.is-embed .player:not(.is-playing) .big-play,
-        body.is-embed .player.show-big-play .big-play,
+        @media (min-width: 640px) {
+          .player-mini-progress,
+          #playerMiniProgress {
+            height: 6px !important;
+          }
+        }
+
+        .player-mini-progress:hover,
+        #playerMiniProgress:hover {
+          height: 9px !important;
+        }
+
+        /* Unplayed blurred black background with top subtle border, identical to nativePlayer */
+        .player-mini-track {
+          position: absolute !important;
+          inset: 0 !important;
+          background: rgba(0, 0, 0, 0.85) !important;
+          backdrop-filter: blur(12px) !important;
+          -webkit-backdrop-filter: blur(12px) !important;
+          border-top: 1px solid rgba(255, 255, 255, 0.2) !important;
+          pointer-events: none !important;
+        }
+
+        /* Buffer Bar (zinc-600/60 matching nativePlayer) */
+        .player-mini-buffered,
+        #playerMiniBuffered {
+          position: absolute !important;
+          top: 0 !important;
+          left: 0 !important;
+          height: 100% !important;
+          background: rgba(113, 113, 122, 0.6) !important;
+          width: 0%;
+          pointer-events: none !important;
+          transition: width 0.2s ease !important;
+        }
+
+        /* Watched Progress Bar with PlayerFU signature amber gradient & glow */
+        .player-mini-played,
+        #playerMiniPlayed {
+          position: absolute !important;
+          top: 0 !important;
+          left: 0 !important;
+          height: 100% !important;
+          background: linear-gradient(90deg, #ff7a00, #ffaa00) !important;
+          box-shadow: 0 0 10px rgba(255, 144, 0, 0.85) !important;
+          width: 0%;
+          pointer-events: none !important;
+          transition: width 0.15s linear !important;
+        }
+
+        /* Shown when controls are hidden/idle */
+        .player.idle .player-mini-progress,
+        .player.idle #playerMiniProgress,
+        body.hide-controls .player-mini-progress,
+        body.hide-controls #playerMiniProgress,
+        #playerMiniProgress.show-mini {
+          opacity: 1 !important;
+          pointer-events: auto !important;
+        }
+
+        #playerMiniProgress.hide-mini {
+          opacity: 0 !important;
+          pointer-events: none !important;
+        }
+
+        /* Center play/pause circle button styling */
+        body.is-embed .player .big-play,
+        body.is-watch .player .big-play,
+        .player .big-play,
         .big-play,
         #bigPlay {
-          width: 38px !important;
-          height: 38px !important;
-          min-width: 38px !important;
-          min-height: 38px !important;
-          max-width: 38px !important;
-          max-height: 38px !important;
+          width: 44px !important;
+          height: 44px !important;
+          min-width: 44px !important;
+          min-height: 44px !important;
+          max-width: 44px !important;
+          max-height: 44px !important;
           border-radius: 50% !important;
-          border: 1.5px solid rgba(255, 255, 255, 0.85) !important;
+          border: 1.5px solid rgba(255, 255, 255, 0.88) !important;
           background: rgba(10, 13, 18, 0.65) !important;
-          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4) !important;
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5) !important;
           display: flex !important;
           align-items: center !important;
           justify-content: center !important;
           padding: 0 !important;
           margin: 0 !important;
           box-sizing: border-box !important;
+          position: absolute !important;
+          top: 50% !important;
+          left: 50% !important;
+          transform: translate(-50%, -50%) !important;
+          z-index: 6 !important;
         }
-        body.is-embed .player:not(.is-playing) .big-play svg,
-        body.is-embed .player.show-big-play .big-play svg,
-        .big-play svg,
-        #bigPlay svg {
-          width: 18px !important;
-          height: 18px !important;
-          max-width: 18px !important;
-          max-height: 18px !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          display: block !important;
-        }
-        /* Perfectly center the play icon in the circle by clearing the 5px offset */
-        body.is-embed .player:not(.is-playing) .big-play #bigIconPlay,
-        body.is-embed .player.show-big-play .big-play #bigIconPlay,
-        .big-play #bigIconPlay,
-        #bigIconPlay {
-          transform: none !important;
-          margin: 0 auto !important;
-          display: block !important;
-        }
-        body.is-embed .player:not(.is-playing) .big-play #bigIconPause,
-        body.is-embed .player.show-big-play .big-play #bigIconPause,
-        .big-play #bigIconPause,
-        #bigIconPause {
-          transform: none !important;
-          margin: 0 auto !important;
-          display: block !important;
-        }
+
         .big-play:hover,
         #bigPlay:hover {
           transform: translate(-50%, -50%) scale(1.08) !important;
           background: rgba(15, 20, 28, 0.85) !important;
           border-color: #fff !important;
         }
+
+        /* SVG icon sizing in center circle */
+        .big-play svg,
+        #bigPlay svg {
+          width: 20px !important;
+          height: 20px !important;
+          max-width: 20px !important;
+          max-height: 20px !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          fill: #fff !important;
+        }
+
+        /* Center play icon: optical center nudge of +1px balances triangle centroid with its bounding box */
+        body.is-embed .player .big-play #bigIconPlay,
+        body.is-watch .player .big-play #bigIconPlay,
+        .big-play #bigIconPlay,
+        #bigIconPlay {
+          transform: translateX(1px) !important;
+          margin: 0 !important;
+        }
+
+        /* Pause icon (two symmetric vertical bars) */
+        body.is-embed .player .big-play #bigIconPause,
+        body.is-watch .player .big-play #bigIconPause,
+        .big-play #bigIconPause,
+        #bigIconPause {
+          transform: none !important;
+          margin: 0 !important;
+        }
+
+        /* MUTUAL EXCLUSIVITY: Never show play and pause icons simultaneously in the center circle! */
+        /* When paused: show ONLY play icon, hide pause icon */
+        .player.show-big-play .big-play #bigIconPlay,
+        .player.show-big-play #bigPlay #bigIconPlay,
+        .player:not(.is-playing) .big-play #bigIconPlay,
+        .player:not(.is-playing) #bigPlay #bigIconPlay {
+          display: block !important;
+        }
+        .player.show-big-play .big-play #bigIconPause,
+        .player.show-big-play #bigPlay #bigIconPause,
+        .player:not(.is-playing) .big-play #bigIconPause,
+        .player:not(.is-playing) #bigPlay #bigIconPause {
+          display: none !important;
+        }
+
+        /* When playing: show ONLY pause icon, hide play icon */
+        .player.is-playing:not(.show-big-play) .big-play #bigIconPlay,
+        .player.is-playing:not(.show-big-play) #bigPlay #bigIconPlay {
+          display: none !important;
+        }
+        .player.is-playing:not(.show-big-play) .big-play #bigIconPause,
+        .player.is-playing:not(.show-big-play) #bigPlay #bigIconPause {
+          display: block !important;
+        }
+
         #btnPlay,
         .cbtn#btnPlay {
           width: 38px !important;
@@ -348,11 +410,117 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
           font-size: 12.5px !important;
           color: #fff !important;
         }
+
+        /* Aspect Ratio Mini Button in Control Bar */
+        #btnAspect,
+        .cbtn#btnAspect {
+          font-weight: 600 !important;
+          font-size: 12px !important;
+          letter-spacing: -0.01em !important;
+          min-width: 48px !important;
+          height: 30px !important;
+          padding: 0 8px !important;
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          gap: 4px !important;
+          border-radius: 8px !important;
+          background: rgba(255, 255, 255, 0.08) !important;
+          border: 1px solid rgba(255, 255, 255, 0.16) !important;
+          color: #fff !important;
+          transition: all 0.2s ease !important;
+          cursor: pointer !important;
+        }
+        #btnAspect:hover {
+          background: rgba(255, 255, 255, 0.18) !important;
+          border-color: rgba(255, 144, 0, 0.6) !important;
+          color: #ff9000 !important;
+        }
+        #btnAspect.is-active-aspect {
+          background: rgba(255, 144, 0, 0.22) !important;
+          border-color: rgba(255, 144, 0, 0.75) !important;
+          color: #ffaa00 !important;
+        }
+        #btnAspect svg {
+          width: 14px !important;
+          height: 14px !important;
+          fill: currentColor !important;
+          flex-shrink: 0 !important;
+        }
+        #btnAspectVal {
+          font-weight: 700 !important;
+          font-size: 11px !important;
+          text-transform: capitalize !important;
+        }
+
+        /* Aspect Ratio Toast HUD Feedback (Clear Feedback centered top) */
+        .aspect-feedback-hud {
+          position: absolute !important;
+          top: 48px !important;
+          left: 50% !important;
+          transform: translate(-50%, -12px) scale(0.95) !important;
+          background: rgba(12, 16, 24, 0.92) !important;
+          backdrop-filter: blur(16px) !important;
+          -webkit-backdrop-filter: blur(16px) !important;
+          border: 1.5px solid rgba(255, 144, 0, 0.55) !important;
+          box-shadow: 0 8px 30px rgba(0, 0, 0, 0.7), 0 0 18px rgba(255, 144, 0, 0.25) !important;
+          border-radius: 9999px !important;
+          padding: 8px 18px !important;
+          display: flex !important;
+          align-items: center !important;
+          gap: 8px !important;
+          color: #fff !important;
+          font-family: inherit !important;
+          z-index: 999999 !important;
+          pointer-events: none !important;
+          opacity: 0 !important;
+          transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+        }
+        .aspect-feedback-hud.show-hud {
+          opacity: 1 !important;
+          transform: translate(-50%, 0) scale(1) !important;
+        }
+        .aspect-feedback-icon {
+          color: #ffaa00 !important;
+          width: 18px !important;
+          height: 18px !important;
+          fill: currentColor !important;
+          flex-shrink: 0 !important;
+        }
+        .aspect-feedback-title {
+          font-size: 12.5px !important;
+          font-weight: 600 !important;
+          color: rgba(255, 255, 255, 0.82) !important;
+        }
+        .aspect-feedback-val {
+          font-size: 13px !important;
+          font-weight: 800 !important;
+          color: #ffaa00 !important;
+          text-transform: capitalize !important;
+          letter-spacing: 0.02em !important;
+        }
+
+        /* Object Fit Video Rules */
+        video.fit-contain,
+        #video.fit-contain {
+          object-fit: contain !important;
+        }
+        video.fit-cover,
+        #video.fit-cover {
+          object-fit: cover !important;
+        }
+        video.fit-fill,
+        #video.fit-fill {
+          object-fit: fill !important;
+        }
       </style>
     `;
 
     if (!html.includes('<meta name="referrer"')) {
-      html = html.replace("<head>", `<head>\n<meta name="referrer" content="origin-when-cross-origin">\n${fullscreenButtonsStyle}`);
+      html = html.replace("<head>", `<head>\n<meta name="referrer" content="origin-when-cross-origin">`);
+    }
+    if (html.includes("</head>")) {
+      html = html.replace("</head>", `${fullscreenButtonsStyle}\n</head>`);
     } else {
       html = html.replace("<head>", `<head>\n${fullscreenButtonsStyle}`);
     }
@@ -363,7 +531,10 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
     html = html.replace(/"video_url"\s*:\s*"\/range\//g, '"video_url":"/api/stream/range/');
 
     // 1. Rewrite assets to our own proxy endpoint so play4u.org NEVER appears in the browser network tab
-    html = html.replace(/(href|src)=["']\/assets\//gi, '$1="/api/stream/player/assets/');
+    html = html.replace(/(href|src)=["']\/assets\/([^"']+)["']/gi, (_match, attr, assetPath) => {
+      const sep = assetPath.includes("?") ? "&" : "?";
+      return `${attr}="/api/stream/player/assets/${assetPath}${sep}mn=2"`;
+    });
 
     // 2. Neutralize embed-guard.js and sanitize branding
     html = html.replace(/<script[^>]*embed-guard\.js[^>]*><\/script>/gi, '<script>window.__PA_EMBED_GUARD_OK__ = true;</script>');
@@ -374,6 +545,43 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
     // Ensure all buttons are shown always: unhide #btnAudio and #btnSubs inline styles
     html = html.replace(/(id="btnAudio"[^>]*?)style="display:none"/g, '$1style="display:inline-flex"');
     html = html.replace(/(id="btnSubs"[^>]*?)style="display:none"/g, '$1style="display:inline-flex"');
+
+    // Ensure body has class is-embed so player fills 100% of viewport without letterboxing or 72px padding
+    html = html.replace(/<body([^>]*)>/i, (_m, pre) => {
+      if (pre.includes('class="')) {
+        return `<body${pre.replace(/class="([^"]*)"/, 'class="$1 is-embed is-watch"')}>`;
+      }
+      return `<body${pre} class="is-embed is-watch">`;
+    });
+
+    // Inject Aspect Ratio mini button right before Fullscreen button in the control bar
+    const aspectButtonMarkup = `
+      <button class="cbtn text aspect-btn" id="btnAspect" type="button" aria-label="Screen Aspect Ratio" title="Screen Aspect: Fit (16:9)">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+          <path d="M19 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H5V6h14v12zm-3-8h2V8h-2v2zm0 4h2v-2h-2v2zM6 8h2v2H6V8zm0 4h2v2H6v-2z"/>
+        </svg>
+        <span class="lbl-val" id="btnAspectVal">Fit</span>
+      </button>
+    `;
+    html = html.replace(/(<button[^>]*id="btnFullscreen")/i, `${aspectButtonMarkup}\n$1`);
+
+    // Directly inject mini progress bar and Aspect HUD DOM markup into #player so they exist from the first millisecond
+    const miniProgressBarMarkup = `<div class="player-mini-progress" id="playerMiniProgress" title="Click to show controls"><div class="player-mini-track"></div><div class="player-mini-buffered" id="playerMiniBuffered"></div><div class="player-mini-played" id="playerMiniPlayed"></div></div>`;
+    const aspectFeedbackHudMarkup = `
+      <div class="aspect-feedback-hud" id="aspectFeedbackHud">
+        <svg viewBox="0 0 24 24" class="aspect-feedback-icon" width="18" height="18" fill="currentColor">
+          <path d="M19 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H5V6h14v12zm-3-8h2V8h-2v2zm0 4h2v-2h-2v2zM6 8h2v2H6V8zm0 4h2v2H6v-2z"/>
+        </svg>
+        <span class="aspect-feedback-title">Aspect Ratio:</span>
+        <span class="aspect-feedback-val" id="aspectFeedbackVal">Fit (16:9)</span>
+      </div>
+    `;
+    // Place HUD and Mini Progress bar at end of player container
+    if (html.includes("</aside>")) {
+      html = html.replace("</aside>", `</aside>\n${aspectFeedbackHudMarkup}\n${miniProgressBarMarkup}`);
+    } else {
+      html = html.replace(/(<div[^>]*id="player"[^>]*>)/i, `$1\n${aspectFeedbackHudMarkup}\n${miniProgressBarMarkup}`);
+    }
 
     // 3. Inject MovizNow Progress Tracking, Quality Sync & Auto-Resume Script
     const trackingScript = `
@@ -635,47 +843,119 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
             setInterval(syncButtonsVisibility, 350);
             syncButtonsVisibility();
 
-            // 2. Slim progress bar when menu/controls are hidden (identical to nativePlayer, keeping PlayerFU amber color)
-            function ensureMiniProgressBar() {
+            // 2. Subtle Mini Progress Bar at bottom edge when controls/menu are hidden (identical to nativePlayer with PlayerFU amber color)
+            function initMiniProgressBar() {
+              var bar = document.getElementById("playerMiniProgress");
               var player = document.getElementById("player") || document.querySelector(".player");
-              if (player && !document.getElementById("playerMiniProgress")) {
-                var bar = document.createElement("div");
+              if (!bar && player) {
+                bar = document.createElement("div");
                 bar.className = "player-mini-progress";
                 bar.id = "playerMiniProgress";
                 bar.title = "Click to show controls";
-                bar.innerHTML = '<div class="player-mini-buffered" id="playerMiniBuffered"></div><div class="player-mini-played" id="playerMiniPlayed"></div>';
+                bar.innerHTML = '<div class="player-mini-track"></div><div class="player-mini-buffered" id="playerMiniBuffered"></div><div class="player-mini-played" id="playerMiniPlayed"></div>';
                 player.appendChild(bar);
+              }
+              if (!bar) return;
 
-                bar.addEventListener("click", function(e) {
-                  e.stopPropagation();
-                  if (player) {
-                    player.classList.remove("idle");
-                    player.classList.add("show-controls");
-                    setTimeout(function() {
-                      player.classList.remove("show-controls");
-                    }, 3500);
+              if (!bar.__hasClickListeners) {
+                bar.__hasClickListeners = true;
+                var wakeControls = function(e) {
+                  if (e) {
+                    e.stopPropagation();
+                    e.preventDefault();
                   }
+                  var p = document.getElementById("player") || document.querySelector(".player");
+                  var ctrl = document.getElementById("controls") || document.querySelector(".controls");
+                  if (p) {
+                    p.classList.remove("idle");
+                    p.classList.add("show-center");
+                  }
+                  if (ctrl) {
+                    ctrl.style.opacity = "1";
+                    ctrl.style.pointerEvents = "auto";
+                    ctrl.style.transform = "none";
+                  }
+                  if (bar) {
+                    bar.classList.remove("show-mini");
+                    bar.classList.add("hide-mini");
+                  }
+                  try {
+                    if (p) p.dispatchEvent(new MouseEvent("mousemove", { bubbles: true }));
+                  } catch(err) {}
+                };
+
+                ['click', 'pointerdown', 'touchend'].forEach(function(evt) {
+                  bar.addEventListener(evt, wakeControls, { passive: false });
                 });
               }
             }
-            ensureMiniProgressBar();
-            setInterval(ensureMiniProgressBar, 500);
+            initMiniProgressBar();
+            setInterval(initMiniProgressBar, 500);
 
             function updateMiniProgress() {
+              var bar = document.getElementById("playerMiniProgress");
+              if (!bar) {
+                initMiniProgressBar();
+                bar = document.getElementById("playerMiniProgress");
+              }
+              if (!bar) return;
+
+              var player = document.getElementById("player") || document.querySelector(".player");
+              var controls = document.getElementById("controls") || document.querySelector(".controls");
               var vid = document.getElementById("video") || document.querySelector("video");
-              if (!vid) return;
               var miniPlayed = document.getElementById("playerMiniPlayed");
               var miniBuffered = document.getElementById("playerMiniBuffered");
-              var dur = vid.duration || 0;
-              var cur = vid.currentTime || 0;
-              if (miniPlayed && dur > 0) {
-                var pct = (cur / dur) * 100;
-                miniPlayed.style.width = Math.min(100, Math.max(0, pct)) + "%";
+
+              // 1. Sync width from real player timeline first, or fallback to video element
+              var realPlayed = document.getElementById("progressPlayed");
+              var realBuffered = document.getElementById("progressBuffered");
+              if (miniPlayed) {
+                if (realPlayed && realPlayed.style.width && realPlayed.style.width !== "0%") {
+                  miniPlayed.style.width = realPlayed.style.width;
+                } else if (vid && vid.duration && vid.duration > 0) {
+                  var pct = (vid.currentTime / vid.duration) * 100;
+                  miniPlayed.style.width = Math.min(100, Math.max(0, pct)) + "%";
+                }
               }
-              if (miniBuffered && dur > 0 && vid.buffered && vid.buffered.length > 0) {
+              if (miniBuffered) {
+                if (realBuffered && realBuffered.style.width && realBuffered.style.width !== "0%") {
+                  miniBuffered.style.width = realBuffered.style.width;
+                } else if (vid && vid.duration && vid.duration > 0 && vid.buffered && vid.buffered.length > 0) {
+                  try {
+                    var bEnd = vid.buffered.end(vid.buffered.length - 1);
+                    miniBuffered.style.width = Math.min(100, Math.max(0, (bEnd / vid.duration) * 100)) + "%";
+                  } catch(e) {}
+                }
+              }
+
+              // 2. Determine if controls menu is currently hidden
+              var isHidden = false;
+              if (player && player.classList.contains("idle")) {
+                isHidden = true;
+              } else if (document.body.classList.contains("hide-controls")) {
+                isHidden = true;
+              } else if (controls) {
+                var comp = window.getComputedStyle(controls);
+                if (comp.opacity === "0" || comp.display === "none" || comp.visibility === "hidden" || parseFloat(comp.opacity) < 0.1) {
+                  isHidden = true;
+                }
+              }
+
+              if (isHidden) {
+                bar.classList.add("show-mini");
+                bar.classList.remove("hide-mini");
+              } else {
+                bar.classList.remove("show-mini");
+                bar.classList.add("hide-mini");
+              }
+
+              if (window.parent && window.parent !== window) {
                 try {
-                  var bEnd = vid.buffered.end(vid.buffered.length - 1);
-                  miniBuffered.style.width = Math.min(100, Math.max(0, (bEnd / dur) * 100)) + "%";
+                  window.parent.postMessage({
+                    type: "MOVIZNOW_CONTROLS_VISIBILITY",
+                    contentId: contentId,
+                    isControlsVisible: !isHidden
+                  }, "*");
                 } catch(e) {}
               }
             }
@@ -684,6 +964,135 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
             video.addEventListener("progress", updateMiniProgress);
             video.addEventListener("seeking", updateMiniProgress);
             video.addEventListener("seeked", updateMiniProgress);
+            setInterval(updateMiniProgress, 150);
+
+            // Mutual exclusivity for center circle Play vs Pause icons
+            function syncCenterButtonIcons() {
+              var vid = document.getElementById("video") || document.querySelector("video");
+              var playIcon = document.getElementById("bigIconPlay");
+              var pauseIcon = document.getElementById("bigIconPause");
+              if (!playIcon || !pauseIcon) return;
+
+              var isPaused = vid ? vid.paused : true;
+              if (isPaused) {
+                playIcon.style.setProperty("display", "block", "important");
+                pauseIcon.style.setProperty("display", "none", "important");
+              } else {
+                playIcon.style.setProperty("display", "none", "important");
+                pauseIcon.style.setProperty("display", "block", "important");
+              }
+            }
+
+            video.addEventListener("play", syncCenterButtonIcons);
+            video.addEventListener("pause", syncCenterButtonIcons);
+            video.addEventListener("playing", syncCenterButtonIcons);
+            video.addEventListener("timeupdate", syncCenterButtonIcons);
+            setInterval(syncCenterButtonIcons, 250);
+            syncCenterButtonIcons();
+
+            // 3. Screen Aspect Ratio Management with Mini Button & Clear Feedback (contain = Fit, cover = Cover, fill = Fill)
+            var currentFitMode = "contain";
+            try {
+              var savedFit = localStorage.getItem("moviznow_aspect_ratio");
+              if (savedFit === "contain" || savedFit === "cover" || savedFit === "fill") {
+                currentFitMode = savedFit;
+              }
+            } catch(e) {}
+
+            var hudTimer = null;
+            function showAspectFeedback(label) {
+              var hud = document.getElementById("aspectFeedbackHud");
+              var val = document.getElementById("aspectFeedbackVal");
+              if (!hud || !val) return;
+              val.textContent = label;
+              hud.classList.add("show-hud");
+              if (hudTimer) clearTimeout(hudTimer);
+              hudTimer = setTimeout(function() {
+                hud.classList.remove("show-hud");
+              }, 1800);
+            }
+
+            function applyFitMode(mode, showFeedback) {
+              if (mode !== "contain" && mode !== "cover" && mode !== "fill") {
+                mode = "contain";
+              }
+              currentFitMode = mode;
+              var vid = document.getElementById("video") || document.querySelector("video");
+              if (vid) {
+                vid.style.objectFit = mode;
+                vid.className = vid.className.replace(/\bfit-(contain|cover|fill)\b/g, "").trim() + " fit-" + mode;
+              }
+              try {
+                localStorage.setItem("moviznow_aspect_ratio", mode);
+              } catch(e) {}
+
+              var btnAspect = document.getElementById("btnAspect");
+              var btnAspectVal = document.getElementById("btnAspectVal");
+              var fullLabel = mode === "contain" ? "Fit (16:9)" : mode === "cover" ? "Cover (Fill)" : "Fill (Stretch)";
+              var shortLabel = mode === "contain" ? "Fit" : mode === "cover" ? "Cover" : "Fill";
+
+              if (btnAspectVal) btnAspectVal.textContent = shortLabel;
+              if (btnAspect) {
+                btnAspect.title = "Screen Aspect: " + fullLabel;
+                if (mode !== "contain") {
+                  btnAspect.classList.add("is-active-aspect");
+                } else {
+                  btnAspect.classList.remove("is-active-aspect");
+                }
+              }
+
+              if (showFeedback) {
+                showAspectFeedback(fullLabel);
+              }
+
+              if (window.parent && window.parent !== window) {
+                try {
+                  window.parent.postMessage({
+                    type: "MOVIZNOW_ASPECT_RATIO",
+                    contentId: contentId,
+                    mode: mode,
+                    label: fullLabel
+                  }, "*");
+                } catch(e) {}
+              }
+            }
+
+            function toggleAspectFit() {
+              var next = currentFitMode === "contain" ? "cover" : currentFitMode === "cover" ? "fill" : "contain";
+              applyFitMode(next, true);
+            }
+
+            function ensureBtnAspect() {
+              var btnFullscreen = document.getElementById("btnFullscreen");
+              var btnAspect = document.getElementById("btnAspect");
+              if (!btnAspect && btnFullscreen && btnFullscreen.parentNode) {
+                btnAspect = document.createElement("button");
+                btnAspect.type = "button";
+                btnAspect.id = "btnAspect";
+                btnAspect.className = "cbtn text aspect-btn";
+                btnAspect.setAttribute("aria-label", "Screen Aspect Ratio");
+                btnAspect.title = "Screen Aspect: Fit (16:9)";
+                btnAspect.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M19 4H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H5V6h14v12zm-3-8h2V8h-2v2zm0 4h2v-2h-2v2zM6 8h2v2H6V8zm0 4h2v2H6v-2z"/></svg><span class="lbl-val" id="btnAspectVal">Fit</span>';
+                btnFullscreen.parentNode.insertBefore(btnAspect, btnFullscreen);
+              }
+
+              if (btnAspect && !btnAspect.__hasAspectClick) {
+                btnAspect.__hasAspectClick = true;
+                btnAspect.addEventListener("click", function(e) {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  toggleAspectFit();
+                });
+              }
+
+              applyFitMode(currentFitMode, false);
+            }
+
+            ensureBtnAspect();
+            setInterval(ensureBtnAspect, 450);
+            video.addEventListener("loadedmetadata", function() {
+              applyFitMode(currentFitMode, false);
+            });
 
             // 3. Automatically Select Hindi (Hin) when available in PlayerFU until user changed
             function autoSelectHindi() {
@@ -795,6 +1204,15 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
     const contentType = response.headers.get("content-type");
     if (contentType) {
       res.setHeader("Content-Type", contentType);
+    }
+
+    // If this is player.css, normalize optical centering for play icon
+    if (assetPath.includes("player.css")) {
+      let css = await response.text();
+      css = css.replace(/transform:\s*translateX\(5px\);?/g, "transform: translateX(1px);");
+      res.setHeader("Content-Type", "text/css; charset=utf-8");
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      return res.send(css);
     }
 
     // If this is player.js, apply crucial playback & orientation fixes
