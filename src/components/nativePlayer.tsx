@@ -1595,23 +1595,6 @@ export function NativePlayer({
               />
             )}
 
-            {/* Center Play/Pause Circle Button (Unified with PlayerFU layout) */}
-            {engine === "native" && (
-              <div
-                onClick={togglePlay}
-                className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-11 h-11 rounded-full border border-white/80 bg-zinc-950/70 shadow-2xl flex items-center justify-center cursor-pointer transition-all duration-200 z-20 ${
-                  !isPlaying || isControlsVisible ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none hover:scale-110"
-                }`}
-                title={isPlaying ? t("Pause") : t("Play")}
-              >
-                {isPlaying ? (
-                  <Pause className="w-5 h-5 text-white fill-current" />
-                ) : (
-                  <Play className="w-5 h-5 text-white fill-current translate-x-[1px]" />
-                )}
-              </div>
-            )}
-
             {/* Custom High-Definition Subtitle Cue Overlay */}
             {selectedSubtitleTrack !== null && activeSubtitleText && (
               <div
@@ -1709,6 +1692,25 @@ export function NativePlayer({
                     <RefreshCw className="w-4 h-4" />
                     <span>{t("Replay Video")}</span>
                   </button>
+                  {fslCandidate && pixeldrainCandidate && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = activeServer === "fsl" ? "pixeldrain" : "fsl";
+                        setActiveServer(target);
+                        const needsTc = isDirectMkv || mediaInfo?.isMkv || mediaInfo?.needsTranscode;
+                        setStreamMode(target === "pixeldrain" && needsTc ? "transcode" : "proxy");
+                        setHasPlaybackError(false);
+                        setStreamAttempt((p) => p + 1);
+                        setIsBuffering(true);
+                        showToast(t(`Switched to ${target === "fsl" ? "FSL" : "Pixeldrain"} Server`));
+                      }}
+                      className="px-5 py-3 bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-zinc-200 font-bold text-sm rounded-xl border border-zinc-700 transition-all flex items-center gap-2 cursor-pointer"
+                    >
+                      <Server className="w-4 h-4" />
+                      <span>{t("Switch Server")}</span>
+                    </button>
+                  )}
                   {directStreamUrl && (
                     <a
                       href={directStreamUrl}
@@ -1741,6 +1743,18 @@ export function NativePlayer({
                   <h2 className="text-sm sm:text-base font-extrabold text-white truncate">
                     {displayTitle}
                   </h2>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveMenu(activeMenu === "quality" ? null : "quality");
+                    }}
+                    className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30 transition-all cursor-pointer flex items-center gap-1"
+                    title={t("Stream Quality")}
+                  >
+                    <span>{currentQualityLabel}</span>
+                    {qualityOptions.length > 1 && <span className="text-[8px] opacity-75">▼</span>}
+                  </button>
                   {seasonInfo && episodeInfo && (
                     <span className="text-[10px] font-bold text-zinc-300 bg-zinc-800 px-2 py-0.5 rounded-md">
                       S{seasonInfo.number ?? (seasonInfo as any).seasonNumber}E{episodeInfo.number ?? (episodeInfo as any).episodeNumber}
@@ -1751,6 +1765,53 @@ export function NativePlayer({
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* Server Switcher Pill if both FSL and Pixeldrain candidates exist */}
+              {fslCandidate && pixeldrainCandidate && (
+                <div className="flex items-center gap-1 bg-zinc-900/90 backdrop-blur-md p-1 rounded-xl border border-zinc-700/60 text-xs shadow-md">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (activeServer !== "fsl") {
+                        setActiveServer("fsl");
+                        setStreamAttempt((p) => p + 1);
+                        setIsBuffering(true);
+                        showToast(t("Switched to FSL Server"));
+                      }
+                    }}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all text-xs cursor-pointer ${
+                      activeServer === "fsl"
+                        ? "bg-emerald-500 text-white shadow-sm"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    FSL
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (activeServer !== "pixeldrain") {
+                        setActiveServer("pixeldrain");
+                        const needsTc = isDirectMkv || mediaInfo?.isMkv || mediaInfo?.needsTranscode;
+                        setStreamMode(needsTc ? "transcode" : "proxy");
+                        setHasPlaybackError(false);
+                        setStreamAttempt((p) => p + 1);
+                        setIsBuffering(true);
+                        showToast(t("Switched to Pixeldrain Server"));
+                      }
+                    }}
+                    className={`px-2.5 py-1 rounded-lg font-bold transition-all text-xs cursor-pointer ${
+                      activeServer === "pixeldrain"
+                        ? "bg-cyan-500 text-white shadow-sm"
+                        : "text-zinc-400 hover:text-white"
+                    }`}
+                  >
+                    Pixeldrain
+                  </button>
+                </div>
+              )}
+
               {/* Direct Download Button */}
               {directStreamUrl && (
                 <a
