@@ -33,6 +33,11 @@ import {
   getSavedProgress,
   saveProgress,
   extractQualityLabel,
+  getPreferredQuality,
+  setPreferredQuality,
+  getPreferredPlaybackSpeed,
+  setPreferredPlaybackSpeed,
+  findBestQualityLink,
 } from "../utils/playbackProgress";
 import {
   modalBackdropAnimation,
@@ -316,7 +321,10 @@ export function useNativePlayerCheck(hubcloudUrl?: string) {
           watchUrl: resData?.watchUrl || stream,
           playable: resData?.playable !== undefined ? resData.playable : Boolean(stream),
         };
-        watchCheckCache.set(trimmedUrl, { data: normalized, timestamp: Date.now() });
+        // Only cache successful playable streams so subsequent link attempts or fixed links are never blocked
+        if (normalized.playable || normalized.hasWatchOnline || normalized.streamUrl) {
+          watchCheckCache.set(trimmedUrl, { data: normalized, timestamp: Date.now() });
+        }
         setData(normalized);
         setIsLoading(false);
       }
@@ -387,16 +395,6 @@ export function NativePlayer({
     return Array.isArray(candidates) ? candidates : [];
   });
   const [isSwitchingQuality, setIsSwitchingQuality] = useState<boolean>(false);
-
-  // Sync state when props change
-  useEffect(() => {
-    if (isOpen) {
-      setCurrentQuality(quality || "720p");
-      setActiveWatchUrl(watchUrl || "");
-      setActiveStreamUrl(propStreamUrl || "");
-      setActiveCandidates(Array.isArray(candidates) ? candidates : []);
-    }
-  }, [isOpen, quality, watchUrl, propStreamUrl, candidates]);
 
   // Parse direct stream URL (prioritizing FSL candidate, Pixeldrain candidate if FSL missing, decoded meta, activeStreamUrl, or direct watchUrl)
   const fslCandidate = useMemo(() => findFslCandidate(activeCandidates), [activeCandidates]);
@@ -521,8 +519,7 @@ export function NativePlayer({
   });
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(() => {
-    const saved = safeStorage.getItem("moviznow_playback_speed");
-    return saved ? parseFloat(saved) : 1;
+    return getPreferredPlaybackSpeed();
   });
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isControlsVisible, setIsControlsVisible] = useState<boolean>(true);
@@ -546,8 +543,16 @@ export function NativePlayer({
   const storageKey = useMemo(() => {
     return getPlaybackProgressKey(contentId, sNum, eNum);
   }, [contentId, sNum, eNum]);
+
+  // Unique composite content & link identifier to detect when link or content is changed
+  const contentKey = useMemo(() => {
+    return `${contentId || ""}_s${sNum ?? ""}_e${eNum ?? ""}_${watchUrl || ""}_${propStreamUrl || ""}`;
+  }, [contentId, sNum, eNum, watchUrl, propStreamUrl]);
+
   const latestPositionRef = useRef<number>(0);
   const lastSaveTimeRef = useRef<number>(0);
+  const prevContentKeyRef = useRef<string>("");
+  const hasExtractedPrefRef = useRef<string>("");
 
   const savePlaybackPosition = useCallback((timeToSave: number) => {
     if (timeToSave > 3) {
@@ -565,6 +570,102 @@ export function NativePlayer({
       setToastMessage(null);
     }, 2200);
   }, []);
+
+  // Complete reset of player state
+  const resetPlayerState = useCallback((targetPosition = 0) => {
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+        videoRef.current.currentTime = 0;
+      } catch {}
+    }
+
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    if (progressSaveIntervalRef.current) clearInterval(progressSaveIntervalRef.current);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+
+    setIsPlaying(false);
+    setCurrentPosition(targetPosition);
+    setSeekOffset(targetPosition);
+    latestPositionRef.current = targetPosition;
+    setTotalDuration(0);
+    setBufferedPercent(0);
+
+    setHasPlaybackError(false);
+    setStreamAttempt(0);
+    setIsBuffering(true);
+
+    setMediaInfo(null);
+    setSubtitleCues([]);
+    setActiveSubtitleText("");
+    setSelectedSubtitleTrack(null);
+    setSelectedAudioTrack(0);
+
+    setActiveMenu(null);
+    setToastMessage(null);
+    setIsSwitchingQuality(false);
+    hasStartedPlaybackRef.current = false;
+  }, []);
+
+  // Full reset when player closes (unmounted or closed)
+  useEffect(() => {
+    if (!isOpen) {
+      if (latestPositionRef.current > 3 && storageKey) {
+        saveProgress(storageKey, latestPositionRef.current);
+      }
+      resetPlayerState(0);
+      prevContentKeyRef.current = "";
+      hasExtractedPrefRef.current = "";
+
+      if (document.fullscreenElement) {
+        try {
+          document.exitFullscreen().catch(() => {});
+        } catch {}
+      }
+      const screenOrientation = window.screen?.orientation as any;
+      if (screenOrientation && typeof screenOrientation.unlock === "function") {
+        try {
+          screenOrientation.unlock();
+        } catch {}
+      }
+      setIsFullscreen(false);
+    }
+  }, [isOpen, resetPlayerState, storageKey]);
+
+  // Detect when content or link changes: reset duration, previous errors, and load new progress
+  useEffect(() => {
+    if (!isOpen) {
+      prevContentKeyRef.current = "";
+      return;
+    }
+
+    if (prevContentKeyRef.current !== contentKey) {
+      prevContentKeyRef.current = contentKey;
+
+      const savedTime = getSavedProgress(storageKey);
+      resetPlayerState(savedTime);
+
+      setCurrentQuality(quality || getPreferredQuality() || "720p");
+      setActiveWatchUrl(watchUrl || "");
+      setActiveStreamUrl(propStreamUrl || "");
+      setActiveCandidates(Array.isArray(candidates) ? candidates : []);
+
+      if (savedTime > 5) {
+        showToast(`${t("Resumed from")} ${formatTime(savedTime)}`);
+      }
+    }
+  }, [
+    isOpen,
+    contentKey,
+    storageKey,
+    quality,
+    watchUrl,
+    propStreamUrl,
+    candidates,
+    resetPlayerState,
+    showToast,
+    t,
+  ]);
 
   // Handler to switch stream quality dynamically while preserving exact playback position
   const handleQualitySelect = useCallback(
@@ -589,6 +690,7 @@ export function NativePlayer({
 
       setActiveMenu(null);
       setCurrentQuality(opt.name || opt.label);
+      setPreferredQuality(opt.label.toLowerCase());
 
       const targetUrl = (opt.url || "").trim();
       const lowerUrl = targetUrl.toLowerCase();
@@ -697,6 +799,28 @@ export function NativePlayer({
     ]
   );
 
+  // Initial preferred quality extraction if availableQualities contains preferred quality (e.g. 480p)
+  useEffect(() => {
+    if (!isOpen || !Array.isArray(availableQualities) || availableQualities.length <= 1) return;
+    const prefQ = getPreferredQuality();
+    const prefLabel = extractQualityLabel(prefQ);
+    const curLabel = extractQualityLabel(currentQuality);
+
+    if (hasExtractedPrefRef.current !== contentKey && prefLabel !== curLabel) {
+      const matchOpt = findBestQualityLink(availableQualities, prefQ);
+      if (matchOpt && matchOpt.url && (matchOpt.url !== activeWatchUrl || prefLabel !== curLabel)) {
+        hasExtractedPrefRef.current = contentKey;
+        handleQualitySelect({
+          label: extractQualityLabel(matchOpt.name || matchOpt.label),
+          name: matchOpt.name || matchOpt.label || prefLabel,
+          url: matchOpt.url,
+          size: matchOpt.size,
+          unit: matchOpt.unit,
+        });
+      }
+    }
+  }, [isOpen, contentKey, availableQualities, currentQuality, activeWatchUrl, handleQualitySelect]);
+
   const hasStartedPlaybackRef = useRef<boolean>(false);
 
   // 15-second fallback: if playing on FSL server and it fails to start playing in 15 seconds, change to Pixeldrain
@@ -747,24 +871,6 @@ export function NativePlayer({
       isMounted = false;
     };
   }, [isOpen, directStreamUrl]);
-
-  // Initial auto-resume detection (automatically resume from saved progress without asking)
-  useEffect(() => {
-    if (!isOpen) return;
-    try {
-      const saved = safeStorage.getItem(storageKey) || localStorage.getItem(storageKey);
-      if (saved) {
-        const time = parseFloat(saved);
-        if (!isNaN(time) && time > 5) {
-          const roundedTime = Math.floor(time);
-          latestPositionRef.current = roundedTime;
-          setSeekOffset(roundedTime);
-          setCurrentPosition(roundedTime);
-          showToast(`${t("Resumed from")} ${formatTime(roundedTime)}`);
-        }
-      }
-    } catch {}
-  }, [isOpen, storageKey, t, showToast]);
 
   // Construct stream URL with seek offset and audio track
   const currentStreamSrc = useMemo(() => {
@@ -1291,7 +1397,7 @@ export function NativePlayer({
     if (videoRef.current) {
       videoRef.current.playbackRate = speed;
     }
-    safeStorage.setItem("moviznow_playback_speed", String(speed));
+    setPreferredPlaybackSpeed(speed);
     setActiveMenu(null);
     showToast(`Speed: ${speed}x`);
     resetControlsTimeout();

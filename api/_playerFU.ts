@@ -177,9 +177,184 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
     let html = await response.text();
 
     // Ensure proper Referrer Policy so video segment CDNs (uprising.best) receive required origin
-    // Play4u requires Referer for edge range requests; we insert meta referrer policy:
+    // Play4u requires Referer for edge range requests; we insert meta referrer policy, always-visible buttons, and PlayerFU progress bar styling:
+    const fullscreenButtonsStyle = `
+      <style>
+        /* Show all buttons always in PlayerFU - do not hide! */
+        #btnAudio,
+        #btnSubs,
+        #btnSpeed,
+        #btnQuality,
+        #btnFullscreen,
+        #btnPlay,
+        #btnMute,
+        [data-action="audio"],
+        [data-action="subs"],
+        [data-action="subtitles"],
+        .btn-audio,
+        .btn-subs,
+        .lang-btn {
+          display: inline-flex !important;
+          visibility: visible !important;
+          opacity: 1 !important;
+        }
+
+        /* Slim progress bar pinned at bottom when controls/menu are hidden (identical to nativePlayer with PlayerFU amber color) */
+        .player-mini-progress {
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+          width: 100%;
+          height: 3px;
+          background: rgba(0, 0, 0, 0.65);
+          z-index: 15;
+          pointer-events: auto;
+          cursor: pointer;
+          opacity: 0;
+          transition: opacity 0.25s ease, height 0.15s ease;
+        }
+        .player-mini-progress:hover {
+          height: 5px;
+        }
+        /* When controls/menu are hidden or idle, show the mini progress bar */
+        .player.idle .player-mini-progress,
+        .player:not(.show-controls).idle .player-mini-progress,
+        body.hide-controls .player-mini-progress {
+          opacity: 1;
+          pointer-events: auto;
+        }
+        /* When controls/menu are visible, hide mini progress bar so it never overlaps the main timeline */
+        .player:not(.idle) .player-mini-progress,
+        .player.show-controls .player-mini-progress {
+          opacity: 0;
+          pointer-events: none;
+        }
+        .player-mini-buffered {
+          position: absolute;
+          top: 0;
+          left: 0;
+          height: 100%;
+          background: rgba(255, 255, 255, 0.3);
+          width: 0%;
+          pointer-events: none;
+          transition: width 0.2s linear;
+        }
+        .player-mini-played {
+          position: absolute;
+          top: 0;
+          left: 0;
+          height: 100%;
+          background: var(--accent, #ff9000);
+          box-shadow: 0 0 8px rgba(255, 144, 0, 0.7);
+          width: 0%;
+          pointer-events: none;
+          transition: width 0.15s linear;
+        }
+
+        /* Unify Play button size to match Pause button size & perfectly center play icon */
+        body.is-embed .player:not(.is-playing) .big-play,
+        body.is-embed .player.show-big-play .big-play,
+        .big-play,
+        #bigPlay {
+          width: 38px !important;
+          height: 38px !important;
+          min-width: 38px !important;
+          min-height: 38px !important;
+          max-width: 38px !important;
+          max-height: 38px !important;
+          border-radius: 50% !important;
+          border: 1.5px solid rgba(255, 255, 255, 0.85) !important;
+          background: rgba(10, 13, 18, 0.65) !important;
+          box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4) !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          box-sizing: border-box !important;
+        }
+        body.is-embed .player:not(.is-playing) .big-play svg,
+        body.is-embed .player.show-big-play .big-play svg,
+        .big-play svg,
+        #bigPlay svg {
+          width: 18px !important;
+          height: 18px !important;
+          max-width: 18px !important;
+          max-height: 18px !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          display: block !important;
+        }
+        /* Perfectly center the play icon in the circle by clearing the 5px offset */
+        body.is-embed .player:not(.is-playing) .big-play #bigIconPlay,
+        body.is-embed .player.show-big-play .big-play #bigIconPlay,
+        .big-play #bigIconPlay,
+        #bigIconPlay {
+          transform: none !important;
+          margin: 0 auto !important;
+          display: block !important;
+        }
+        body.is-embed .player:not(.is-playing) .big-play #bigIconPause,
+        body.is-embed .player.show-big-play .big-play #bigIconPause,
+        .big-play #bigIconPause,
+        #bigIconPause {
+          transform: none !important;
+          margin: 0 auto !important;
+          display: block !important;
+        }
+        .big-play:hover,
+        #bigPlay:hover {
+          transform: translate(-50%, -50%) scale(1.08) !important;
+          background: rgba(15, 20, 28, 0.85) !important;
+          border-color: #fff !important;
+        }
+        #btnPlay,
+        .cbtn#btnPlay {
+          width: 38px !important;
+          height: 38px !important;
+        }
+        #btnPlay svg,
+        #iconPlay,
+        #iconPause {
+          width: 20px !important;
+          height: 20px !important;
+        }
+
+        /* Speed button refinement: show only the speed (e.g. 1.5x), hide white dot/icon */
+        #btnSpeed .p-btn-icon,
+        #btnSpeed::before,
+        #btnSpeed::after {
+          display: none !important;
+          content: none !important;
+          opacity: 0 !important;
+          visibility: hidden !important;
+        }
+        #btnSpeed,
+        .cbtn#btnSpeed {
+          font-weight: 600 !important;
+          font-size: 12.5px !important;
+          letter-spacing: -0.01em !important;
+          min-width: 36px !important;
+          height: 30px !important;
+          padding: 0 8px !important;
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+        }
+        #btnSpeedVal,
+        #btnSpeed .lbl-val {
+          font-weight: 600 !important;
+          font-size: 12.5px !important;
+          color: #fff !important;
+        }
+      </style>
+    `;
+
     if (!html.includes('<meta name="referrer"')) {
-      html = html.replace("<head>", '<head>\n<meta name="referrer" content="origin-when-cross-origin">');
+      html = html.replace("<head>", `<head>\n<meta name="referrer" content="origin-when-cross-origin">\n${fullscreenButtonsStyle}`);
+    } else {
+      html = html.replace("<head>", `<head>\n${fullscreenButtonsStyle}`);
     }
 
     // Rewrite any edge CDN URLs (e.g. https://uprising.best/range/...) to our proxy /api/stream/range/
@@ -195,6 +370,10 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
     html = html.replace(/window\.__PA_SITE__\s*=\s*["'][^"']*["']/g, 'window.__PA_SITE__ = "MovizNow"');
     html = html.replace(/<title>.*?<\/title>/gi, '<title>MovizNow Player</title>');
     html = html.replace(/"embed_url"\s*:\s*"https:\/\/play4u\.org\/[^"]*"/gi, `"embed_url":"/api/stream/player/${contentId}?imdb=${imdbId}"`);
+
+    // Ensure all buttons are shown always: unhide #btnAudio and #btnSubs inline styles
+    html = html.replace(/(id="btnAudio"[^>]*?)style="display:none"/g, '$1style="display:inline-flex"');
+    html = html.replace(/(id="btnSubs"[^>]*?)style="display:none"/g, '$1style="display:inline-flex"');
 
     // 3. Inject MovizNow Progress Tracking, Quality Sync & Auto-Resume Script
     const trackingScript = `
@@ -238,9 +417,12 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
             video.addEventListener("loadedmetadata", doResume);
             video.addEventListener("canplay", doResume);
 
-            // Auto-start playback helper with muted fallback
-            var startPlayback = function() {
+            // Auto-start playback helper with muted fallback on initial load only
+            var initialAutoplayTriggered = false;
+            var startInitialPlayback = function() {
+              if (initialAutoplayTriggered) return;
               if (video && video.paused) {
+                initialAutoplayTriggered = true;
                 var p = video.play();
                 if (p && typeof p.catch === "function") {
                   p.catch(function() {
@@ -251,23 +433,26 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
               }
             };
 
-            video.addEventListener("canplay", startPlayback);
-            video.addEventListener("loadeddata", startPlayback);
+            video.addEventListener("canplay", startInitialPlayback, { once: true });
+            video.addEventListener("loadeddata", startInitialPlayback, { once: true });
+            setTimeout(startInitialPlayback, 600);
 
-            // Start playback or unmute on first user touch/click
-            var handleUserInteraction = function() {
-              if (video) {
-                if (video.paused) {
-                  startPlayback();
-                }
-                if (video.muted) {
-                  video.muted = false;
-                }
+            // One-time user interaction gesture handler to unmute if initial playback was muted
+            var hasInteracted = false;
+            var handleFirstInteraction = function() {
+              if (hasInteracted) return;
+              hasInteracted = true;
+              document.removeEventListener("click", handleFirstInteraction, true);
+              document.removeEventListener("touchend", handleFirstInteraction, true);
+              document.removeEventListener("pointerdown", handleFirstInteraction, true);
+
+              if (video && video.muted) {
+                video.muted = false;
               }
             };
-            document.addEventListener("click", handleUserInteraction);
-            document.addEventListener("touchend", handleUserInteraction);
-            document.addEventListener("pointerdown", handleUserInteraction);
+            document.addEventListener("click", handleFirstInteraction, true);
+            document.addEventListener("touchend", handleFirstInteraction, true);
+            document.addEventListener("pointerdown", handleFirstInteraction, true);
 
             // Periodic progress saving every 2 seconds
             var lastSave = 0;
@@ -334,18 +519,12 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
                 btnSpeedVal.textContent = s + "x";
               }
 
-              var btnSpeed = document.getElementById("btnSpeed");
-              if (btnSpeed) {
-                if (s !== 1) btnSpeed.classList.add("active");
-                else btnSpeed.classList.remove("active");
-              }
-
               checkStatus();
             }
 
             window.__PA_SET_SPEED__ = applySpeed;
 
-            var speedEvents = ["loadedmetadata", "canplay", "play", "playing", "ratechange", "timeupdate", "seeking", "seeked"];
+            var speedEvents = ["loadedmetadata", "canplay", "play", "playing", "timeupdate", "seeking", "seeked"];
             speedEvents.forEach(function(evt) {
               video.addEventListener(evt, function() {
                 var target = window.__PA_TARGET_SPEED__ || currentSpeed;
@@ -363,6 +542,30 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
             });
 
             applySpeed(currentSpeed);
+
+            // Ensure btnSpeed button is present in control bar
+            function ensureBtnSpeed() {
+              var btnQuality = document.getElementById("btnQuality");
+              if (btnQuality && btnQuality.parentNode && !document.getElementById("btnSpeed")) {
+                var btnSpeed = document.createElement("button");
+                btnSpeed.type = "button";
+                btnSpeed.id = "btnSpeed";
+                btnSpeed.className = btnQuality.className || "cbtn text";
+                btnSpeed.title = "Playback speed";
+                btnSpeed.setAttribute("aria-haspopup", "dialog");
+                btnSpeed.setAttribute("aria-label", "Playback speed");
+                btnSpeed.innerHTML = '<span id="btnSpeedVal" class="lbl-val">' + (currentSpeed ? (currentSpeed + "x") : "1x") + '</span>';
+                btnQuality.parentNode.insertBefore(btnSpeed, btnQuality);
+                btnSpeed.addEventListener("click", function(e) {
+                  e.stopPropagation();
+                  if (typeof window.__PA_OPEN_SPEED_SHEET__ === "function") {
+                    window.__PA_OPEN_SPEED_SHEET__();
+                  }
+                });
+              }
+            }
+            setInterval(ensureBtnSpeed, 400);
+            ensureBtnSpeed();
 
             // Listen to playback speed changes from parent window
             window.addEventListener("message", function(e) {
@@ -403,6 +606,152 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
 
             setTimeout(checkStatus, 1200);
             setTimeout(checkStatus, 3000);
+
+            // 1. Show all buttons always in PlayerFU - do not hide!
+            function syncButtonsVisibility() {
+              var btnAudio = document.getElementById("btnAudio") || document.querySelector('[data-action="audio"]');
+              if (btnAudio) {
+                btnAudio.style.setProperty("display", "inline-flex", "important");
+              }
+              var btnSubs = document.getElementById("btnSubs") || document.querySelector('[data-action="subs"]') || document.querySelector('[data-action="subtitles"]');
+              if (btnSubs) {
+                btnSubs.style.setProperty("display", "inline-flex", "important");
+              }
+              var btnSpeed = document.getElementById("btnSpeed");
+              if (btnSpeed) {
+                btnSpeed.style.setProperty("display", "inline-flex", "important");
+              }
+              var btnQuality = document.getElementById("btnQuality");
+              if (btnQuality) {
+                btnQuality.style.setProperty("display", "inline-flex", "important");
+              }
+            }
+
+            document.addEventListener("fullscreenchange", syncButtonsVisibility);
+            document.addEventListener("webkitfullscreenchange", syncButtonsVisibility);
+            document.addEventListener("mozfullscreenchange", syncButtonsVisibility);
+            window.addEventListener("resize", syncButtonsVisibility);
+            window.addEventListener("orientationchange", syncButtonsVisibility);
+            setInterval(syncButtonsVisibility, 350);
+            syncButtonsVisibility();
+
+            // 2. Slim progress bar when menu/controls are hidden (identical to nativePlayer, keeping PlayerFU amber color)
+            function ensureMiniProgressBar() {
+              var player = document.getElementById("player") || document.querySelector(".player");
+              if (player && !document.getElementById("playerMiniProgress")) {
+                var bar = document.createElement("div");
+                bar.className = "player-mini-progress";
+                bar.id = "playerMiniProgress";
+                bar.title = "Click to show controls";
+                bar.innerHTML = '<div class="player-mini-buffered" id="playerMiniBuffered"></div><div class="player-mini-played" id="playerMiniPlayed"></div>';
+                player.appendChild(bar);
+
+                bar.addEventListener("click", function(e) {
+                  e.stopPropagation();
+                  if (player) {
+                    player.classList.remove("idle");
+                    player.classList.add("show-controls");
+                    setTimeout(function() {
+                      player.classList.remove("show-controls");
+                    }, 3500);
+                  }
+                });
+              }
+            }
+            ensureMiniProgressBar();
+            setInterval(ensureMiniProgressBar, 500);
+
+            function updateMiniProgress() {
+              var vid = document.getElementById("video") || document.querySelector("video");
+              if (!vid) return;
+              var miniPlayed = document.getElementById("playerMiniPlayed");
+              var miniBuffered = document.getElementById("playerMiniBuffered");
+              var dur = vid.duration || 0;
+              var cur = vid.currentTime || 0;
+              if (miniPlayed && dur > 0) {
+                var pct = (cur / dur) * 100;
+                miniPlayed.style.width = Math.min(100, Math.max(0, pct)) + "%";
+              }
+              if (miniBuffered && dur > 0 && vid.buffered && vid.buffered.length > 0) {
+                try {
+                  var bEnd = vid.buffered.end(vid.buffered.length - 1);
+                  miniBuffered.style.width = Math.min(100, Math.max(0, (bEnd / dur) * 100)) + "%";
+                } catch(e) {}
+              }
+            }
+
+            video.addEventListener("timeupdate", updateMiniProgress);
+            video.addEventListener("progress", updateMiniProgress);
+            video.addEventListener("seeking", updateMiniProgress);
+            video.addEventListener("seeked", updateMiniProgress);
+
+            // 3. Automatically Select Hindi (Hin) when available in PlayerFU until user changed
+            function autoSelectHindi() {
+              var userChanged = false;
+              try {
+                userChanged = localStorage.getItem("pa_user_audio_changed") === "true";
+              } catch(_) {}
+              if (userChanged) return;
+
+              var h = window.hls;
+              if (h && h.audioTracks && h.audioTracks.length > 0) {
+                var tracks = h.audioTracks;
+                var curIdx = h.audioTrack;
+                var cur = tracks[curIdx];
+                var curLang = cur ? (cur.lang || cur.name || "").toLowerCase() : "";
+                if (curLang === "hi" || curLang === "hin" || curLang.startsWith("hi") || curLang.includes("hindi")) {
+                  var btnAudioVal = document.getElementById("btnAudioVal");
+                  if (btnAudioVal && (btnAudioVal.textContent === "—" || !btnAudioVal.textContent)) {
+                    btnAudioVal.textContent = "HIN";
+                  }
+                  return; // already Hindi
+                }
+
+                var hindiIndex = -1;
+                for (var i = 0; i < tracks.length; i++) {
+                  var t = tracks[i];
+                  var c = (t.lang || "").toLowerCase();
+                  var n = (t.name || "").toLowerCase();
+                  if (c === "hi" || c === "hin" || c.startsWith("hi") || n.includes("hindi") || n.includes("hin")) {
+                    hindiIndex = i;
+                    break;
+                  }
+                }
+
+                if (hindiIndex >= 0) {
+                  if (typeof h.setAudioOption === "function") {
+                    try {
+                      h.setAudioOption({ lang: tracks[hindiIndex].lang, name: tracks[hindiIndex].name });
+                    } catch(e) {}
+                  }
+                  h.audioTrack = hindiIndex;
+                  var btnAudioValEl = document.getElementById("btnAudioVal");
+                  if (btnAudioValEl) btnAudioValEl.textContent = "HIN";
+                  console.log("[PlayerFU] Automatically selected Hindi (Hin) track:", tracks[hindiIndex]);
+                }
+              }
+            }
+
+            // Track if user manually chooses another audio track in sheet
+            document.addEventListener("click", function(e) {
+              var t = e.target;
+              if (t && t.closest) {
+                var item = t.closest(".ps-item");
+                if (item) {
+                  var sheetTitle = document.getElementById("psTitle");
+                  if (sheetTitle && sheetTitle.textContent && sheetTitle.textContent.toLowerCase().includes("audio")) {
+                    try {
+                      localStorage.setItem("pa_user_audio_changed", "true");
+                    } catch(_) {}
+                  }
+                }
+              }
+            }, true);
+
+            setInterval(autoSelectHindi, 500);
+            setTimeout(autoSelectHindi, 600);
+            setTimeout(autoSelectHindi, 1500);
+            setTimeout(autoSelectHindi, 3000);
           }
 
           if (document.readyState === "loading") {
@@ -571,7 +920,12 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
         }`
       );
 
-      // 5. Patch openSheet to support "speed" sheet type
+      // 5. Patch openSheet to support "speed" sheet type and expose global opener
+      js = js.replace(
+        "function openSheet(type) {",
+        `function openSheet(type) {
+          window.__PA_OPEN_SPEED_SHEET__ = function() { openSheet("speed"); };`
+      );
       js = js.replace(
         /if\s*\(type\s*===\s*["']quality["']\)\s*\{\s*psTitle\.textContent\s*=\s*["']Quality["'];\s*populateQualitySheet\(\);\s*\}/g,
         `if (type === "speed") {
@@ -600,15 +954,16 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
           var btnSpeed = document.createElement("button");
           btnSpeed.type = "button";
           btnSpeed.id = "btnSpeed";
-          btnSpeed.className = btnQuality.className || "p-btn";
+          btnSpeed.className = btnQuality.className || "cbtn text";
           btnSpeed.title = "Playback speed";
+          btnSpeed.setAttribute("aria-haspopup", "dialog");
+          btnSpeed.setAttribute("aria-label", "Playback speed");
           var savedSpeed = 1;
           try {
             var sp = parseFloat(localStorage.getItem("moviznow_playback_speed") || "1");
             if (!isNaN(sp) && sp >= 0.25 && sp <= 4) savedSpeed = sp;
           } catch(e) {}
-          if (savedSpeed !== 1) btnSpeed.classList.add("active");
-          btnSpeed.innerHTML = '<span class="p-btn-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 15"/></svg></span><span id="btnSpeedVal" class="p-btn-val">' + savedSpeed + 'x</span>';
+          btnSpeed.innerHTML = '<span id="btnSpeedVal" class="lbl-val">' + (savedSpeed ? (savedSpeed + "x") : "1x") + '</span>';
           btnQuality.parentNode.insertBefore(btnSpeed, btnQuality);
           btnSpeed.addEventListener("click", (e) => {
             e.stopPropagation();
@@ -617,15 +972,61 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
         }`
       );
 
-      // 8. Append helper methods for quality resolution, playback speed sheet & 15s Auto safety guard
-      js += `
-        /* MovizNow Playback Speed Sheet */
+      // 8. Patch preferredAudioLang to automatically prefer Hindi ('hi') unless user changed
+      js = js.replace(
+        /function preferredAudioLang\(\)\s*\{[\s\S]*?return readStoredAudioLang\(\);\s*\}/,
+        `function preferredAudioLang() {
+          var userChanged = false;
+          try { userChanged = localStorage.getItem("pa_user_audio_changed") === "true"; } catch(_) {}
+          if (userChanged) {
+            if (window.__PA_PREF_LANG__) {
+              return String(window.__PA_PREF_LANG__).toLowerCase().trim().split("-")[0];
+            }
+            var stored = readStoredAudioLang();
+            if (stored) return stored;
+          }
+          return "hi";
+        }`
+      );
+
+      // Patch setAudioTrack to mark user changed when a track is manually chosen
+      js = js.replace(
+        /function setAudioTrack\(index\)\s*\{[\s\S]*?audioUserPicked\s*=\s*true;/,
+        `function setAudioTrack(index) {
+          try { localStorage.setItem("pa_user_audio_changed", "true"); } catch(_) {}
+          if (!hls) return;
+          const tracks = hls.audioTracks || [];
+          const i = Number(index);
+          if (!Number.isFinite(i) || i < 0 || i >= tracks.length) return;
+          audioUserPicked = true;`
+      );
+
+      // Ensure all buttons are shown always in updateMenuVisibility
+      js = js.replace(
+        /function updateMenuVisibility\(\)\s*\{[\s\S]*?btnSubs\.style\.display\s*=\s*[^;]+;/g,
+        `function updateMenuVisibility() {
+          if (btnAudio) btnAudio.style.display = "inline-flex";
+          if (btnSubs) btnSubs.style.display = "inline-flex";
+          if (typeof btnSpeed !== "undefined" && btnSpeed) btnSpeed.style.display = "inline-flex";
+          if (typeof btnQuality !== "undefined" && btnQuality) btnQuality.style.display = "inline-flex";`
+      );
+
+      // 9. Inject Speed Sheet builder, Quality Fallback & Auto-Play Protection INSIDE player.js IIFE
+      const insideIifeCode = `
+        /* MovizNow Playback Speed Sheet inside player.js IIFE */
         function populateSpeedSheet() {
           if (typeof psBody === "undefined" || !psBody) return;
           psBody.innerHTML = "";
           var speeds = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4];
-          var video = document.getElementById("video") || document.querySelector("video");
-          var curRate = window.__PA_TARGET_SPEED__ || (video ? video.playbackRate : 1) || 1;
+          var vid = $("video") || document.getElementById("video") || document.querySelector("video");
+          var savedSpeedStr = "";
+          try { savedSpeedStr = localStorage.getItem("moviznow_playback_speed") || ""; } catch(e) {}
+          var savedSpeedNum = parseFloat(savedSpeedStr);
+          var curRate = (typeof window.__PA_TARGET_SPEED__ === "number" && window.__PA_TARGET_SPEED__ >= 0.25)
+            ? window.__PA_TARGET_SPEED__
+            : (!isNaN(savedSpeedNum) && savedSpeedNum >= 0.25
+              ? savedSpeedNum
+              : ((vid && vid.playbackRate) ? vid.playbackRate : 1));
 
           speeds.forEach(function(s) {
             var isSel = Math.abs(curRate - s) < 0.01;
@@ -633,32 +1034,44 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
             var item = makeSheetItem({
               label: label,
               selected: isSel,
+              keepOpen: true,
               onPick: function() {
+                // Immediately show tick/check icon on clicked item and remove from others
+                if (psBody) {
+                  var allItems = psBody.querySelectorAll(".ps-item");
+                  allItems.forEach(function(el) {
+                    el.classList.remove("selected");
+                    el.setAttribute("aria-selected", "false");
+                  });
+                  item.classList.add("selected");
+                  item.setAttribute("aria-selected", "true");
+                }
+
+                // Apply rate and persist
+                window.__PA_TARGET_SPEED__ = s;
                 if (typeof window.__PA_SET_SPEED__ === "function") {
                   window.__PA_SET_SPEED__(s);
-                } else {
-                  if (video) {
-                    try {
-                      video.playbackRate = s;
-                      video.defaultPlaybackRate = s;
-                    } catch(e) {}
-                  }
+                }
+                if (vid) {
                   try {
-                    localStorage.setItem("moviznow_playback_speed", String(s));
+                    vid.playbackRate = s;
+                    vid.defaultPlaybackRate = s;
                   } catch(e) {}
-                  var btnSpeedVal = document.getElementById("btnSpeedVal");
-                  if (btnSpeedVal) {
-                    btnSpeedVal.textContent = s + "x";
-                  }
-                  var btnSpeed = document.getElementById("btnSpeed");
-                  if (btnSpeed) {
-                    if (s !== 1) btnSpeed.classList.add("active");
-                    else btnSpeed.classList.remove("active");
-                  }
                 }
-                if (typeof closeSheet === "function") {
-                  closeSheet();
+                try {
+                  localStorage.setItem("moviznow_playback_speed", String(s));
+                } catch(e) {}
+                var btnSpeedVal = document.getElementById("btnSpeedVal");
+                if (btnSpeedVal) {
+                  btnSpeedVal.textContent = s + "x";
                 }
+
+                // Brief visual confirmation of the tick before closing sheet
+                setTimeout(function() {
+                  if (typeof closeSheet === "function") {
+                    closeSheet();
+                  }
+                }, 220);
               }
             });
             psBody.appendChild(item);
@@ -742,12 +1155,10 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
           if (__autoTimer) clearTimeout(__autoTimer);
           __autoTimer = setTimeout(function() {
             if (typeof qualityIsAuto === "function" && qualityIsAuto()) {
-              var vid = document.getElementById("video");
-              // If playback has not started, switch to previous selected quality (not auto), or minimum
+              var vid = $("video") || document.getElementById("video");
               if (vid && (vid.currentTime === 0 || vid.paused || vid.readyState < 3)) {
                 console.warn("[PlayerFU] Auto stream did not start playback. Switching to previous selected quality (or minimum).");
                 var fallbackIdx = -1;
-                // 1. If previous non-auto quality was selected, change to it:
                 if (typeof __lastSelectedNonAutoIndex === "number" && __lastSelectedNonAutoIndex >= 0) {
                   fallbackIdx = __lastSelectedNonAutoIndex;
                 } else if (__lastSelectedNonAutoHeight > 0) {
@@ -759,7 +1170,6 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
                     fallbackIdx = findBestQualityIndexForTarget(prevSaved);
                   }
                 }
-                // 2. If previous not selected, select minimum quality:
                 if (fallbackIdx < 0) {
                   fallbackIdx = findMinimumQualityIndex();
                 }
@@ -770,32 +1180,12 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
             }
           }, 3000);
         }
-
-        (function() {
-          function attachAutoListeners() {
-            var vid = document.getElementById("video");
-            if (!vid) {
-              setTimeout(attachAutoListeners, 200);
-              return;
-            }
-            var cancelGuard = function() {
-              if (vid.currentTime > 0) {
-                if (__autoTimer) {
-                  clearTimeout(__autoTimer);
-                  __autoTimer = null;
-                }
-              }
-            };
-            vid.addEventListener("timeupdate", cancelGuard);
-            vid.addEventListener("playing", cancelGuard);
-          }
-          if (document.readyState === "loading") {
-            document.addEventListener("DOMContentLoaded", attachAutoListeners);
-          } else {
-            attachAutoListeners();
-          }
-        })();
       `;
+
+      js = js.replace(
+        "function populateQualitySheet()",
+        `${insideIifeCode}\nfunction populateQualitySheet()`
+      );
 
       res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       return res.send(js);

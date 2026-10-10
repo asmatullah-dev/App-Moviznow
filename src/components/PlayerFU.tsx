@@ -9,6 +9,10 @@ import {
   getPlaybackProgressKey,
   getSavedProgress,
   saveProgress,
+  getPreferredQuality,
+  setPreferredQuality,
+  getPreferredPlaybackSpeed,
+  setPreferredPlaybackSpeed,
 } from "../utils/playbackProgress";
 import {
   modalBackdropAnimation,
@@ -291,40 +295,17 @@ export function PlayerFU({
 
     // Determine remembered quality preference across all movies with fallback logic.
     // If preference is missing or set to auto, resolveBestQuality automatically selects minimum quality.
-    let savedPref = "";
-    try {
-      const stored = (
-        safeStorage.getItem("moviznow_preferred_quality") ||
-        localStorage.getItem("moviznow_preferred_quality") ||
-        ""
-      )
-        .trim()
-        .toLowerCase();
-      if (stored && stored !== "auto") {
-        savedPref = stored;
-      }
-    } catch {
-      savedPref = "";
-    }
-
+    const savedPref = getPreferredQuality();
     const preferredQuality = resolveBestQuality(savedPref, streamMeta?.qualities);
 
     // Determine remembered playback speed preference
-    let savedSpeed = "1";
-    try {
-      savedSpeed =
-        safeStorage.getItem("moviznow_playback_speed") ||
-        localStorage.getItem("moviznow_playback_speed") ||
-        "1";
-    } catch {
-      savedSpeed = "1";
-    }
+    const savedSpeed = String(getPreferredPlaybackSpeed());
 
-    // Construct immutable URL for this session with explicit quality & speed preferences
+    // Construct immutable URL for this session with explicit quality, speed & Hindi language preference
     const apiBase = getStreamingApiBase();
     let stableUrl = `${apiBase}/api/stream/player/${content.id}?imdb=${encodeURIComponent(
       imdbId,
-    )}&t=${initialResumeTime}&quality=${encodeURIComponent(preferredQuality)}&speed=${encodeURIComponent(savedSpeed)}&autoplay=1`;
+    )}&t=${initialResumeTime}&quality=${encodeURIComponent(preferredQuality)}&speed=${encodeURIComponent(savedSpeed)}&lang=hi&autoplay=1`;
     if (season !== undefined && season !== null) {
       stableUrl += `&season=${encodeURIComponent(String(season))}`;
     }
@@ -354,30 +335,13 @@ export function PlayerFU({
           const lowerQ = rawQuality.trim().toLowerCase();
           // Never save preference if selected Auto
           if (!lowerQ.startsWith("auto")) {
-            // Extract resolution like 1080p, 720p, 480p, 360p
-            const match = lowerQ.match(/(\d{3,4}p)/i);
-            if (match) {
-              const detectedQ = match[1].toLowerCase();
-              try {
-                safeStorage.setItem("moviznow_preferred_quality", detectedQ);
-                localStorage.setItem("moviznow_preferred_quality", detectedQ);
-                safeStorage.setItem("moviznow_previous_quality", detectedQ);
-                localStorage.setItem("moviznow_previous_quality", detectedQ);
-              } catch {
-                // Storage fallback
-              }
-            }
+            setPreferredQuality(lowerQ);
           }
         }
 
         const speed = event.data.speed;
         if (typeof speed === "number" && speed >= 0.25 && speed <= 4) {
-          try {
-            safeStorage.setItem("moviznow_playback_speed", String(speed));
-            localStorage.setItem("moviznow_playback_speed", String(speed));
-          } catch {
-            // Storage fallback
-          }
+          setPreferredPlaybackSpeed(speed);
         }
       }
     };
@@ -398,6 +362,27 @@ export function PlayerFU({
       }
     };
 
+    const notifyOrientation = () => {
+      const isFs = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      const isLandscape = window.innerWidth > window.innerHeight;
+      const iframe = document.querySelector<HTMLIFrameElement>('iframe[title*="Player"]');
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(
+          {
+            type: "MOVIZNOW_ORIENTATION_CHANGE",
+            isLandscape,
+            isFs,
+          },
+          "*"
+        );
+      }
+    };
+
     const handleFullscreenChange = () => {
       const isFs = !!(
         document.fullscreenElement ||
@@ -405,6 +390,8 @@ export function PlayerFU({
         (document as any).mozFullScreenElement ||
         (document as any).msFullscreenElement
       );
+
+      notifyOrientation();
 
       if (isFs) {
         if (
@@ -435,12 +422,18 @@ export function PlayerFU({
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
     document.addEventListener("mozfullscreenchange", handleFullscreenChange);
+    window.addEventListener("resize", notifyOrientation);
+    window.addEventListener("orientationchange", notifyOrientation);
+    const intervalId = setInterval(notifyOrientation, 500);
 
     return () => {
+      clearInterval(intervalId);
       window.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
       document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
       document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
+      window.removeEventListener("resize", notifyOrientation);
+      window.removeEventListener("orientationchange", notifyOrientation);
     };
   }, [isOpen, onClose]);
 

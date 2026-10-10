@@ -92,3 +92,133 @@ export function extractQualityLabel(name?: string): string {
 
   return trimmed.length > 12 ? `${trimmed.slice(0, 10)}...` : trimmed;
 }
+
+export const PREFERRED_QUALITY_KEY = 'moviznow_preferred_quality';
+export const PREVIOUS_QUALITY_KEY = 'moviznow_previous_quality';
+export const PREFERRED_SPEED_KEY = 'moviznow_playback_speed';
+
+/**
+ * Get unified preferred quality across nativePlayer and PlayerFU.
+ * Defaults to '720p' if none is stored or if set to auto.
+ */
+export function getPreferredQuality(): string {
+  try {
+    const raw = (
+      safeStorage.getItem(PREFERRED_QUALITY_KEY) ||
+      localStorage.getItem(PREFERRED_QUALITY_KEY) ||
+      safeStorage.getItem(PREVIOUS_QUALITY_KEY) ||
+      localStorage.getItem(PREVIOUS_QUALITY_KEY) ||
+      ''
+    ).trim().toLowerCase();
+
+    if (raw && !raw.startsWith('auto')) {
+      const match = raw.match(/(\d{3,4}p?)/i);
+      if (match) {
+        const val = match[1].toLowerCase();
+        return val.endsWith('p') ? val : `${val}p`;
+      }
+      return raw;
+    }
+  } catch {
+    // Storage fallback
+  }
+  return '720p';
+}
+
+/**
+ * Set unified preferred quality across both players and local storages.
+ */
+export function setPreferredQuality(quality: string): void {
+  if (!quality || typeof quality !== 'string') return;
+  const clean = quality.trim().toLowerCase();
+  if (!clean || clean.startsWith('auto')) return;
+  const match = clean.match(/(\d{3,4}p?)/i);
+  const normalized = match
+    ? (match[1].toLowerCase().endsWith('p') ? match[1].toLowerCase() : `${match[1].toLowerCase()}p`)
+    : clean;
+
+  try {
+    safeStorage.setItem(PREFERRED_QUALITY_KEY, normalized);
+    localStorage.setItem(PREFERRED_QUALITY_KEY, normalized);
+    safeStorage.setItem(PREVIOUS_QUALITY_KEY, normalized);
+    localStorage.setItem(PREVIOUS_QUALITY_KEY, normalized);
+  } catch {
+    // Storage fallback
+  }
+}
+
+/**
+ * Get unified playback speed preference (0.25x - 4x).
+ */
+export function getPreferredPlaybackSpeed(): number {
+  try {
+    const raw =
+      safeStorage.getItem(PREFERRED_SPEED_KEY) ||
+      localStorage.getItem(PREFERRED_SPEED_KEY) ||
+      '1';
+    const parsed = parseFloat(raw);
+    if (!isNaN(parsed) && parsed >= 0.25 && parsed <= 4) {
+      return parsed;
+    }
+  } catch {
+    // Storage fallback
+  }
+  return 1;
+}
+
+/**
+ * Set unified playback speed preference across both players.
+ */
+export function setPreferredPlaybackSpeed(speed: number): void {
+  if (typeof speed !== 'number' || isNaN(speed) || speed < 0.25 || speed > 4) return;
+  try {
+    safeStorage.setItem(PREFERRED_SPEED_KEY, String(speed));
+    localStorage.setItem(PREFERRED_SPEED_KEY, String(speed));
+  } catch {
+    // Storage fallback
+  }
+}
+
+/**
+ * Select the optimal link based on the user's preferred quality (e.g. 480p, 720p, 1080p).
+ */
+export function findBestQualityLink<T extends { url: string; name?: string; label?: string }>(
+  links: T[],
+  preferredQuality?: string
+): T | null {
+  if (!Array.isArray(links) || links.length === 0) return null;
+  const pref = (preferredQuality || getPreferredQuality()).trim().toLowerCase();
+  const targetH = parseInt(pref.replace(/[^0-9]/g, ''), 10) || 720;
+
+  const parseHeight = (item: T): number => {
+    const str = `${item.name || ''} ${item.label || ''} ${item.url || ''}`.toLowerCase();
+    const m = str.match(/\b(480|720|1080|2160|4k)\b/);
+    if (m) {
+      if (m[1] === '4k' || m[1] === '2160') return 2160;
+      return parseInt(m[1], 10);
+    }
+    return 0;
+  };
+
+  // 1. Direct exact height match
+  const exact = links.find((l) => parseHeight(l) === targetH);
+  if (exact) return exact;
+
+  // 2. Highest lower height
+  const parsedWithHeights = links.map((l) => ({ link: l, height: parseHeight(l) }));
+  const lower = parsedWithHeights.filter((p) => p.height > 0 && p.height < targetH);
+  if (lower.length > 0) {
+    lower.sort((a, b) => b.height - a.height);
+    return lower[0].link;
+  }
+
+  // 3. Lowest higher height
+  const higher = parsedWithHeights.filter((p) => p.height > targetH);
+  if (higher.length > 0) {
+    higher.sort((a, b) => a.height - b.height);
+    return higher[0].link;
+  }
+
+  return links[0];
+}
+

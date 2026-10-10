@@ -412,7 +412,8 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
     } catch {}
 
     const noResult: NativeStreamData = { hasWatchOnline: false, playable: false };
-    checkCache.set(url, { data: noResult, timestamp: Date.now() });
+    // Only cache transient failure for 5 seconds so retries or subsequent links are never blocked
+    checkCache.set(url, { data: noResult, timestamp: Date.now() - (CHECK_CACHE_TTL - 5000) });
     return res.json(noResult);
   } catch (err: any) {
     console.error("[NativePlayer Check Error]:", err);

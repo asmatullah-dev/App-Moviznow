@@ -83,6 +83,10 @@ import { touchMetadataUsage } from "../../services/cacheManager";
 import AlertModal from "../../components/AlertModal";
 import ConfirmModal from "../../components/ConfirmModal";
 import SharePreviewModal from "../../components/SharePreviewModal";
+import {
+  getPreferredQuality,
+  findBestQualityLink,
+} from "../../utils/playbackProgress";
 import PlayerFU, { PlayerFUButton, usePlayerFU } from "../../components/PlayerFU";
 import NativePlayer, {
   findWatchOnlineCandidate,
@@ -947,14 +951,14 @@ export default function MovieDetails() {
     };
 
     // User requirement:
-    // Extract the hubcloud link of 720p or 720p HEVC or 1080p (if 720p not available)
+    // Extract matching link for user's saved quality preference (e.g. 480p, 720p, 1080p)
     // If a movie has only Pixeldrain links not hubcloud links then simply play using Pixeldrain server
-    const hc720 = links.find((l) => isHc(l.url) && (/720p?/i.test(l.name || "") || /720/i.test(l.name || "")));
-    const hc1080 = links.find((l) => isHc(l.url) && (/1080p?/i.test(l.name || "") || /1080/i.test(l.name || "")));
-    const hcAny = links.find((l) => isHc(l.url));
-    const targetHcLink = hc720 || hc1080 || hcAny;
+    const savedQuality = getPreferredQuality();
+    const hcLinks = links.filter((l) => isHc(l.url));
+    const pdLinks = links.filter((l) => isPd(l.url));
 
-    const pdOnlyLink = links.find((l) => isPd(l.url));
+    const targetHcLink = findBestQualityLink(hcLinks, savedQuality);
+    const pdOnlyLink = findBestQualityLink(pdLinks, savedQuality);
 
     // If a movie has only Pixeldrain links not hubcloud links then simply play using Pixeldrain server
     if (!targetHcLink && pdOnlyLink) {
