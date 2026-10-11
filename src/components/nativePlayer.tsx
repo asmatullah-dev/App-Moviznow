@@ -122,219 +122,318 @@ function formatTime(seconds: number): string {
 }
 
 /**
- * Standard 3-letter language code mapping for the nativePlayer audio button.
- * Converts full language names into standard ISO 639-2 short codes:
- * Hin for Hindi, Tam for Tamil, Tel for Telugu, Eng for English, etc.
+ * Formats audio language for the nativePlayer audio button and overlays.
+ * Uses the clean, full language name (e.g. Hindi, English, Tamil).
+ * If the language name exceeds 8 characters, gracefully truncates with an ellipsis (e.g. Portugue...).
  */
-export function getLanguageShortCode(lang?: string): string {
+export function formatAudioLanguageLabel(lang?: string): string {
   if (!lang || typeof lang !== "string") return "Audio";
-  const clean = lang.trim().toLowerCase();
-  if (!clean || clean === "default" || clean === "unknown" || clean === "none") {
+  let clean = lang.trim();
+
+  // Strip brackets, parentheses, technical codecs, bitrates, etc.
+  clean = clean
+    .replace(/\[[^\]]*\]/g, "")
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\b(original|stereo|5\.1|7\.1|aac|ac3|dts|audio|dual|multi)\b/gi, "")
+    .replace(/[-–—]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!clean || clean.toLowerCase() === "default" || clean.toLowerCase() === "unknown" || clean.toLowerCase() === "none") {
     return "Audio";
   }
 
-  const CODE_MAP: Record<string, string> = {
-    // Primary Indian languages
-    hindi: "Hin",
-    hin: "Hin",
-    hi: "Hin",
-    tamil: "Tam",
-    tam: "Tam",
-    ta: "Tam",
-    telugu: "Tel",
-    tel: "Tel",
-    te: "Tel",
-    malayalam: "Mal",
-    mal: "Mal",
-    ml: "Mal",
-    kannada: "Kan",
-    kan: "Kan",
-    kn: "Kan",
-    bengali: "Ben",
-    bangla: "Ben",
-    ben: "Ben",
-    bn: "Ben",
-    marathi: "Mar",
-    mar: "Mar",
-    mr: "Mar",
-    gujarati: "Guj",
-    guj: "Guj",
-    gu: "Guj",
-    punjabi: "Pan",
-    pan: "Pan",
-    pun: "Pan",
-    pa: "Pan",
-    urdu: "Urd",
-    urd: "Urd",
-    ur: "Urd",
-    odia: "Ori",
-    oriya: "Ori",
-    ori: "Ori",
-    assamese: "Asm",
-    asm: "Asm",
-    bhojpuri: "Bho",
-    bho: "Bho",
-    sanskrit: "San",
-    san: "San",
-    nepali: "Nep",
-    nep: "Nep",
-    ne: "Nep",
-    sinhala: "Sin",
-    sin: "Sin",
-    si: "Sin",
+  const lower = clean.toLowerCase();
 
-    // Major International languages (ISO 639-2)
-    english: "Eng",
-    eng: "Eng",
-    en: "Eng",
-    spanish: "Spa",
-    español: "Spa",
-    espanol: "Spa",
-    spa: "Spa",
-    es: "Spa",
-    french: "Fra",
-    français: "Fra",
-    francais: "Fra",
-    fra: "Fra",
-    fre: "Fra",
-    fr: "Fra",
-    german: "Ger",
-    deutsch: "Ger",
-    ger: "Ger",
-    deu: "Ger",
-    de: "Ger",
-    italian: "Ita",
-    italiano: "Ita",
-    ita: "Ita",
-    it: "Ita",
-    portuguese: "Por",
-    português: "Por",
-    portugues: "Por",
-    por: "Por",
-    pt: "Por",
-    russian: "Rus",
-    русский: "Rus",
-    rus: "Rus",
-    ru: "Rus",
-    japanese: "Jpn",
-    日本語: "Jpn",
-    jpn: "Jpn",
-    ja: "Jpn",
-    korean: "Kor",
-    한국어: "Kor",
-    kor: "Kor",
-    ko: "Kor",
-    chinese: "Chi",
-    中文: "Chi",
-    mandarin: "Chi",
-    cantonese: "Yue",
-    yue: "Yue",
-    chi: "Chi",
-    zho: "Chi",
-    zh: "Chi",
-    arabic: "Ara",
-    العربية: "Ara",
-    ara: "Ara",
-    ar: "Ara",
-    turkish: "Tur",
-    türkçe: "Tur",
-    tur: "Tur",
-    tr: "Tur",
-    vietnamese: "Vie",
-    "tiếng việt": "Vie",
-    vie: "Vie",
-    vi: "Vie",
-    thai: "Tha",
-    ไทย: "Tha",
-    tha: "Tha",
-    th: "Tha",
-    indonesian: "Ind",
-    "bahasa indonesia": "Ind",
-    ind: "Ind",
-    id: "Ind",
-    malay: "Msa",
-    "bahasa melayu": "Msa",
-    msa: "Msa",
-    ms: "Msa",
-    filipino: "Fil",
-    tagalog: "Fil",
-    fil: "Fil",
-    tgl: "Fil",
-    tl: "Fil",
-    persian: "Fas",
-    farsi: "Fas",
-    فارسی: "Fas",
-    fas: "Fas",
-    per: "Fas",
-    fa: "Fas",
-    polish: "Pol",
-    polski: "Pol",
-    pol: "Pol",
-    pl: "Pol",
-    dutch: "Nld",
-    nederlands: "Nld",
-    nld: "Nld",
-    dut: "Nld",
-    nl: "Nld",
-    swedish: "Swe",
-    svenska: "Swe",
-    swe: "Swe",
-    sv: "Swe",
-    norwegian: "Nor",
-    norsk: "Nor",
-    nor: "Nor",
-    no: "Nor",
-    danish: "Dan",
-    dansk: "Dan",
-    dan: "Dan",
-    da: "Dan",
-    finnish: "Fin",
-    suomi: "Fin",
-    fin: "Fin",
-    fi: "Fin",
-    greek: "Gre",
-    ell: "Gre",
-    gre: "Gre",
-    el: "Gre",
-    hebrew: "Heb",
-    heb: "Heb",
-    he: "Heb",
-    czech: "Cze",
-    ces: "Cze",
-    cze: "Cze",
-    cs: "Cze",
-    hungarian: "Hun",
-    hun: "Hun",
-    hu: "Hun",
-    romanian: "Ron",
-    ron: "Ron",
-    rum: "Ron",
-    ro: "Ron",
-    ukrainian: "Ukr",
-    ukr: "Ukr",
-    uk: "Ukr",
+  // Map known short codes or variations to clean full capitalized language names
+  const FULL_NAME_MAP: Record<string, string> = {
+    // Primary Indian languages
+    hin: "Hindi",
+    hi: "Hindi",
+    hindi: "Hindi",
+    tam: "Tamil",
+    ta: "Tamil",
+    tamil: "Tamil",
+    tel: "Telugu",
+    te: "Telugu",
+    telugu: "Telugu",
+    mal: "Malayalam",
+    ml: "Malayalam",
+    malayalam: "Malayalam",
+    kan: "Kannada",
+    kn: "Kannada",
+    kannada: "Kannada",
+    ben: "Bengali",
+    bn: "Bengali",
+    bengali: "Bengali",
+    bangla: "Bengali",
+    mar: "Marathi",
+    mr: "Marathi",
+    marathi: "Marathi",
+    guj: "Gujarati",
+    gu: "Gujarati",
+    gujarati: "Gujarati",
+    pan: "Punjabi",
+    pa: "Punjabi",
+    punjabi: "Punjabi",
+    urd: "Urdu",
+    ur: "Urdu",
+    urdu: "Urdu",
+    ori: "Odia",
+    or: "Odia",
+    odia: "Odia",
+    oriya: "Odia",
+    asm: "Assamese",
+    as: "Assamese",
+    assamese: "Assamese",
+    bho: "Bhojpuri",
+    bhojpuri: "Bhojpuri",
+    san: "Sanskrit",
+    sa: "Sanskrit",
+    sanskrit: "Sanskrit",
+    nep: "Nepali",
+    ne: "Nepali",
+    nepali: "Nepali",
+    sin: "Sinhala",
+    si: "Sinhala",
+    sinhala: "Sinhala",
+
+    // Major International languages
+    eng: "English",
+    en: "English",
+    english: "English",
+    spa: "Spanish",
+    es: "Spanish",
+    spanish: "Spanish",
+    español: "Spanish",
+    espanol: "Spanish",
+    fra: "French",
+    fre: "French",
+    fr: "French",
+    french: "French",
+    français: "French",
+    francais: "French",
+    ger: "German",
+    deu: "German",
+    de: "German",
+    german: "German",
+    deutsch: "German",
+    ita: "Italian",
+    it: "Italian",
+    italian: "Italian",
+    italiano: "Italian",
+    por: "Portuguese",
+    pt: "Portuguese",
+    portuguese: "Portuguese",
+    português: "Portuguese",
+    portugues: "Portuguese",
+    rus: "Russian",
+    ru: "Russian",
+    russian: "Russian",
+    русский: "Russian",
+    jpn: "Japanese",
+    ja: "Japanese",
+    japanese: "Japanese",
+    日本語: "Japanese",
+    kor: "Korean",
+    ko: "Korean",
+    korean: "Korean",
+    한국어: "Korean",
+    chi: "Chinese",
+    zho: "Chinese",
+    zh: "Chinese",
+    chinese: "Chinese",
+    mandarin: "Chinese",
+    cantonese: "Cantonese",
+    yue: "Cantonese",
+    中文: "Chinese",
+    ara: "Arabic",
+    ar: "Arabic",
+    arabic: "Arabic",
+    العربية: "Arabic",
+    tur: "Turkish",
+    tr: "Turkish",
+    turkish: "Turkish",
+    türkçe: "Turkish",
+    vie: "Vietnamese",
+    vi: "Vietnamese",
+    vietnamese: "Vietnamese",
+    tha: "Thai",
+    th: "Thai",
+    thai: "Thai",
+    ไทย: "Thai",
+    ind: "Indonesian",
+    id: "Indonesian",
+    indonesian: "Indonesian",
+    msa: "Malay",
+    ms: "Malay",
+    malay: "Malay",
+    fil: "Filipino",
+    tl: "Filipino",
+    tgl: "Filipino",
+    filipino: "Filipino",
+    tagalog: "Filipino",
+    fas: "Persian",
+    per: "Persian",
+    fa: "Persian",
+    persian: "Persian",
+    farsi: "Persian",
+    pol: "Polish",
+    pl: "Polish",
+    polish: "Polish",
+    polski: "Polish",
+    nld: "Dutch",
+    dut: "Dutch",
+    nl: "Dutch",
+    dutch: "Dutch",
+    nederlands: "Dutch",
+    swe: "Swedish",
+    sv: "Swedish",
+    swedish: "Swedish",
+    svenska: "Swedish",
+    nor: "Norwegian",
+    no: "Norwegian",
+    norwegian: "Norwegian",
+    norsk: "Norwegian",
+    dan: "Danish",
+    da: "Danish",
+    danish: "Danish",
+    dansk: "Danish",
+    fin: "Finnish",
+    fi: "Finnish",
+    finnish: "Finnish",
+    suomi: "Finnish",
+    gre: "Greek",
+    ell: "Greek",
+    el: "Greek",
+    greek: "Greek",
+    heb: "Hebrew",
+    he: "Hebrew",
+    hebrew: "Hebrew",
+    cze: "Czech",
+    ces: "Czech",
+    cs: "Czech",
+    czech: "Czech",
+    hun: "Hungarian",
+    hu: "Hungarian",
+    hungarian: "Hungarian",
+    ron: "Romanian",
+    rum: "Romanian",
+    ro: "Romanian",
+    romanian: "Romanian",
+    ukr: "Ukrainian",
+    uk: "Ukrainian",
+    ukrainian: "Ukrainian",
   };
 
-  if (CODE_MAP[clean]) {
-    return CODE_MAP[clean];
-  }
+  let fullName = FULL_NAME_MAP[lower];
 
-  // Check prefix match (e.g. "Hindi [Original]", "Telugu - 5.1", "Tamil Audio")
-  for (const [key, val] of Object.entries(CODE_MAP)) {
-    if (key.length >= 3 && clean.startsWith(key)) {
-      return val;
+  if (!fullName) {
+    // Check prefix match
+    for (const [key, val] of Object.entries(FULL_NAME_MAP)) {
+      if (key.length >= 3 && lower.startsWith(key)) {
+        fullName = val;
+        break;
+      }
     }
   }
 
-  // Fallback: 3 letters capitalized (e.g. "Croatian" -> "Cro")
-  const lettersOnly = lang.replace(/[^a-zA-Z]/g, "");
-  if (lettersOnly.length >= 3) {
-    return lettersOnly.slice(0, 3).charAt(0).toUpperCase() + lettersOnly.slice(1, 3).toLowerCase();
-  } else if (lettersOnly.length > 0) {
-    return lettersOnly.toUpperCase();
+  if (!fullName) {
+    fullName = clean.charAt(0).toUpperCase() + clean.slice(1);
   }
 
-  return "Audio";
+  // If the language name is too long (> 8 characters), truncate with ellipsis
+  if (fullName.length > 8) {
+    return fullName.slice(0, 8) + "...";
+  }
+
+  return fullName;
+}
+
+/**
+ * Backward compatibility export
+ */
+export function getLanguageShortCode(lang?: string): string {
+  return formatAudioLanguageLabel(lang);
+}
+
+export interface ParsedHeaderTitle {
+  isSeriesEpisode: boolean;
+  isSeasonOnly: boolean;
+  seriesName: string;
+  seasonEpisodeTag?: string; // e.g. "S1E1" or "Season 1"
+  episodeTitle?: string;
+  cleanFullTitle: string;
+}
+
+/**
+ * Parses and cleans nativePlayer title:
+ * - Strips quality labels (- 720p, - 480p HEVC, etc.)
+ * - Extracts Series Title, S1E1, and Episode Title for styled rendering
+ * - Formats full season MKVs as "Series Title - Season X"
+ */
+export function parsePlayerHeaderTitle(
+  rawTitle?: string,
+  seasonInfo?: { number?: number; seasonNumber?: number; title?: string },
+  episodeInfo?: { number?: number; episodeNumber?: number; title?: string }
+): ParsedHeaderTitle {
+  let titleStr = (rawTitle || "").trim();
+
+  // Strip quality suffixes (e.g. " - 720p", " - 480p HEVC", " - 1080p", " 4K", etc.)
+  titleStr = titleStr
+    .replace(/\s*[-–—|•]?\s*\b(\d{3,4}p(?:\s*hevc)?|4k(?:\s*hevc)?|2160p|1080p|720p|480p|hevc|hdrip|webrip|web-dl|bluray|dvdrip|remux)\b.*$/i, "")
+    .trim();
+
+  const sNum = seasonInfo?.number ?? seasonInfo?.seasonNumber;
+  const eNum = episodeInfo?.number ?? episodeInfo?.episodeNumber;
+
+  // Case A: Series episode (detected by SxxExx in title or passed in props)
+  const epMatch = titleStr.match(/^(.*?)\s*[-–—]?\s*\bS(\d{1,2})\s*E(\d{1,2})\b(?:\s*:\s*(.*)|\s*[-–—]\s*(.*)|(.*))?$/i);
+  if (epMatch || (sNum !== undefined && eNum !== undefined)) {
+    const s = sNum !== undefined ? sNum : parseInt(epMatch![2], 10);
+    const e = eNum !== undefined ? eNum : parseInt(epMatch![3], 10);
+    let seriesName = epMatch ? epMatch[1].trim() : titleStr;
+    seriesName = seriesName.replace(/\s*[-–—:]\s*$/, "").trim();
+
+    let epName = episodeInfo?.title || (epMatch ? (epMatch[4] || epMatch[5] || epMatch[6] || "") : "");
+    epName = epName
+      .replace(/^[:\s\-–—]+/, "")
+      .replace(/\s*[-–—|•]?\s*\b(\d{3,4}p(?:\s*hevc)?|4k|hevc).*/i, "")
+      .trim();
+
+    return {
+      isSeriesEpisode: true,
+      isSeasonOnly: false,
+      seriesName: seriesName || "Series",
+      seasonEpisodeTag: `S${s}E${e}`,
+      episodeTitle: epName,
+      cleanFullTitle: epName ? `${seriesName} - S${s}E${e}: ${epName}` : `${seriesName} - S${s}E${e}`,
+    };
+  }
+
+  // Case B: Season-only pack (e.g. "Ishqa Ishqa Season 1 - 480p HEVC")
+  const seasMatch = titleStr.match(/^(.*?)\s*[-–—]?\s*\b(?:Season\s*(\d{1,2})|S(\d{1,2}))\b(?:\s*[-–—]?\s*(.*))?$/i);
+  if (seasMatch || (sNum !== undefined && eNum === undefined)) {
+    const s = sNum !== undefined ? sNum : parseInt(seasMatch![2] || seasMatch![3], 10);
+    let seriesName = seasMatch ? seasMatch[1].trim() : titleStr;
+    seriesName = seriesName.replace(/\s*[-–—:]\s*$/, "").trim();
+
+    return {
+      isSeriesEpisode: false,
+      isSeasonOnly: true,
+      seriesName: seriesName || "Series",
+      seasonEpisodeTag: `Season ${s}`,
+      cleanFullTitle: `${seriesName} - Season ${s}`,
+    };
+  }
+
+  // Case C: Movie / Generic
+  return {
+    isSeriesEpisode: false,
+    isSeasonOnly: false,
+    seriesName: titleStr,
+    cleanFullTitle: titleStr,
+  };
 }
 
 /**
@@ -653,7 +752,10 @@ export function NativePlayer({
   }, [activeServer, fslCandidate, pixeldrainCandidate, activeStreamUrl, decodedMeta, activeWatchUrl]);
 
   const directStreamUrl = normalizePixeldrainUrl(rawStreamUrl);
-  const displayTitle = decodedMeta.title || title;
+  const parsedHeaderTitle = useMemo(() => {
+    return parsePlayerHeaderTitle(decodedMeta.title || title, seasonInfo, episodeInfo);
+  }, [decodedMeta.title, title, seasonInfo, episodeInfo]);
+  const displayTitle = parsedHeaderTitle.cleanFullTitle;
 
   // Extract concise clean quality label (e.g. "480P", "720P", "1080P", "4K")
   const currentQualityLabel = useMemo(() => {
@@ -1724,7 +1826,7 @@ export function NativePlayer({
       }
       setSelectedAudioTrack(trackId);
       setActiveMenu(null);
-      showToast(`Audio: ${track?.language || "Track " + (trackId + 1)}`);
+      showToast(`Audio: ${formatAudioLanguageLabel(track?.language) || "Track " + (trackId + 1)}`);
       return;
     }
 
@@ -1743,7 +1845,7 @@ export function NativePlayer({
     }
     setSelectedAudioTrack(trackId);
     setActiveMenu(null);
-    showToast(`Audio: ${track?.language || "Track " + (trackId + 1)}`);
+    showToast(`Audio: ${formatAudioLanguageLabel(track?.language) || "Track " + (trackId + 1)}`);
   };
 
   const handleSubtitleSelect = (subId: number | null) => {
@@ -2146,20 +2248,28 @@ export function NativePlayer({
           >
             {/* Title & Metadata (Unified from PlayerFU embed-chrome) */}
             <div className="flex flex-col gap-0.5 max-w-[80%] sm:max-w-[85%]">
-              <h2 className="text-sm sm:text-base md:text-lg font-bold text-white tracking-tight drop-shadow-md truncate">
-                {displayTitle}
-              </h2>
+              {parsedHeaderTitle.isSeriesEpisode ? (
+                <h2 className="text-sm sm:text-base md:text-lg font-bold text-white tracking-tight drop-shadow-md truncate">
+                  <span>{parsedHeaderTitle.seriesName} - </span>
+                  <span className="text-emerald-400 font-extrabold">{parsedHeaderTitle.seasonEpisodeTag}</span>
+                  {parsedHeaderTitle.episodeTitle && <span>: {parsedHeaderTitle.episodeTitle}</span>}
+                </h2>
+              ) : parsedHeaderTitle.isSeasonOnly ? (
+                <h2 className="text-sm sm:text-base md:text-lg font-bold text-white tracking-tight drop-shadow-md truncate">
+                  <span>{parsedHeaderTitle.seriesName} - </span>
+                  <span className="text-emerald-400 font-extrabold">{parsedHeaderTitle.seasonEpisodeTag}</span>
+                </h2>
+              ) : (
+                <h2 className="text-sm sm:text-base md:text-lg font-bold text-white tracking-tight drop-shadow-md truncate">
+                  {parsedHeaderTitle.cleanFullTitle}
+                </h2>
+              )}
               <div className="flex items-center gap-2 text-[11px] sm:text-xs text-zinc-300 font-medium flex-wrap">
                 {year && <span>{year}</span>}
                 {totalDuration > 0 && <span>• {formatTime(totalDuration)}</span>}
-                {seasonInfo && episodeInfo && (
-                  <span className="text-emerald-400 font-bold">
-                    • S{seasonInfo.number ?? (seasonInfo as any).seasonNumber}E{episodeInfo.number ?? (episodeInfo as any).episodeNumber}
-                  </span>
-                )}
                 {mediaInfo?.audioTracks && mediaInfo.audioTracks.length > 0 && (
                   <span className="text-zinc-400 font-normal">
-                    • {mediaInfo.audioTracks.map((a: any) => a.language).filter(Boolean).join(", ")}
+                    • {mediaInfo.audioTracks.map((a: any) => formatAudioLanguageLabel(a.language)).filter(Boolean).join(", ")}
                   </span>
                 )}
               </div>
@@ -2405,8 +2515,8 @@ export function NativePlayer({
                       aria-label={t("Audio Language")}
                     >
                       <Mic className="w-3.5 h-3.5 text-emerald-400" />
-                      <span className="max-w-[70px] truncate">
-                        {getLanguageShortCode(mediaInfo?.audioTracks?.find((a) => a.id === selectedAudioTrack)?.language)}
+                      <span className="max-w-[95px] truncate">
+                        {formatAudioLanguageLabel(mediaInfo?.audioTracks?.find((a) => a.id === selectedAudioTrack)?.language)}
                       </span>
                     </button>
                   )}
@@ -2566,7 +2676,7 @@ export function NativePlayer({
                             }`}
                           >
                             <div className="flex items-center gap-1.5 truncate min-w-0">
-                              <span className="font-bold truncate">{tr.language}</span>
+                              <span className="font-bold truncate">{formatAudioLanguageLabel(tr.language)}</span>
                               <span className={`text-[11px] font-normal uppercase shrink-0 ${
                                 selectedAudioTrack === tr.id ? "text-emerald-300/80" : "text-zinc-400"
                               }`}>
