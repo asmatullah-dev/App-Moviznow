@@ -1,7 +1,7 @@
 import express from "express";
 import { Readable } from "stream";
 import { spawn } from "child_process";
-import { getCachedHubcloudData, isExtractableIntermediate, performExtraction } from "./_LinkExtractionModal.js";
+import { getCachedHubcloudData, setCachedHubcloudData, isExtractableIntermediate, performExtraction } from "./_LinkExtractionModal.js";
 import { normalizeDomain } from "./_domainUtils.js";
 
 export const nativePlayerRouter = express.Router();
@@ -406,18 +406,19 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
             candidates: data.candidates,
           };
           checkCache.set(url, { data: result, timestamp: Date.now() });
+          try {
+            setCachedHubcloudData(url, data);
+          } catch {}
           return res.json(result);
         }
       }
     } catch {}
 
     const noResult: NativeStreamData = { hasWatchOnline: false, playable: false };
-    // Only cache transient failure for 5 seconds so retries or subsequent links are never blocked
-    checkCache.set(url, { data: noResult, timestamp: Date.now() - (CHECK_CACHE_TTL - 5000) });
     return res.json(noResult);
   } catch (err: any) {
-    console.error("[NativePlayer Check Error]:", err);
-    return res.status(500).json({ error: "Failed to check watch link", hasWatchOnline: false });
+    console.warn("[NativePlayer Check Error]:", err?.message || err);
+    return res.json({ ok: false, hasWatchOnline: false, playable: false, error: "Failed to check watch link" });
   }
 });
 
@@ -550,7 +551,10 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       height: 1080,
       isMkv,
       audioTracks: [{ id: 0, language: "Stereo", codec: "aac", title: "Audio Track" }],
-      subtitleTracks: [],
+      subtitleTracks: [
+        { id: 0, language: "English", title: "English" },
+        { id: 1, language: "Hindi", title: "Hindi" },
+      ],
       needsTranscode,
       playable: true,
     };
@@ -577,6 +581,8 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       "-print_format", "json",
       "-show_format",
       "-show_streams",
+      "-analyzeduration", "15M",
+      "-probesize", "15M",
       "-headers", headerStr,
       targetUrl,
     ];
@@ -614,7 +620,7 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
 
     probeTimeout = setTimeout(() => {
       finishProbe(defaultData);
-    }, 5000);
+    }, 12000);
 
     child.stdout.on("data", (d: any) => {
       output += d.toString();
@@ -692,7 +698,10 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
           height: videoStream?.height || 720,
           isMkv,
           audioTracks: audioTracks.length > 0 ? audioTracks : [{ id: 0, language: "Stereo", codec: "aac", title: "Audio" }],
-          subtitleTracks,
+          subtitleTracks: subtitleTracks.length > 0 ? subtitleTracks : [
+            { id: 0, language: "English", title: "English" },
+            { id: 1, language: "Hindi", title: "Hindi" },
+          ],
           needsTranscode,
           playable: true,
         };
@@ -738,43 +747,150 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
 });
 
 /**
- * Parse raw WebVTT content into structured time-coded cues
+ * Parse raw WebVTT or SRT content into structured time-coded cues
  */
 function parseWebVTT(vttText: string): Array<{ start: number; end: number; text: string }> {
   const cues: Array<{ start: number; end: number; text: string }> = [];
   if (!vttText || typeof vttText !== "string") return cues;
+
+  const parseTime = (str: string): number => {
+    if (!str) return 0;
+    const parts = str.trim().replace(",", ".").split(":");
+    if (parts.length === 3) {
+      return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
+    } else if (parts.length === 2) {
+      return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+    }
+    return parseFloat(str) || 0;
+  };
+
   const lines = vttText.split(/\r?\n/);
   let i = 0;
-  const timeRegex = /(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})/;
 
   while (i < lines.length) {
     const line = lines[i].trim();
-    const match = line.match(timeRegex);
-    if (match) {
-      const h1 = parseInt(match[1] || "0", 10);
-      const m1 = parseInt(match[2], 10);
-      const s1 = parseInt(match[3], 10);
-      const ms1 = parseInt(match[4], 10);
-      const start = h1 * 3600 + m1 * 60 + s1 + ms1 / 1000;
+    if (line.includes("-->")) {
+      const parts = line.split("-->");
+      if (parts.length >= 2) {
+        const startStr = parts[0].trim().split(/\s+/)[0];
+        const endStr = parts[1].trim().split(/\s+/)[0];
+        const start = parseTime(startStr);
+        const end = parseTime(endStr);
 
-      const h2 = parseInt(match[5] || "0", 10);
-      const m2 = parseInt(match[6], 10);
-      const s2 = parseInt(match[7], 10);
-      const ms2 = parseInt(match[8], 10);
-      const end = h2 * 3600 + m2 * 60 + s2 + ms2 / 1000;
-
-      i++;
-      const textLines: string[] = [];
-      while (i < lines.length && lines[i].trim() !== "") {
-        textLines.push(lines[i].trim());
+        i++;
+        const textLines: string[] = [];
+        while (i < lines.length && lines[i].trim() !== "") {
+          const rawL = lines[i].trim();
+          // Clean ASS/SSA tags like {\an8} and formatting tags
+          const cleanL = rawL.replace(/\{[^}]*\}/g, "").replace(/<[^>]+>/g, "").trim();
+          if (cleanL) textLines.push(cleanL);
+          i++;
+        }
+        if (textLines.length > 0 && end > start) {
+          cues.push({ start, end, text: textLines.join("\n") });
+        }
+      } else {
         i++;
       }
-      cues.push({ start, end, text: textLines.join("\n") });
     } else {
       i++;
     }
   }
   return cues;
+}
+
+async function fetchOnlineSubtitles(rawTitle: string, lang = "eng"): Promise<Array<{ start: number; end: number; text: string }>> {
+  if (!rawTitle) return [];
+  try {
+    let titleStr = rawTitle.trim();
+    // 1. Detect season and episode if present (e.g. S01E02, Season 1 Episode 2)
+    let season: number | undefined;
+    let episode: number | undefined;
+    const seMatch = titleStr.match(/\bS(\d{1,2})\s*E(\d{1,2})\b/i) || titleStr.match(/\bSeason\s*(\d{1,2})\s*Episode\s*(\d{1,2})\b/i);
+    if (seMatch) {
+      season = parseInt(seMatch[1], 10);
+      episode = parseInt(seMatch[2], 10);
+      titleStr = titleStr.slice(0, seMatch.index);
+    }
+
+    // 2. Strip brackets, release groups, codecs, resolutions
+    let clean = titleStr
+      .replace(/\[[^\]]*\]/g, " ")
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/\{[^}]*\}/g, " ")
+      .replace(/\b(480p|720p|1080p|2160p|4k|uhd|fhd|hevc|x264|x265|h264|h265|aac|dts|bluray|web-dl|webrip|hdrip|dvdrip|remux|moviznow|yts|yify|proper|repack|hindi|tamil|telugu|multi|dual\s*audio)\b/gi, " ")
+      .replace(/[\._\-+]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (!clean) clean = rawTitle.slice(0, 30).trim();
+
+    // 3. Search Cinemeta movies first, then series
+    let imdbId = "";
+    let isSeries = season !== undefined && episode !== undefined;
+
+    const movieSearch = await fetch(`https://v3-cinemeta.strem.io/catalog/movie/top/search=${encodeURIComponent(clean)}.json`, {
+      signal: AbortSignal.timeout(4000)
+    }).catch(() => null);
+
+    if (movieSearch && movieSearch.ok) {
+      const data: any = await movieSearch.json();
+      if (data?.metas?.[0]) {
+        imdbId = data.metas[0].imdb_id || data.metas[0].id;
+      }
+    }
+
+    if (!imdbId) {
+      const seriesSearch = await fetch(`https://v3-cinemeta.strem.io/catalog/series/top/search=${encodeURIComponent(clean)}.json`, {
+        signal: AbortSignal.timeout(4000)
+      }).catch(() => null);
+
+      if (seriesSearch && seriesSearch.ok) {
+        const data: any = await seriesSearch.json();
+        if (data?.metas?.[0]) {
+          imdbId = data.metas[0].imdb_id || data.metas[0].id;
+          isSeries = true;
+        }
+      }
+    }
+
+    if (!imdbId) return [];
+
+    // 4. Query OpenSubtitles Stremio add-on
+    const subQueryUrl = isSeries && season !== undefined && episode !== undefined
+      ? `https://opensubtitles-v3.strem.io/subtitles/series/${imdbId}:${season}:${episode}.json`
+      : `https://opensubtitles-v3.strem.io/subtitles/movie/${imdbId}.json`;
+
+    const subRes = await fetch(subQueryUrl, {
+      signal: AbortSignal.timeout(4000)
+    }).catch(() => null);
+
+    if (!subRes || !subRes.ok) return [];
+    const subData: any = await subRes.json();
+    const subs = subData?.subtitles || [];
+    if (!Array.isArray(subs) || subs.length === 0) return [];
+
+    const targetLang = lang.toLowerCase();
+    const match = subs.find((s: any) => {
+      const l = (s.lang || "").toLowerCase();
+      if (targetLang.includes("hin") || targetLang === "hi") return l === "hin" || l === "hi";
+      if (targetLang.includes("tam") || targetLang === "ta") return l === "tam" || l === "ta";
+      if (targetLang.includes("tel") || targetLang === "te") return l === "tel" || l === "te";
+      if (targetLang.includes("spa") || targetLang === "es") return l === "spa" || l === "es";
+      return l === "eng" || l === "en";
+    }) || subs.find((s: any) => (s.lang || "").toLowerCase().includes("eng")) || subs[0];
+
+    if (match && match.url) {
+      const vttRes = await fetch(match.url, { signal: AbortSignal.timeout(5000) }).catch(() => null);
+      if (vttRes && vttRes.ok) {
+        const text = await vttRes.text();
+        return parseWebVTT(text);
+      }
+    }
+  } catch (e) {
+    console.warn("[fetchOnlineSubtitles error]:", e);
+  }
+  return [];
 }
 
 const subtitleCuesCache = new Map<string, { cues: Array<{ start: number; end: number; text: string }>; timestamp: number }>();
@@ -790,16 +906,38 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
     }
     const targetUrl = normalizePixeldrainUrl(rawTarget) || rawTarget;
 
-    const hasFFmpeg = await checkFFmpegAvailable();
-    if (!hasFFmpeg) {
-      return res.json({ ok: true, cues: [] });
-    }
-
+    const titleQuery = ((req.query.title as string) || "").trim();
+    const langQuery = ((req.query.lang as string) || "eng").trim();
     const subIdx = parseInt((req.query.sub as string) || "0", 10) || 0;
-    const cacheKey = `${targetUrl}_sub_${subIdx}`;
+    const cacheKey = `${targetUrl}_sub_${subIdx}_${langQuery}_${titleQuery}`;
     const cached = subtitleCuesCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < 30 * 60 * 1000) {
       return res.json({ ok: true, cues: cached.cues });
+    }
+
+    // Check cached probe info to see if this stream actually contains embedded subtitle streams
+    const cachedProbe = infoCache.get(targetUrl)?.data;
+    const hasEmbeddedSubtitles = Boolean(
+      cachedProbe &&
+      Array.isArray(cachedProbe.subtitleTracks) &&
+      cachedProbe.subtitleTracks.length > subIdx &&
+      // If probe was default placeholder, don't treat as embedded stream
+      !cachedProbe.subtitleTracks[0]?.title?.includes("Online")
+    );
+
+    // If no embedded subtitles exist in the stream, fetch online subtitles immediately (sub-second response!)
+    if (!hasEmbeddedSubtitles) {
+      const onlineCues = titleQuery ? await fetchOnlineSubtitles(titleQuery, langQuery) : [];
+      if (onlineCues.length > 0) {
+        subtitleCuesCache.set(cacheKey, { cues: onlineCues, timestamp: Date.now() });
+      }
+      return res.json({ ok: onlineCues.length > 0, cues: onlineCues });
+    }
+
+    const hasFFmpeg = await checkFFmpegAvailable();
+    if (!hasFFmpeg) {
+      const cues = titleQuery ? await fetchOnlineSubtitles(titleQuery, langQuery) : [];
+      return res.json({ ok: cues.length > 0, cues });
     }
 
     let referer = "";
@@ -814,9 +952,15 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
     const ffmpegArgs: string[] = [
       "-headers",
       subHeaders,
+      "-analyzeduration", "10M",
+      "-probesize", "10M",
+      "-reconnect", "1",
+      "-reconnect_streamed", "1",
+      "-reconnect_delay_max", "5",
       "-i", targetUrl,
       "-vn", "-an",
-      "-map", `0:s:${subIdx}`,
+      "-map", `0:s:${subIdx}?`,
+      "-c:s", "webvtt",
       "-f", "webvtt",
       "pipe:1"
     ];
@@ -827,30 +971,39 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
         stdio: ["ignore", "pipe", "ignore"],
       });
     } catch {
-      return res.json({ ok: false, cues: [] });
+      const cues = titleQuery ? await fetchOnlineSubtitles(titleQuery, langQuery) : [];
+      return res.json({ ok: cues.length > 0, cues });
     }
 
     let vttText = "";
+    let responded = false;
+
     child.stdout.on("data", (chunk: any) => {
       vttText += chunk.toString();
     });
 
-    child.on("close", () => {
-      const cues = parseWebVTT(vttText);
-      subtitleCuesCache.set(cacheKey, { cues, timestamp: Date.now() });
-      return res.json({ ok: true, cues });
-    });
-
-    child.on("error", (err: any) => {
-      console.warn("[FFmpeg subtitle extraction error]:", err);
-      return res.json({ ok: false, cues: [] });
-    });
-
-    setTimeout(() => {
+    const sendResponse = async () => {
+      if (responded) return;
+      responded = true;
       try {
         child.kill("SIGKILL");
       } catch {}
-    }, 20000);
+
+      let cues = parseWebVTT(vttText);
+      if (cues.length === 0 && titleQuery) {
+        cues = await fetchOnlineSubtitles(titleQuery, langQuery);
+      }
+      subtitleCuesCache.set(cacheKey, { cues, timestamp: Date.now() });
+      return res.json({ ok: cues.length > 0, cues });
+    };
+
+    child.on("close", sendResponse);
+    child.on("error", sendResponse);
+
+    // Fast 5-second timeout for embedded subtitle probe
+    setTimeout(() => {
+      sendResponse();
+    }, 5000);
   } catch (err: any) {
     return res.status(500).json({ error: err.message, cues: [] });
   }
@@ -1168,6 +1321,11 @@ nativePlayerRouter.all(
         const ffmpegArgs: string[] = [
           "-headers",
           `${referer}User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`,
+          "-analyzeduration", "15M",
+          "-probesize", "15M",
+          "-reconnect", "1",
+          "-reconnect_streamed", "1",
+          "-reconnect_delay_max", "5",
         ];
 
         // Instant seeking support with fast input seek
@@ -1218,6 +1376,8 @@ nativePlayerRouter.all(
 
         ffmpegArgs.push(
           "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+          "-frag_duration", "1000000",
+          "-max_muxing_queue_size", "1024",
           "-flush_packets", "1",
           "-f", "mp4",
           "pipe:1"

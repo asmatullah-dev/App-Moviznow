@@ -10,7 +10,7 @@ import {
 import { Helmet } from "react-helmet-async";
 
 import { canManageContent, canUserStreamContent, canUserUseAiTranslation } from "../../utils/roleUtils";
-import { normalizeContentUrl, getCachedLinkExtraction, saveCachedLinkExtraction } from "../../utils/linkUtils";
+import { normalizeContentUrl, getCachedLinkExtraction, saveCachedLinkExtraction, unifiedExtractStream, CachedExtractionResult } from "../../utils/linkUtils";
 import { getStaticContentById } from "../../utils/staticContentLoader";
 import { GuestAccessBanner } from "../../components/GuestAccessBanner";
 import { Content, QualityLinks, Season, Trailer } from "../../types";
@@ -988,79 +988,77 @@ export default function MovieDetails() {
       return;
     }
 
-    if (!targetHcLink) {
-      // Direct stream fallback
-      const directVideoLink = links.find(
-        (l) => l.url && (l.url.includes(".mp4") || l.url.includes(".mkv") || l.url.includes("workers.dev"))
-      );
-      if (directVideoLink) {
-        const streamUrl = normalizePixeldrainUrl(directVideoLink.url);
-        setActiveNativePlayerConfig({
-          watchUrl: directVideoLink.url,
-          streamUrl,
-          title: mergedContent.title,
-          quality: directVideoLink.name || "HD",
-          contentId: mergedContent.id,
-          poster: mergedContent.posterUrl || mergedContent.backdropUrl,
-          year: mergedContent.year,
-          candidates: [{ text: directVideoLink.name || "Direct Stream", href: streamUrl }],
-          availableQualities: links,
-        });
-        setIsNativePlayerOpen(true);
-        return;
-      }
+    // Sort links: user's preferred quality first, then remaining hcLinks
+    const sortedHc = targetHcLink
+      ? [targetHcLink, ...hcLinks.filter((l) => l.url !== targetHcLink.url)]
+      : hcLinks;
 
-      setAlertConfig({
-        isOpen: true,
-        title: t("No Stream Available"),
-        message: t("No Hubcloud or Pixeldrain stream links found for this movie."),
-      });
-      return;
-    }
-
-    // Spin loader and extract target HubCloud link
+    // Spin loader and show "Loading" on button
     setIsExtractingNativeMovie(true);
     try {
-      const apiBase = getStreamingApiBase();
-      const doCheck = async (base: string) => {
-        const res = await fetch(`${base}/api/native-player/check`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: targetHcLink.url.trim() }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      };
+      let extractedResult: CachedExtractionResult | null = null;
+      let chosenLink: any = null;
 
-      let checkData: any = null;
-      try {
-        checkData = await doCheck(apiBase);
-      } catch (e) {
-        if (apiBase) {
-          checkData = await doCheck("");
-        } else {
-          throw e;
+      // Try HubCloud links in order of quality; if one extraction fails, immediately try the other links!
+      for (const link of sortedHc) {
+        try {
+          const res = await unifiedExtractStream(link.url);
+          if (res && (res.streamUrl || res.url || (res.candidates && res.candidates.length > 0))) {
+            extractedResult = res;
+            chosenLink = link;
+            break;
+          }
+        } catch (e) {
+          console.warn(`Extraction failed for ${link.name || link.url}, trying next link...`, e);
         }
       }
 
-      if (checkData) {
-        const candidates = Array.isArray(checkData.candidates) ? checkData.candidates : [];
+      // If all HubCloud links failed or none existed, try Pixeldrain links
+      if (!extractedResult && pdLinks.length > 0) {
+        const preferredPd = findBestQualityLink(pdLinks, savedQuality) || pdLinks[0];
+        const sortedPd = [preferredPd, ...pdLinks.filter((l) => l.url !== preferredPd.url)];
+        for (const link of sortedPd) {
+          try {
+            const res = await unifiedExtractStream(link.url);
+            if (res) {
+              extractedResult = res;
+              chosenLink = link;
+              break;
+            }
+          } catch (e) {
+            console.warn(`Pixeldrain fallback failed for ${link.url}`, e);
+          }
+        }
+      }
+
+      // If still no extracted result, check direct video links (.mp4, .mkv, workers.dev)
+      if (!extractedResult) {
+        const directVideoLinks = links.filter(
+          (l) => l.url && (l.url.includes(".mp4") || l.url.includes(".mkv") || l.url.includes("workers.dev"))
+        );
+        for (const link of directVideoLinks) {
+          try {
+            const res = await unifiedExtractStream(link.url);
+            if (res) {
+              extractedResult = res;
+              chosenLink = link;
+              break;
+            }
+          } catch {}
+        }
+      }
+
+      if (extractedResult && chosenLink) {
+        const candidates = extractedResult.candidates || [];
         const fsl = findFslCandidate(candidates);
         const pixel = findPixeldrainCandidate(candidates);
-        const watch = findWatchOnlineCandidate(candidates);
-
-        // Priority:
-        // Use FSL server to play video, if FSL fails to play in 15 seconds change to Pixeldrain,
-        // and also use Pixeldrain if FSL server is not available!
-        const chosen = fsl || pixel || watch;
-        const rawStream = fsl ? fsl.href : (pixel ? pixel.streamUrl : (chosen ? chosen.href : checkData.streamUrl));
-        const streamUrl = normalizePixeldrainUrl(rawStream);
+        const streamUrl = normalizePixeldrainUrl(extractedResult.streamUrl || extractedResult.url);
 
         setActiveNativePlayerConfig({
-          watchUrl: checkData.watchUrl || targetHcLink.url,
+          watchUrl: extractedResult.watchUrl || chosenLink.url,
           streamUrl: streamUrl,
           title: mergedContent.title,
-          quality: targetHcLink.name || checkData.quality || "720p",
+          quality: chosenLink.name || extractedResult.quality || "720p",
           contentId: mergedContent.id,
           poster: mergedContent.posterUrl || mergedContent.backdropUrl,
           year: mergedContent.year,
@@ -1073,11 +1071,15 @@ export default function MovieDetails() {
           logEvent("link_click", profile.uid, {
             contentId: mergedContent.id,
             contentTitle: mergedContent.title,
-            linkName: `Native Player - ${fsl ? "FSL Server" : pixel ? "Pixeldrain Server" : "Watch Online"} - ${targetHcLink.name || "720p"}`,
+            linkName: `Native Player - ${fsl ? "FSL Server" : pixel ? "Pixeldrain Server" : "Watch Online"} - ${chosenLink.name || "720p"}`,
           });
         }
       } else {
-        throw new Error("No data returned from extraction");
+        setAlertConfig({
+          isOpen: true,
+          title: t("Playback Error"),
+          message: t("Failed to extract video stream. Please try selecting a link from the links section below."),
+        });
       }
     } catch (err: any) {
       console.error("[Native Movie Play extraction failed]:", err);
@@ -3388,7 +3390,7 @@ export default function MovieDetails() {
                     {isExtractingNativeMovie ? (
                       <>
                         <Loader2 className="w-5 h-5 animate-spin text-white" />
-                        <span>{t('Extracting Stream...')}</span>
+                        <span>{t('Loading')}</span>
                       </>
                     ) : (
                       <>

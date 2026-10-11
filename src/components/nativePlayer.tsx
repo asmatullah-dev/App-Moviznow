@@ -20,6 +20,7 @@ import {
   Layers,
   Subtitles,
   Mic,
+  Gauge,
   RefreshCw,
   Server,
 } from "lucide-react";
@@ -28,6 +29,7 @@ import { safeStorage } from "../utils/safeStorage";
 import { useModalBehavior } from "../hooks/useModalBehavior";
 import { getStreamingApiBase } from "../utils/domains";
 export { getStreamingApiBase };
+import { getCachedLinkExtraction, unifiedExtractStream } from "../utils/linkUtils";
 import {
   getPlaybackProgressKey,
   getSavedProgress,
@@ -117,6 +119,222 @@ function formatTime(seconds: number): string {
     return `${h}:${m < 10 ? "0" : ""}${m}:${s < 10 ? "0" : ""}${s}`;
   }
   return `${m}:${s < 10 ? "0" : ""}${s}`;
+}
+
+/**
+ * Standard 3-letter language code mapping for the nativePlayer audio button.
+ * Converts full language names into standard ISO 639-2 short codes:
+ * Hin for Hindi, Tam for Tamil, Tel for Telugu, Eng for English, etc.
+ */
+export function getLanguageShortCode(lang?: string): string {
+  if (!lang || typeof lang !== "string") return "Audio";
+  const clean = lang.trim().toLowerCase();
+  if (!clean || clean === "default" || clean === "unknown" || clean === "none") {
+    return "Audio";
+  }
+
+  const CODE_MAP: Record<string, string> = {
+    // Primary Indian languages
+    hindi: "Hin",
+    hin: "Hin",
+    hi: "Hin",
+    tamil: "Tam",
+    tam: "Tam",
+    ta: "Tam",
+    telugu: "Tel",
+    tel: "Tel",
+    te: "Tel",
+    malayalam: "Mal",
+    mal: "Mal",
+    ml: "Mal",
+    kannada: "Kan",
+    kan: "Kan",
+    kn: "Kan",
+    bengali: "Ben",
+    bangla: "Ben",
+    ben: "Ben",
+    bn: "Ben",
+    marathi: "Mar",
+    mar: "Mar",
+    mr: "Mar",
+    gujarati: "Guj",
+    guj: "Guj",
+    gu: "Guj",
+    punjabi: "Pan",
+    pan: "Pan",
+    pun: "Pan",
+    pa: "Pan",
+    urdu: "Urd",
+    urd: "Urd",
+    ur: "Urd",
+    odia: "Ori",
+    oriya: "Ori",
+    ori: "Ori",
+    assamese: "Asm",
+    asm: "Asm",
+    bhojpuri: "Bho",
+    bho: "Bho",
+    sanskrit: "San",
+    san: "San",
+    nepali: "Nep",
+    nep: "Nep",
+    ne: "Nep",
+    sinhala: "Sin",
+    sin: "Sin",
+    si: "Sin",
+
+    // Major International languages (ISO 639-2)
+    english: "Eng",
+    eng: "Eng",
+    en: "Eng",
+    spanish: "Spa",
+    español: "Spa",
+    espanol: "Spa",
+    spa: "Spa",
+    es: "Spa",
+    french: "Fra",
+    français: "Fra",
+    francais: "Fra",
+    fra: "Fra",
+    fre: "Fra",
+    fr: "Fra",
+    german: "Ger",
+    deutsch: "Ger",
+    ger: "Ger",
+    deu: "Ger",
+    de: "Ger",
+    italian: "Ita",
+    italiano: "Ita",
+    ita: "Ita",
+    it: "Ita",
+    portuguese: "Por",
+    português: "Por",
+    portugues: "Por",
+    por: "Por",
+    pt: "Por",
+    russian: "Rus",
+    русский: "Rus",
+    rus: "Rus",
+    ru: "Rus",
+    japanese: "Jpn",
+    日本語: "Jpn",
+    jpn: "Jpn",
+    ja: "Jpn",
+    korean: "Kor",
+    한국어: "Kor",
+    kor: "Kor",
+    ko: "Kor",
+    chinese: "Chi",
+    中文: "Chi",
+    mandarin: "Chi",
+    cantonese: "Yue",
+    yue: "Yue",
+    chi: "Chi",
+    zho: "Chi",
+    zh: "Chi",
+    arabic: "Ara",
+    العربية: "Ara",
+    ara: "Ara",
+    ar: "Ara",
+    turkish: "Tur",
+    türkçe: "Tur",
+    tur: "Tur",
+    tr: "Tur",
+    vietnamese: "Vie",
+    "tiếng việt": "Vie",
+    vie: "Vie",
+    vi: "Vie",
+    thai: "Tha",
+    ไทย: "Tha",
+    tha: "Tha",
+    th: "Tha",
+    indonesian: "Ind",
+    "bahasa indonesia": "Ind",
+    ind: "Ind",
+    id: "Ind",
+    malay: "Msa",
+    "bahasa melayu": "Msa",
+    msa: "Msa",
+    ms: "Msa",
+    filipino: "Fil",
+    tagalog: "Fil",
+    fil: "Fil",
+    tgl: "Fil",
+    tl: "Fil",
+    persian: "Fas",
+    farsi: "Fas",
+    فارسی: "Fas",
+    fas: "Fas",
+    per: "Fas",
+    fa: "Fas",
+    polish: "Pol",
+    polski: "Pol",
+    pol: "Pol",
+    pl: "Pol",
+    dutch: "Nld",
+    nederlands: "Nld",
+    nld: "Nld",
+    dut: "Nld",
+    nl: "Nld",
+    swedish: "Swe",
+    svenska: "Swe",
+    swe: "Swe",
+    sv: "Swe",
+    norwegian: "Nor",
+    norsk: "Nor",
+    nor: "Nor",
+    no: "Nor",
+    danish: "Dan",
+    dansk: "Dan",
+    dan: "Dan",
+    da: "Dan",
+    finnish: "Fin",
+    suomi: "Fin",
+    fin: "Fin",
+    fi: "Fin",
+    greek: "Gre",
+    ell: "Gre",
+    gre: "Gre",
+    el: "Gre",
+    hebrew: "Heb",
+    heb: "Heb",
+    he: "Heb",
+    czech: "Cze",
+    ces: "Cze",
+    cze: "Cze",
+    cs: "Cze",
+    hungarian: "Hun",
+    hun: "Hun",
+    hu: "Hun",
+    romanian: "Ron",
+    ron: "Ron",
+    rum: "Ron",
+    ro: "Ron",
+    ukrainian: "Ukr",
+    ukr: "Ukr",
+    uk: "Ukr",
+  };
+
+  if (CODE_MAP[clean]) {
+    return CODE_MAP[clean];
+  }
+
+  // Check prefix match (e.g. "Hindi [Original]", "Telugu - 5.1", "Tamil Audio")
+  for (const [key, val] of Object.entries(CODE_MAP)) {
+    if (key.length >= 3 && clean.startsWith(key)) {
+      return val;
+    }
+  }
+
+  // Fallback: 3 letters capitalized (e.g. "Croatian" -> "Cro")
+  const lettersOnly = lang.replace(/[^a-zA-Z]/g, "");
+  if (lettersOnly.length >= 3) {
+    return lettersOnly.slice(0, 3).charAt(0).toUpperCase() + lettersOnly.slice(1, 3).toLowerCase();
+  } else if (lettersOnly.length > 0) {
+    return lettersOnly.toUpperCase();
+  }
+
+  return "Audio";
 }
 
 /**
@@ -287,6 +505,26 @@ export function useNativePlayerCheck(hubcloudUrl?: string) {
     }
 
     const trimmedUrl = hubcloudUrl.trim();
+
+    // 1. Check unified cache first (shares cache with Play Movie and Download extraction)
+    const cachedUnified = getCachedLinkExtraction(trimmedUrl);
+    if (cachedUnified && (cachedUnified.streamUrl || cachedUnified.url)) {
+      const stream = cachedUnified.streamUrl || cachedUnified.url;
+      const normalized: NativeStreamData = {
+        hasWatchOnline: true,
+        playable: true,
+        streamUrl: stream,
+        watchUrl: cachedUnified.watchUrl || stream,
+        candidates: cachedUnified.candidates || [{ text: "Stream Server", href: stream }],
+        size: cachedUnified.size,
+        quality: cachedUnified.quality,
+        title: cachedUnified.title,
+      };
+      setData(normalized);
+      setIsLoading(false);
+      return;
+    }
+
     const cached = watchCheckCache.get(trimmedUrl);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
       setData(cached.data);
@@ -296,54 +534,30 @@ export function useNativePlayerCheck(hubcloudUrl?: string) {
     let isMounted = true;
     setIsLoading(true);
 
-    const apiBase = getStreamingApiBase();
-    const controller = new AbortController();
-
-    const doFetch = (base: string) => {
-      return fetch(`${base}/api/native-player/check`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: trimmedUrl }),
-        signal: controller.signal,
-      }).then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      });
-    };
-
-    const handleSuccess = (resData: any) => {
-      if (isMounted) {
-        const stream = resData?.streamUrl || resData?.sourceUrl || resData?.directUrl;
-        const normalized: NativeStreamData = {
-          ...resData,
-          hasWatchOnline: Boolean(resData?.hasWatchOnline || resData?.playable || stream),
-          streamUrl: stream,
-          watchUrl: resData?.watchUrl || stream,
-          playable: resData?.playable !== undefined ? resData.playable : Boolean(stream),
-        };
-        // Only cache successful playable streams so subsequent link attempts or fixed links are never blocked
-        if (normalized.playable || normalized.hasWatchOnline || normalized.streamUrl) {
+    unifiedExtractStream(trimmedUrl)
+      .then((resData) => {
+        if (!isMounted) return;
+        if (resData && (resData.streamUrl || resData.url)) {
+          const stream = resData.streamUrl || resData.url;
+          const normalized: NativeStreamData = {
+            hasWatchOnline: true,
+            playable: true,
+            streamUrl: stream,
+            watchUrl: resData.watchUrl || stream,
+            candidates: resData.candidates || [{ text: "Stream Server", href: stream }],
+            size: resData.size,
+            quality: resData.quality,
+            title: resData.title,
+          };
           watchCheckCache.set(trimmedUrl, { data: normalized, timestamp: Date.now() });
+          setData(normalized);
+        } else {
+          setData(null);
         }
-        setData(normalized);
         setIsLoading(false);
-      }
-    };
-
-    doFetch(apiBase)
-      .then(handleSuccess)
+      })
       .catch((err) => {
-        if (apiBase && !controller.signal.aborted) {
-          doFetch("")
-            .then(handleSuccess)
-            .catch((fallbackErr) => {
-              if (isMounted && fallbackErr.name !== "AbortError") {
-                setIsLoading(false);
-              }
-            });
-          return;
-        }
-        if (isMounted && err.name !== "AbortError") {
+        if (isMounted) {
           setIsLoading(false);
         }
       });
@@ -530,18 +744,84 @@ export function NativePlayer({
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isControlsVisible, setIsControlsVisible] = useState<boolean>(true);
   const [isBuffering, setIsBuffering] = useState<boolean>(true);
+  const [isSwitchingAudio, setIsSwitchingAudio] = useState<boolean>(false);
+  const isSwitchingAudioRef = useRef<boolean>(false);
+  const audioSwitchResumePosRef = useRef<number>(0);
   const [hasPlaybackError, setHasPlaybackError] = useState<boolean>(false);
   const [fitMode, setFitMode] = useState<"contain" | "cover" | "fill">("contain");
 
   const [activeMenu, setActiveMenu] = useState<"speed" | "audio" | "subtitles" | "quality" | null>(null);
   const [doubleTapFeedback, setDoubleTapFeedback] = useState<"left" | "right" | null>(null);
 
-  // Close audio menu if exiting fullscreen
-  useEffect(() => {
-    if (!isFullscreen && activeMenu === "audio") {
-      setActiveMenu(null);
+  // Measure container width for responsive adaptive controls priority
+  const [containerWidth, setContainerWidth] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      return window.innerWidth;
     }
-  }, [isFullscreen, activeMenu]);
+    return 800;
+  });
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const measure = () => {
+      if (containerRef.current) {
+        const w = containerRef.current.clientWidth || containerRef.current.getBoundingClientRect().width;
+        if (w > 0) {
+          setContainerWidth(w);
+        }
+      } else if (typeof window !== "undefined") {
+        setContainerWidth(window.innerWidth);
+      }
+    };
+
+    measure();
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined" && containerRef.current) {
+      ro = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const w = entry.contentRect?.width;
+          if (typeof w === "number" && w > 0) {
+            setContainerWidth(w);
+          }
+        }
+      });
+      ro.observe(containerRef.current);
+    }
+
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.removeEventListener("orientationchange", measure);
+    };
+  }, [isOpen]);
+
+  // Priority system for buttons under progress bar:
+  // 1. Play/pause, quality and full screen button and running progress duration time (Always visible)
+  // 2. Audio/language button
+  // 3. Playback speed button
+  // 4. Subtitles button
+  // 5. Mute + volume adjuster button
+  // 6. Crop, aspect ratio button
+  // 7. Total duration of stream (under progress bar only when enough space; upside remains untouched)
+  // 8. Other all
+  const showP2Audio = containerWidth >= 360;
+  const showP3Speed = containerWidth >= 420;
+  const showP4Subtitles = containerWidth >= 480;
+  const showP5Volume = containerWidth >= 550;
+  const showP6CropRatio = containerWidth >= 620;
+  const showP7TotalDuration = containerWidth >= 700;
+
+  // Auto-close active menu if its corresponding button becomes hidden by space constraints
+  useEffect(() => {
+    if (activeMenu === "audio" && !showP2Audio) setActiveMenu(null);
+    if (activeMenu === "speed" && !showP3Speed) setActiveMenu(null);
+    if (activeMenu === "subtitles" && !showP4Subtitles) setActiveMenu(null);
+  }, [activeMenu, showP2Audio, showP3Speed, showP4Subtitles]);
 
   // Unified storage key for playback progress (movie: contentId; series: contentId + season + episode)
   const sNum = seasonInfo?.seasonNumber ?? seasonInfo?.number;
@@ -1078,7 +1358,34 @@ export function NativePlayer({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose, resetControlsTimeout, isPlaying, seekOffset, totalDuration, selectedSubtitleTrack]);
 
+  // Keep track of buffer ahead (15s to 1 min) and update scrubber buffer bar
+  const updateBufferMetrics = () => {
+    if (!videoRef.current) return;
+    const v = videoRef.current;
+    if (v.buffered.length > 0) {
+      let curBufferedEnd = 0;
+      for (let i = 0; i < v.buffered.length; i++) {
+        if (v.currentTime >= v.buffered.start(i) && v.currentTime <= v.buffered.end(i)) {
+          curBufferedEnd = v.buffered.end(i);
+          break;
+        }
+      }
+      if (curBufferedEnd === 0) {
+        curBufferedEnd = v.buffered.end(v.buffered.length - 1);
+      }
+      const effectiveDuration = totalDuration || v.duration;
+      if (effectiveDuration > 0) {
+        const bufferedPos = streamMode === "transcode" ? seekOffset + curBufferedEnd : curBufferedEnd;
+        setBufferedPercent(Math.min(100, (bufferedPos / effectiveDuration) * 100));
+      }
+    }
+  };
+
   // Video Event Handlers
+  const handleProgress = () => {
+    updateBufferMetrics();
+  };
+
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
     const current =
@@ -1096,28 +1403,21 @@ export function NativePlayer({
 
     // If time is actively advancing, stream is playing and NOT buffering!
     if (!videoRef.current.paused) {
-      if (isBuffering) setIsBuffering(false);
+      if (isBuffering && !isSwitchingAudioRef.current) setIsBuffering(false);
       if (!isPlaying) setIsPlaying(true);
     }
 
-    // Match inbuilt subtitle cue from MKV file without any track downloads
+    // Match inbuilt or external subtitle cue without delay
     if (selectedSubtitleTrack !== null && subtitleCues.length > 0) {
       const activeCue = subtitleCues.find(
-        (cue) => current >= cue.start && current <= cue.end
+        (cue) => current >= (cue.start - 0.25) && current <= (cue.end + 0.25)
       );
       setActiveSubtitleText(activeCue ? activeCue.text : "");
     } else if (selectedSubtitleTrack === null && activeSubtitleText) {
       setActiveSubtitleText("");
     }
 
-    if (videoRef.current.buffered.length > 0) {
-      const bufferedEnd = videoRef.current.buffered.end(videoRef.current.buffered.length - 1);
-      const effectiveDuration = totalDuration || videoRef.current.duration;
-      if (effectiveDuration > 0) {
-        const bufferedPos = streamMode === "transcode" ? seekOffset + bufferedEnd : bufferedEnd;
-        setBufferedPercent((bufferedPos / effectiveDuration) * 100);
-      }
-    }
+    updateBufferMetrics();
   };
 
   const handleLoadedMetadata = () => {
@@ -1265,6 +1565,14 @@ export function NativePlayer({
     latestPositionRef.current = Math.floor(clampedTarget);
     savePlaybackPosition(clampedTarget);
 
+    // Instantly preview subtitle cue at new position if subtitles are on
+    if (selectedSubtitleTrack !== null && subtitleCues.length > 0) {
+      const activeCue = subtitleCues.find(
+        (cue) => clampedTarget >= (cue.start - 0.25) && clampedTarget <= (cue.end + 0.25)
+      );
+      setActiveSubtitleText(activeCue ? activeCue.text : "");
+    }
+
     if (streamMode === "transcode") {
       setSeekOffset(clampedTarget);
       if (videoRef.current) {
@@ -1274,7 +1582,6 @@ export function NativePlayer({
       if (videoRef.current) {
         try {
           videoRef.current.currentTime = clampedTarget;
-          setIsBuffering(false);
         } catch {
           setSeekOffset(clampedTarget);
         }
@@ -1388,14 +1695,55 @@ export function NativePlayer({
     resetControlsTimeout();
   };
 
-  const handleAudioSelect = (trackId: number) => {
-    setSelectedAudioTrack(trackId);
-    executeSeek(currentPosition);
-    setActiveMenu(null);
-    const track = mediaInfo?.audioTracks.find((a) => a.id === trackId);
-    if (track) {
-      showToast(`Audio: ${track.language}`);
+  const computedSubtitleTracks = useMemo(() => {
+    const list: Array<{ id: number; language: string; title: string }> = [];
+    if (mediaInfo?.subtitleTracks && mediaInfo.subtitleTracks.length > 0) {
+      list.push(...mediaInfo.subtitleTracks);
     }
+    if (!list.some((s) => s.language.toLowerCase().includes("eng"))) {
+      list.push({ id: 100, language: "English", title: "English" });
+    }
+    if (!list.some((s) => s.language.toLowerCase().includes("hin"))) {
+      list.push({ id: 101, language: "Hindi", title: "Hindi" });
+    }
+    return list;
+  }, [mediaInfo]);
+
+  const handleAudioSelect = (trackId: number) => {
+    const track = mediaInfo?.audioTracks.find((a) => a.id === trackId);
+    if (trackId === selectedAudioTrack) {
+      setActiveMenu(null);
+      return;
+    }
+
+    // 1. Try native client-side HTML5 audio tracks if available (instant with 0 reload)
+    const v = videoRef.current as any;
+    if (v && v.audioTracks && v.audioTracks.length > 1) {
+      for (let i = 0; i < v.audioTracks.length; i++) {
+        v.audioTracks[i].enabled = (i === trackId);
+      }
+      setSelectedAudioTrack(trackId);
+      setActiveMenu(null);
+      showToast(`Audio: ${track?.language || "Track " + (trackId + 1)}`);
+      return;
+    }
+
+    // 2. Server-side audio track switch: seamlessly preserve playback position without full-screen "Loading Stream"
+    setIsSwitchingAudio(true);
+    isSwitchingAudioRef.current = true;
+    setTimeout(() => {
+      setIsSwitchingAudio(false);
+      isSwitchingAudioRef.current = false;
+    }, 6000);
+
+    const targetPos = Math.floor(currentPosition);
+    audioSwitchResumePosRef.current = targetPos;
+    if (streamMode === "transcode") {
+      setSeekOffset(targetPos);
+    }
+    setSelectedAudioTrack(trackId);
+    setActiveMenu(null);
+    showToast(`Audio: ${track?.language || "Track " + (trackId + 1)}`);
   };
 
   const handleSubtitleSelect = (subId: number | null) => {
@@ -1407,18 +1755,42 @@ export function NativePlayer({
       showToast("Subtitles: Off");
       return;
     }
-    const sub = mediaInfo?.subtitleTracks.find((s) => s.id === subId);
-    showToast(`Loading ${sub?.language || "English"} Subtitles...`);
+    const sub = computedSubtitleTracks.find((s) => s.id === subId);
+    const subLang = sub?.language || "English";
+    showToast(`Loading ${subLang} Subtitles...`);
 
     const apiBase = getStreamingApiBase();
-    fetch(`${apiBase}/api/native-player/subtitles?url=${encodeURIComponent(directStreamUrl)}&sub=${subId}`)
+    const epSuffix = (seasonInfo && episodeInfo)
+      ? ` S${seasonInfo.number ?? (seasonInfo as any).seasonNumber ?? 1}E${episodeInfo.number ?? (episodeInfo as any).episodeNumber ?? 1}`
+      : "";
+    const movieTitle = (displayTitle || title || "") + epSuffix;
+    const subLangLower = subLang.toLowerCase();
+    const langCode = subLangLower.includes("hin")
+      ? "hin"
+      : subLangLower.includes("tam")
+      ? "tam"
+      : subLangLower.includes("tel")
+      ? "tel"
+      : subLangLower.includes("spa")
+      ? "spa"
+      : "eng";
+
+    fetch(
+      `${apiBase}/api/native-player/subtitles?url=${encodeURIComponent(
+        directStreamUrl
+      )}&sub=${subId}&title=${encodeURIComponent(movieTitle)}&lang=${encodeURIComponent(langCode)}`
+    )
       .then((r) => r.json())
       .then((res) => {
-        if (res.cues && Array.isArray(res.cues)) {
+        if (res.cues && Array.isArray(res.cues) && res.cues.length > 0) {
           setSubtitleCues(res.cues);
-          showToast(`Subtitles: ${sub?.language || "English"}`);
+          const activeCue = res.cues.find(
+            (cue: any) => currentPosition >= (cue.start - 0.25) && currentPosition <= (cue.end + 0.25)
+          );
+          setActiveSubtitleText(activeCue ? activeCue.text : "");
+          showToast(`Subtitles: ${subLang}`);
         } else {
-          showToast("Subtitles unavailable");
+          showToast(`No ${subLang} subtitles found`);
         }
       })
       .catch((err) => {
@@ -1517,23 +1889,58 @@ export function NativePlayer({
                   }
                   resetControlsTimeout();
                 }}
+                onProgress={handleProgress}
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
                 onCanPlay={() => {
-                  setIsBuffering(false);
+                  if (!isSwitchingAudioRef.current) {
+                    setIsBuffering(false);
+                  }
                   setHasPlaybackError(false);
+                  if (audioSwitchResumePosRef.current > 0 && videoRef.current) {
+                    if (streamMode !== "transcode") {
+                      try {
+                        videoRef.current.currentTime = audioSwitchResumePosRef.current;
+                      } catch {}
+                    }
+                    audioSwitchResumePosRef.current = 0;
+                  }
                 }}
                 onCanPlayThrough={() => {
-                  setIsBuffering(false);
+                  if (!isSwitchingAudioRef.current) {
+                    setIsBuffering(false);
+                  }
                 }}
                 onWaiting={() => {
-                  if (videoRef.current?.paused || videoRef.current?.seeking) {
+                  if (!isSwitchingAudioRef.current) {
                     setIsBuffering(true);
+                  }
+                }}
+                onStalled={() => {
+                  if (!isSwitchingAudioRef.current) {
+                    setIsBuffering(true);
+                  }
+                }}
+                onLoadStart={() => {
+                  if (!isSwitchingAudioRef.current) {
+                    setIsBuffering(true);
+                  }
+                }}
+                onSeeking={() => {
+                  if (!isSwitchingAudioRef.current) {
+                    setIsBuffering(true);
+                  }
+                }}
+                onSeeked={() => {
+                  if (!isSwitchingAudioRef.current) {
+                    setIsBuffering(false);
                   }
                 }}
                 onPlaying={() => {
                   setIsBuffering(false);
                   setIsPlaying(true);
+                  setIsSwitchingAudio(false);
+                  isSwitchingAudioRef.current = false;
                   setHasPlaybackError(false);
                   hasStartedPlaybackRef.current = true;
                 }}
@@ -1583,19 +1990,20 @@ export function NativePlayer({
             {/* Custom High-Definition Subtitle Cue Overlay */}
             {selectedSubtitleTrack !== null && activeSubtitleText && (
               <div
-                className={`absolute pointer-events-none inset-x-0 flex items-center justify-center px-4 transition-all duration-300 z-25 ${
+                className={`absolute pointer-events-none inset-x-0 flex items-center justify-center px-4 transition-all duration-300 z-[35] ${
                   isControlsVisible ? "bottom-24 sm:bottom-28" : "bottom-10 sm:bottom-14"
                 }`}
               >
                 <div
-                  className="bg-black/85 backdrop-blur-xs text-white font-semibold text-center rounded-xl px-4 py-2 max-w-[88%] sm:max-w-[78%] leading-relaxed shadow-2xl border border-white/10 select-none animate-in fade-in duration-150"
+                  className="bg-black/90 text-white font-semibold text-center rounded-xl px-4 py-2 max-w-[90%] sm:max-w-[80%] leading-relaxed shadow-2xl border border-white/20 select-none animate-in fade-in duration-150"
                   style={{
                     fontSize:
                       subtitleSize === "small"
-                        ? "13px"
+                        ? "14px"
                         : subtitleSize === "large"
-                        ? "20px"
-                        : "16px",
+                        ? "22px"
+                        : "17px",
+                    textShadow: "0 2px 4px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,1)",
                   }}
                   dangerouslySetInnerHTML={{
                     __html: activeSubtitleText.replace(/\n/g, "<br/>"),
@@ -1619,12 +2027,22 @@ export function NativePlayer({
               )}
             </AnimatePresence>
 
-            {/* Buffering Indicator */}
-            {isBuffering && (!videoRef.current || videoRef.current.paused || videoRef.current.currentTime === 0) && engine === "native" && !hasPlaybackError && (
+            {/* Buffering Indicator - Show each time stream is buffering / loading */}
+            {isBuffering && !isSwitchingAudio && engine === "native" && !hasPlaybackError && (
               <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center bg-black/40 backdrop-blur-xs z-20">
                 <Loader2 className="w-14 h-14 text-emerald-500 animate-spin mb-3" />
                 <span className="text-xs font-bold uppercase tracking-widest text-zinc-300">
                   {t("Loading Stream...")}
+                </span>
+              </div>
+            )}
+
+            {/* Seamless Audio Track Switch Badge (no full-screen Loading Stream when only changing language) */}
+            {isSwitchingAudio && engine === "native" && (
+              <div className="absolute top-16 left-1/2 -translate-x-1/2 pointer-events-none flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-black/80 backdrop-blur-md border border-emerald-500/30 text-emerald-400 text-xs font-semibold shadow-xl z-20 animate-in fade-in duration-150">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400 shrink-0" />
+                <span>
+                  {t("Switching Audio Track...")}
                 </span>
               </div>
             )}
@@ -1870,15 +2288,15 @@ export function NativePlayer({
                 />
               </div>
 
-              {/* Action Buttons Row (Unified from PlayerFU crow) */}
-              <div className="w-full flex items-center justify-between gap-2 sm:gap-3">
-                {/* Left side: Play button, Volume wrap, Time display */}
-                <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-                  {/* Dedicated Play/Pause button */}
+              {/* Action Buttons Row (Priority & space-adaptive layout) */}
+              <div className="w-full flex items-center justify-between gap-1.5 sm:gap-3">
+                {/* Left side: Play button, Volume wrap (Priority 5), Time display (Priority 1 + 7) */}
+                <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+                  {/* Priority 1: Dedicated Play/Pause button */}
                   <button
                     type="button"
                     onClick={togglePlay}
-                    className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl border border-white/10 hover:border-emerald-500/40 bg-white/5 hover:bg-emerald-500/20 text-white hover:text-emerald-300 transition-all flex items-center justify-center cursor-pointer active:scale-95 shadow-sm"
+                    className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl border border-white/10 hover:border-emerald-500/40 bg-white/5 hover:bg-emerald-500/20 text-white hover:text-emerald-300 transition-all flex items-center justify-center cursor-pointer active:scale-95 shadow-sm shrink-0"
                     title={isPlaying ? "Pause (Space)" : "Play (Space)"}
                     aria-label={isPlaying ? "Pause (Space)" : "Play (Space)"}
                   >
@@ -1889,71 +2307,79 @@ export function NativePlayer({
                     )}
                   </button>
 
-                  {/* Volume Wrap (Unified from PlayerFU volume-wrap) */}
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setIsMuted(!isMuted)}
-                      className="w-8 h-8 rounded-lg border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white flex items-center justify-center transition-all cursor-pointer"
-                      title={isMuted ? "Unmute (M)" : "Mute (M)"}
-                      aria-label={isMuted ? "Unmute (M)" : "Mute (M)"}
-                    >
-                      {isMuted || volume === 0 ? (
-                        <VolumeX className="w-4 h-4 text-red-400" />
-                      ) : volume < 0.5 ? (
-                        <Volume1 className="w-4 h-4" />
-                      ) : (
-                        <Volume2 className="w-4 h-4" />
-                      )}
-                    </button>
-                    <input
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.05}
-                      value={isMuted ? 0 : volume}
-                      onChange={(e) => {
-                        const val = parseFloat(e.target.value);
-                        setVolume(val);
-                        setIsMuted(false);
-                        safeStorage.setItem("moviznow_volume", String(val));
-                      }}
-                      className="w-14 sm:w-20 h-1 accent-emerald-500 bg-zinc-700/80 rounded-lg cursor-pointer"
-                      title="Volume"
-                      aria-label="Volume"
-                    />
-                  </div>
+                  {/* Priority 5: Mute + volume adjuster button */}
+                  {showP5Volume && (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setIsMuted(!isMuted)}
+                        className="w-8 h-8 rounded-lg border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white flex items-center justify-center transition-all cursor-pointer"
+                        title={isMuted ? "Unmute (M)" : "Mute (M)"}
+                        aria-label={isMuted ? "Unmute (M)" : "Mute (M)"}
+                      >
+                        {isMuted || volume === 0 ? (
+                          <VolumeX className="w-4 h-4 text-red-400" />
+                        ) : volume < 0.5 ? (
+                          <Volume1 className="w-4 h-4" />
+                        ) : (
+                          <Volume2 className="w-4 h-4" />
+                        )}
+                      </button>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={isMuted ? 0 : volume}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setVolume(val);
+                          setIsMuted(false);
+                          safeStorage.setItem("moviznow_volume", String(val));
+                        }}
+                        className="w-12 sm:w-20 h-1 accent-emerald-500 bg-zinc-700/80 rounded-lg cursor-pointer"
+                        title="Volume"
+                        aria-label="Volume"
+                      />
+                    </div>
+                  )}
 
-                  {/* Current / Total Time (ctime) */}
-                  <div className="flex items-center text-xs sm:text-[12.5px] font-mono font-semibold ml-1">
+                  {/* Priority 1: Running progress duration time; Priority 7: Total duration under progress bar when enough space */}
+                  <div className="flex items-center text-xs sm:text-[12.5px] font-mono font-semibold ml-0.5 sm:ml-1 shrink-0">
                     <span className="text-white">{formatTime(currentPosition)}</span>
-                    <span className="text-zinc-500 mx-1">/</span>
-                    <span className="text-zinc-400">{formatTime(totalDuration)}</span>
+                    {showP7TotalDuration && (
+                      <>
+                        <span className="text-zinc-500 mx-1">/</span>
+                        <span className="text-zinc-400">{formatTime(totalDuration)}</span>
+                      </>
+                    )}
                   </div>
                 </div>
 
                 {/* Middle Spacer */}
-                <div className="flex-1" />
+                <div className="flex-1 min-w-[4px]" />
 
-                {/* Right side: Screen Fit, Speed, Audio, Subtitles, Quality, Fullscreen */}
-                <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 relative">
-                  {/* Screen Aspect / Fit Mode Toggle (btnVideoFit) */}
-                  <button
-                    type="button"
-                    onClick={handleToggleFitMode}
-                    className="h-8 px-2 sm:px-2.5 rounded-lg border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                    title={`Screen Aspect: ${fitMode === "contain" ? "Fit (16:9)" : fitMode === "cover" ? "Cover" : "Fill"}`}
-                  >
-                    <Ratio className="w-3.5 h-3.5" />
-                    <span className="capitalize">{fitMode === "contain" ? "Fit" : fitMode === "cover" ? "Cover" : "Fill"}</span>
-                  </button>
+                {/* Right side: Crop (P6), Speed (P3), Audio (P2), Subtitles (P4), Quality (P1), Fullscreen (P1) */}
+                <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
+                  {/* Priority 6: Screen Aspect / Fit Mode Toggle (btnVideoFit) */}
+                  {showP6CropRatio && (
+                    <button
+                      type="button"
+                      onClick={handleToggleFitMode}
+                      className="h-8 px-2 sm:px-2.5 rounded-lg border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 shrink-0"
+                      title={`Screen Aspect: ${fitMode === "contain" ? "Fit (16:9)" : fitMode === "cover" ? "Cover" : "Fill"}`}
+                    >
+                      <Ratio className="w-3.5 h-3.5" />
+                      <span className="capitalize">{fitMode === "contain" ? "Fit" : fitMode === "cover" ? "Cover" : "Fill"}</span>
+                    </button>
+                  )}
 
-                  {/* Playback Speed Menu (btnSpeed) */}
-                  <div className="relative">
+                  {/* Priority 3: Playback Speed Button (btnSpeed) */}
+                  {showP3Speed && (
                     <button
                       type="button"
                       onClick={() => setActiveMenu(activeMenu === "speed" ? null : "speed")}
-                      className={`h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-semibold font-mono flex items-center justify-center transition-all cursor-pointer ${
+                      className={`h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-semibold font-mono flex items-center justify-center transition-all cursor-pointer shrink-0 ${
                         activeMenu === "speed"
                           ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
                           : "border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white"
@@ -1963,37 +2389,14 @@ export function NativePlayer({
                     >
                       <span>{playbackSpeed}x</span>
                     </button>
+                  )}
 
-                    {/* Speed Popup Window (Unified from PlayerFU ps-sheet) */}
-                    {activeMenu === "speed" && (
-                      <div className="absolute bottom-12 sm:bottom-14 right-0 w-44 bg-[#181818]/98 border border-zinc-700/80 rounded-xl shadow-2xl backdrop-blur-xl z-50 p-1.5 flex flex-col gap-1 max-h-56 overflow-y-auto">
-                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-2 py-1 border-b border-white/10 pb-1 mb-0.5">
-                          <span>{t("Playback speed")}</span>
-                        </div>
-                        {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3].map((s) => (
-                          <button
-                            key={s}
-                            onClick={() => handleSpeedSelect(s)}
-                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
-                              playbackSpeed === s
-                                ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
-                                : "text-zinc-300 hover:bg-white/10 hover:text-white"
-                            }`}
-                          >
-                            <span>{s === 1 ? "1x (Normal)" : `${s}x`}</span>
-                            {playbackSpeed === s && <Check className="w-3.5 h-3.5 text-emerald-400" />}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Audio Languages Button & Window (btnAudio - Unified from PlayerFU) */}
-                  <div className="relative">
+                  {/* Priority 2: Audio Languages Button (btnAudio) */}
+                  {showP2Audio && (
                     <button
                       type="button"
                       onClick={() => setActiveMenu(activeMenu === "audio" ? null : "audio")}
-                      className={`h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      className={`h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                         activeMenu === "audio"
                           ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
                           : "border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white"
@@ -2002,49 +2405,18 @@ export function NativePlayer({
                       aria-label={t("Audio Language")}
                     >
                       <Mic className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>
-                        {mediaInfo?.audioTracks?.find((a) => a.id === selectedAudioTrack)?.language || "Audio"}
+                      <span className="max-w-[70px] truncate">
+                        {getLanguageShortCode(mediaInfo?.audioTracks?.find((a) => a.id === selectedAudioTrack)?.language)}
                       </span>
                     </button>
+                  )}
 
-                    {/* Audio Popup Window (Unified from PlayerFU ps-sheet) */}
-                    {activeMenu === "audio" && (
-                      <div className="absolute bottom-12 sm:bottom-14 right-0 w-48 sm:w-56 bg-[#181818]/98 border border-zinc-700/80 rounded-xl shadow-2xl backdrop-blur-xl z-50 p-1.5 flex flex-col gap-1 max-h-56 overflow-y-auto">
-                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-2 py-1 border-b border-white/10 pb-1 mb-0.5">
-                          <span>{t("Audio Language")}</span>
-                        </div>
-                        {(mediaInfo?.audioTracks && mediaInfo.audioTracks.length > 0
-                          ? mediaInfo.audioTracks
-                          : [{ id: 0, language: "Default", codec: "AAC", title: "Default Audio" }]
-                        ).map((tr) => (
-                          <button
-                            key={tr.id}
-                            onClick={() => handleAudioSelect(tr.id)}
-                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
-                              selectedAudioTrack === tr.id
-                                ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
-                                : "text-zinc-300 hover:bg-white/10 hover:text-white"
-                            }`}
-                          >
-                            <div className="flex flex-col">
-                              <span>{tr.language}</span>
-                              <span className="text-[10px] opacity-75 font-normal uppercase">
-                                {tr.codec} Stereo
-                              </span>
-                            </div>
-                            {selectedAudioTrack === tr.id && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Subtitles Button & Window (btnSubs - Unified from PlayerFU) */}
-                  <div className="relative">
+                  {/* Priority 4: Subtitles Button (btnSubs) */}
+                  {showP4Subtitles && (
                     <button
                       type="button"
                       onClick={() => setActiveMenu(activeMenu === "subtitles" ? null : "subtitles")}
-                      className={`h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                      className={`h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                         selectedSubtitleTrack !== null
                           ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
                           : activeMenu === "subtitles"
@@ -2055,20 +2427,163 @@ export function NativePlayer({
                       aria-label={t("Subtitles (C)")}
                     >
                       <Subtitles className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>
+                      <span className="max-w-[65px] truncate">
                         {selectedSubtitleTrack === null
                           ? "Off"
                           : mediaInfo?.subtitleTracks?.find((s) => s.id === selectedSubtitleTrack)?.language || "Subtitles"}
                       </span>
                     </button>
+                  )}
 
-                    {/* Subtitles Popup Window (Unified from PlayerFU ps-sheet) */}
+                  {/* Priority 1: Quality Button (btnQuality) */}
+                  <button
+                    type="button"
+                    onClick={() => setActiveMenu(activeMenu === "quality" ? null : "quality")}
+                    className={`h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                      activeMenu === "quality"
+                        ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
+                        : "border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white"
+                    }`}
+                    title={t("Quality")}
+                    aria-label={t("Quality")}
+                  >
+                    <Tv className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>{currentQualityLabel}</span>
+                    {isSwitchingQuality && <Loader2 className="w-3 h-3 animate-spin text-emerald-300" />}
+                  </button>
+
+                  {/* Priority 1: Fullscreen Button (btnFullscreen) */}
+                  <button
+                    type="button"
+                    onClick={toggleFullscreen}
+                    className="w-8 h-8 rounded-lg border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
+                    title={isFullscreen ? "Exit Fullscreen (F)" : "Fullscreen (F)"}
+                    aria-label={isFullscreen ? "Exit Fullscreen (F)" : "Fullscreen (F)"}
+                  >
+                    {isFullscreen ? (
+                      <Minimize2 className="w-4 h-4" />
+                    ) : (
+                      <Maximize2 className="w-4 h-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Active Selection Menu Window (Anchored near its triggering button at safest edge, single-line layout) */}
+          {activeMenu && (
+            <div className="absolute inset-0 z-40 pointer-events-none">
+              {/* Invisible backdrop to dismiss window on outside clicks */}
+              <div
+                onClick={() => setActiveMenu(null)}
+                className="absolute inset-0 pointer-events-auto cursor-default"
+                aria-label="Dismiss menu"
+              />
+
+              {/* Safe bounding container: bounded above bottom controls/progress bar and below top bar */}
+              <div className="absolute inset-x-0 top-10 sm:top-12 bottom-16 sm:bottom-18 md:bottom-20 pointer-events-none flex items-end justify-end px-2 sm:px-3 md:px-5">
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className={`pointer-events-auto w-auto min-w-[210px] sm:min-w-[230px] max-w-[calc(100%-1rem)] max-h-full bg-[#141414]/95 border border-zinc-700/80 rounded-2xl shadow-2xl backdrop-blur-2xl flex flex-col p-2 sm:p-2.5 overflow-hidden ring-1 ring-white/10 animate-in fade-in zoom-in-95 duration-150 ${
+                    activeMenu === "quality"
+                      ? "mr-0 sm:mr-1 md:mr-3"
+                      : activeMenu === "subtitles"
+                      ? "mr-0 sm:mr-6 md:mr-14"
+                      : activeMenu === "audio"
+                      ? "mr-0 sm:mr-10 md:mr-24"
+                      : "mr-0 sm:mr-14 md:mr-36"
+                  }`}
+                >
+                  {/* Header with section title, icon & quick close 'X' button */}
+                  <div className="flex items-center justify-between px-1.5 pb-2 border-b border-white/10 mb-1.5 shrink-0">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-200">
+                      {activeMenu === "speed" && <Gauge className="w-3.5 h-3.5 text-emerald-400" />}
+                      {activeMenu === "audio" && <Mic className="w-3.5 h-3.5 text-emerald-400" />}
+                      {activeMenu === "subtitles" && <Subtitles className="w-3.5 h-3.5 text-emerald-400" />}
+                      {activeMenu === "quality" && <Tv className="w-3.5 h-3.5 text-emerald-400" />}
+                      <span>
+                        {activeMenu === "speed" && t("Playback speed")}
+                        {activeMenu === "audio" && t("Audio Language")}
+                        {activeMenu === "subtitles" && t("Subtitles")}
+                        {activeMenu === "quality" && t("Quality")}
+                      </span>
+                      {activeMenu === "quality" && (
+                        <span className="text-[10px] text-zinc-500 font-normal ml-1">
+                          ({qualityOptions.length})
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveMenu(null)}
+                      className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                      title={t("Close")}
+                      aria-label={t("Close")}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Scrollable Content Options (fills expanded vertical space upwards) */}
+                  <div className="flex-1 overflow-y-auto space-y-1 pr-0.5 custom-scrollbar">
+                    {/* Speed Menu Content */}
+                    {activeMenu === "speed" && (
+                      <>
+                        {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3].map((s) => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => handleSpeedSelect(s)}
+                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
+                              playbackSpeed === s
+                                ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
+                                : "text-zinc-300 hover:bg-white/10 hover:text-white"
+                            }`}
+                          >
+                            <span>{s === 1 ? "1x (Normal)" : `${s}x`}</span>
+                            {playbackSpeed === s && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
+                          </button>
+                        ))}
+                      </>
+                    )}
+
+                    {/* Audio Language Menu Content - Single Line (e.g. Hindi AAC Stereo) */}
+                    {activeMenu === "audio" && (
+                      <>
+                        {(mediaInfo?.audioTracks && mediaInfo.audioTracks.length > 0
+                          ? mediaInfo.audioTracks
+                          : [{ id: 0, language: "Default", codec: "AAC", title: "Default Audio" }]
+                        ).map((tr) => (
+                          <button
+                            key={tr.id}
+                            type="button"
+                            onClick={() => handleAudioSelect(tr.id)}
+                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between gap-3 cursor-pointer ${
+                              selectedAudioTrack === tr.id
+                                ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
+                                : "text-zinc-300 hover:bg-white/10 hover:text-white"
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 truncate min-w-0">
+                              <span className="font-bold truncate">{tr.language}</span>
+                              <span className={`text-[11px] font-normal uppercase shrink-0 ${
+                                selectedAudioTrack === tr.id ? "text-emerald-300/80" : "text-zinc-400"
+                              }`}>
+                                {tr.codec || "AAC"} Stereo
+                              </span>
+                            </div>
+                            {selectedAudioTrack === tr.id && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
+                          </button>
+                        ))}
+                      </>
+                    )}
+
+                    {/* Subtitles Menu Content - Single Line */}
                     {activeMenu === "subtitles" && (
-                      <div className="absolute bottom-12 sm:bottom-14 right-0 w-48 sm:w-56 bg-[#181818]/98 border border-zinc-700/80 rounded-xl shadow-2xl backdrop-blur-xl z-50 p-1.5 flex flex-col gap-1 max-h-60 overflow-y-auto">
-                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-2 py-1 border-b border-white/10 pb-1 mb-0.5">
-                          <span>{t("Subtitles")}</span>
-                        </div>
+                      <>
                         <button
+                          type="button"
                           onClick={() => handleSubtitleSelect(null)}
                           className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
                             selectedSubtitleTrack === null
@@ -2077,14 +2592,12 @@ export function NativePlayer({
                           }`}
                         >
                           <span>{t("Off")}</span>
-                          {selectedSubtitleTrack === null && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                          {selectedSubtitleTrack === null && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
                         </button>
-                        {(mediaInfo?.subtitleTracks && mediaInfo.subtitleTracks.length > 0
-                          ? mediaInfo.subtitleTracks
-                          : [{ id: 0, language: "English", title: "English" }]
-                        ).map((sub) => (
+                        {computedSubtitleTracks.map((sub) => (
                           <button
                             key={sub.id}
+                            type="button"
                             onClick={() => handleSubtitleSelect(sub.id)}
                             className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
                               selectedSubtitleTrack === sub.id
@@ -2092,8 +2605,8 @@ export function NativePlayer({
                                 : "text-zinc-300 hover:bg-white/10 hover:text-white"
                             }`}
                           >
-                            <span>{sub.language}</span>
-                            {selectedSubtitleTrack === sub.id && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                            <span className="truncate">{sub.language}</span>
+                            {selectedSubtitleTrack === sub.id && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
                           </button>
                         ))}
 
@@ -2107,6 +2620,7 @@ export function NativePlayer({
                               {(["small", "normal", "large"] as const).map((sz) => (
                                 <button
                                   key={sz}
+                                  type="button"
                                   onClick={() => handleSubtitleSizeSelect(sz)}
                                   className={`py-1 text-[11px] font-bold rounded-lg capitalize transition-all cursor-pointer ${
                                     subtitleSize === sz
@@ -2120,80 +2634,49 @@ export function NativePlayer({
                             </div>
                           </div>
                         )}
-                      </div>
+                      </>
                     )}
-                  </div>
 
-                  {/* Quality Button & Window (btnQuality - Unified from PlayerFU) */}
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setActiveMenu(activeMenu === "quality" ? null : "quality")}
-                      className={`h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                        activeMenu === "quality"
-                          ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
-                          : "border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white"
-                      }`}
-                      title={t("Quality")}
-                      aria-label={t("Quality")}
-                    >
-                      <Tv className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>{currentQualityLabel}</span>
-                      {isSwitchingQuality && <Loader2 className="w-3 h-3 animate-spin text-emerald-300" />}
-                    </button>
-
-                    {/* Quality Popup Window (Unified from PlayerFU ps-sheet) */}
+                    {/* Quality Menu Content - Single Line (e.g. 480p 650MB, 720p 1.1GB, 1080p 3.2GB) */}
                     {activeMenu === "quality" && (
-                      <div className="absolute bottom-12 sm:bottom-14 right-0 w-48 sm:w-56 bg-[#181818]/98 border border-zinc-700/80 rounded-xl shadow-2xl backdrop-blur-xl z-50 p-1.5 flex flex-col gap-1 max-h-56 overflow-y-auto">
-                        <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-2 py-1 flex items-center justify-between border-b border-white/10 pb-1 mb-0.5">
-                          <span>{t("Quality")}</span>
-                          <span className="text-[10px] text-zinc-500 font-normal">
-                            {qualityOptions.length} {t("options")}
-                          </span>
-                        </div>
+                      <>
                         {qualityOptions.map((opt, idx) => {
                           const isCurrent = opt.label.toUpperCase() === currentQualityLabel.toUpperCase();
+                          const rawSize = opt.size ? String(opt.size).trim() : "";
+                          const rawUnit = opt.unit ? String(opt.unit).trim() : "";
+                          const sizeDisplay = rawSize
+                            ? rawUnit && !rawSize.toUpperCase().endsWith(rawUnit.toUpperCase())
+                              ? `${rawSize}${rawUnit}`
+                              : rawSize
+                            : "";
+
                           return (
                             <button
                               key={`${opt.url}-${idx}`}
+                              type="button"
                               onClick={() => handleQualitySelect(opt)}
                               disabled={isSwitchingQuality}
-                              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
+                              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between gap-3 cursor-pointer ${
                                 isCurrent
                                   ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
                                   : "text-zinc-300 hover:bg-white/10 hover:text-white"
                               }`}
                             >
-                              <div className="flex flex-col">
+                              <div className="flex items-center gap-2 truncate">
                                 <span className="font-bold">{opt.label}</span>
-                                {opt.size && (
-                                  <span className="text-[10px] opacity-75 font-normal">
-                                    {opt.size} {opt.unit || ""}
+                                {sizeDisplay && (
+                                  <span className={`text-[11px] font-normal ${isCurrent ? "text-emerald-300/80" : "text-zinc-400"}`}>
+                                    {sizeDisplay}
                                   </span>
                                 )}
                               </div>
-                              {isCurrent && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />}
+                              {isCurrent && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
                             </button>
                           );
                         })}
-                      </div>
+                      </>
                     )}
                   </div>
-
-                  {/* Fullscreen Button (btnFullscreen - Unified from PlayerFU) */}
-                  <button
-                    type="button"
-                    onClick={toggleFullscreen}
-                    className="w-8 h-8 rounded-lg border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white flex items-center justify-center transition-all cursor-pointer"
-                    title={isFullscreen ? "Exit Fullscreen (F)" : "Fullscreen (F)"}
-                    aria-label={isFullscreen ? "Exit Fullscreen (F)" : "Fullscreen (F)"}
-                  >
-                    {isFullscreen ? (
-                      <Minimize2 className="w-4 h-4" />
-                    ) : (
-                      <Maximize2 className="w-4 h-4" />
-                    )}
-                  </button>
                 </div>
               </div>
             </div>
