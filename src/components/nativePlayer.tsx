@@ -105,6 +105,7 @@ export interface MediaProbeInfo {
   audioTracks: Array<{ id: number; language: string; codec: string; title: string }>;
   subtitleTracks: Array<{ id: number; language: string; title: string }>;
   needsTranscode: boolean;
+  hasFFmpeg?: boolean;
 }
 
 /**
@@ -795,12 +796,8 @@ export function NativePlayer({
   const isDirectMkv = useMemo(() => {
     if (!directStreamUrl) return false;
     const lower = directStreamUrl.toLowerCase();
-    const isPd =
-      lower.includes("pixeldrain") ||
-      lower.includes("pixel.drain") ||
-      lower.includes("pixeldra.in");
+    // Do not force Pixeldrain links to be treated as MKVs; Pixeldrain streams cleanly via direct CORS or standard MP4 proxy
     return (
-      isPd ||
       lower.includes(".mkv") ||
       lower.includes("matroska") ||
       Boolean(mediaInfo?.isMkv) ||
@@ -809,12 +806,15 @@ export function NativePlayer({
   }, [directStreamUrl, mediaInfo]);
 
   const [streamAttempt, setStreamAttempt] = useState<number>(0);
-  const [streamMode, setStreamMode] = useState<"proxy" | "transcode">(() => {
-    return isDirectMkv ? "transcode" : "proxy";
-  });
+  const [streamMode, setStreamMode] = useState<"proxy" | "transcode">("proxy");
 
   useEffect(() => {
-    if (isDirectMkv || mediaInfo?.isMkv || mediaInfo?.needsTranscode) {
+    // If running on Vercel or environment where FFmpeg is not installed, always use proxy mode
+    if (mediaInfo?.hasFFmpeg === false) {
+      setStreamMode("proxy");
+      return;
+    }
+    if (mediaInfo?.hasFFmpeg && (isDirectMkv || mediaInfo?.needsTranscode)) {
       setStreamMode("transcode");
     }
   }, [isDirectMkv, mediaInfo]);
@@ -973,7 +973,7 @@ export function NativePlayer({
 
     setIsPlaying(false);
     setCurrentPosition(targetPosition);
-    setSeekOffset(targetPosition);
+    setSeekOffset(0);
     latestPositionRef.current = targetPosition;
     setTotalDuration(0);
     setBufferedPercent(0);
@@ -1069,9 +1069,13 @@ export function NativePlayer({
       // 1. Unify and save current playback progress
       const curPos =
         latestPositionRef.current ||
-        (videoRef.current ? Math.floor(seekOffset + (videoRef.current.currentTime || 0)) : seekOffset);
+        (videoRef.current
+          ? Math.floor(
+              (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) +
+                (videoRef.current.currentTime || 0)
+            )
+          : 0);
       savePlaybackPosition(curPos);
-      setSeekOffset(curPos);
       setCurrentPosition(curPos);
       latestPositionRef.current = curPos;
 
@@ -1098,7 +1102,9 @@ export function NativePlayer({
         setActiveCandidates([{ text: "Direct Stream", href: directUrl }]);
         setActiveServer("pixeldrain");
         const isMkv = directUrl.includes(".mkv") || directUrl.toLowerCase().includes("matroska");
-        setStreamMode(isMkv ? "transcode" : "proxy");
+        const needsTc = isMkv && mediaInfo?.hasFFmpeg !== false;
+        setStreamMode(needsTc ? "transcode" : "proxy");
+        setSeekOffset(needsTc ? curPos : 0);
         setHasPlaybackError(false);
         setStreamAttempt((p) => p + 1);
         setIsBuffering(true);
@@ -1160,7 +1166,9 @@ export function NativePlayer({
           const isMkv =
             normalizedStream.includes(".mkv") ||
             normalizedStream.toLowerCase().includes("matroska");
-          setStreamMode(isMkv ? "transcode" : "proxy");
+          const needsTc = isMkv && mediaInfo?.hasFFmpeg !== false;
+          setStreamMode(needsTc ? "transcode" : "proxy");
+          setSeekOffset(needsTc ? curPos : 0);
           setHasPlaybackError(false);
           setStreamAttempt((p) => p + 1);
           showToast(`${t("Switched to")} ${opt.label}`);
@@ -1194,15 +1202,15 @@ export function NativePlayer({
     if (activeServer !== "fsl") return;
     if (!pixeldrainCandidate) return;
 
-    hasStartedPlaybackRef.current = false;
     const timerId = setTimeout(() => {
-      // Check if FSL server is actually playing or has played
-      const isCurrentlyPlaying = videoRef.current && !videoRef.current.paused && videoRef.current.currentTime > 0;
+      // Check if FSL server is actually playing, paused after playing, or has buffered frames
+      const vid = videoRef.current;
+      const isCurrentlyPlaying = vid && (!vid.paused || vid.currentTime > 0 || vid.readyState >= 2);
       if (!hasStartedPlaybackRef.current && !isCurrentlyPlaying) {
         console.warn("[NativePlayer] FSL Server failed to play within 20 seconds. Switching to Pixeldrain Server...");
         showToast(t("FSL server took too long. Switching to Pixeldrain..."));
         setActiveServer("pixeldrain");
-        const needsTc = isDirectMkv || mediaInfo?.isMkv || mediaInfo?.needsTranscode;
+        const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
         setStreamMode(needsTc ? "transcode" : "proxy");
         setHasPlaybackError(false);
         setStreamAttempt((prev) => prev + 1);
@@ -1213,7 +1221,7 @@ export function NativePlayer({
     return () => {
       clearTimeout(timerId);
     };
-  }, [isOpen, activeServer, pixeldrainCandidate, engine, isDirectMkv, mediaInfo, streamAttempt, showToast, t]);
+  }, [isOpen, activeServer, pixeldrainCandidate, engine, contentKey]);
 
   // Fetch probe media info (exact duration, audio streams, subtitles)
   useEffect(() => {
@@ -1244,28 +1252,27 @@ export function NativePlayer({
     if (!directStreamUrl) return "";
 
     const requiresTranscode =
-      streamMode === "transcode" ||
-      isDirectMkv ||
-      Boolean(mediaInfo?.isMkv) ||
-      Boolean(mediaInfo?.needsTranscode);
+      streamMode === "transcode" &&
+      mediaInfo?.hasFFmpeg !== false &&
+      (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
 
     // Pixeldrain natively provides Access-Control-Allow-Origin: * (CORS).
     // Stream directly from Pixeldrain to bypass server proxy latency and Vercel execution limits
     // whenever transcoding is not required and default audio track is selected.
     if (
       !requiresTranscode &&
-      activeServer === "pixeldrain" &&
+      (activeServer === "pixeldrain" || directStreamUrl.toLowerCase().includes("pixeldrain")) &&
       directStreamUrl.startsWith("http") &&
       selectedAudioTrack === 0
     ) {
-      return directStreamUrl;
+      return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
     }
 
     const params = new URLSearchParams();
     params.set("url", directStreamUrl);
     params.set("mode", streamMode);
 
-    if (streamMode === "transcode" && seekOffset > 0) {
+    if (streamMode === "transcode" && mediaInfo?.hasFFmpeg !== false && seekOffset > 0) {
       params.set("ss", String(seekOffset));
     }
     if (selectedAudioTrack > 0) {
@@ -1490,11 +1497,15 @@ export function NativePlayer({
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
     const current =
-      streamMode === "transcode"
+      streamMode === "transcode" && seekOffset > 0
         ? seekOffset + videoRef.current.currentTime
         : videoRef.current.currentTime;
     setCurrentPosition(current);
     latestPositionRef.current = Math.floor(current);
+
+    if (current > 0 || (videoRef.current && videoRef.current.currentTime > 0)) {
+      hasStartedPlaybackRef.current = true;
+    }
 
     // Keep remembering new position every 5 to 10 seconds while playing
     const now = Date.now();
@@ -1529,9 +1540,9 @@ export function NativePlayer({
     setIsBuffering(false);
     setHasPlaybackError(false);
 
-    // If resuming in proxy mode, seek to remembered position
+    // If resuming in proxy or direct mode (where full video duration is preserved), seek to remembered position
     const savedTarget = latestPositionRef.current || currentPosition;
-    if (streamMode === "proxy" && savedTarget > 3) {
+    if (savedTarget > 2 && (streamMode !== "transcode" || seekOffset === 0)) {
       try {
         videoRef.current.currentTime = savedTarget;
       } catch {}
@@ -1549,7 +1560,11 @@ export function NativePlayer({
   const handleRetryPlayback = useCallback(() => {
     setHasPlaybackError(false);
     setIsBuffering(true);
-    setStreamMode("transcode");
+    if (mediaInfo?.hasFFmpeg !== false) {
+      setStreamMode("transcode");
+    } else {
+      setStreamMode("proxy");
+    }
     setStreamAttempt((prev) => prev + 1);
 
     const targetTime = latestPositionRef.current || currentPosition;
@@ -1579,17 +1594,32 @@ export function NativePlayer({
 
   const handleVideoError = () => {
     setIsBuffering(false);
-    // If the video is actually playing and healthy, ignore spurious error events
-    if (videoRef.current && !videoRef.current.paused && videoRef.current.currentTime > 0 && !videoRef.current.error) {
+    const vid = videoRef.current;
+    const mediaErr = vid?.error;
+
+    // Ignore aborted loads (e.g. browser seeking or switching streams)
+    if (mediaErr && mediaErr.code === 1 /* MEDIA_ERR_ABORTED */) {
       return;
     }
 
-    // If on FSL server and Pixeldrain candidate is available, switch to Pixeldrain only if FSL truly failed
-    if (activeServer === "fsl" && pixeldrainCandidate) {
-      console.warn("[NativePlayer] Genuine FSL server error encountered. Switching to Pixeldrain Server...");
+    // If the video is actually playing and healthy, ignore spurious error events
+    if (vid && !vid.paused && vid.currentTime > 0) {
+      return;
+    }
+
+    // If playback has successfully started previously and current time is progressing,
+    // do not treat transient network hiccups as fatal FSL server error
+    if (hasStartedPlaybackRef.current && vid && vid.currentTime > 2) {
+      console.warn("[NativePlayer] Transient glitch during active playback; not switching server.");
+      return;
+    }
+
+    // If on FSL server and Pixeldrain candidate is available, switch to Pixeldrain only if FSL truly failed before starting
+    if (activeServer === "fsl" && pixeldrainCandidate && !hasStartedPlaybackRef.current) {
+      console.warn("[NativePlayer] Genuine FSL server error encountered before playback. Switching to Pixeldrain Server...");
       showToast(t("FSL server error. Switching to Pixeldrain..."));
       setActiveServer("pixeldrain");
-      const needsTc = isDirectMkv || mediaInfo?.isMkv || mediaInfo?.needsTranscode;
+      const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
       setStreamMode(needsTc ? "transcode" : "proxy");
       setHasPlaybackError(false);
       setStreamAttempt((prev) => prev + 1);
@@ -1597,8 +1627,16 @@ export function NativePlayer({
       return;
     }
 
-    // If proxy failed on Pixeldrain or any stream, escalate to transcode mode before failing!
-    if (streamMode === "proxy") {
+    // If direct pixeldrain playback had an error, escalate to proxy mode before failing!
+    if (activeServer === "pixeldrain" && streamMode === "proxy") {
+      console.warn("[NativePlayer] Direct Pixeldrain stream failed; retrying with proxy...");
+      setStreamAttempt((prev) => prev + 1);
+      setIsBuffering(true);
+      return;
+    }
+
+    // If proxy failed on other streams and FFmpeg is available on backend, escalate to transcode mode
+    if (streamMode === "proxy" && mediaInfo?.hasFFmpeg !== false) {
       console.warn("[NativePlayer] Proxy mode failed. Escalating to transcode engine...");
       setStreamMode("transcode");
       setStreamAttempt((prev) => prev + 1);
@@ -1624,7 +1662,7 @@ export function NativePlayer({
       // Resuming playback after video was stopped/paused
       const rememberedTarget = latestPositionRef.current || currentPosition;
       const currentVidPos = Math.floor(
-        streamMode === "transcode"
+        streamMode === "transcode" && seekOffset > 0
           ? seekOffset + (videoRef.current.currentTime || 0)
           : videoRef.current.currentTime || 0
       );
@@ -1649,7 +1687,7 @@ export function NativePlayer({
     } else {
       // Stopping / pausing playback: save current position immediately
       const current = Math.floor(
-        streamMode === "transcode"
+        streamMode === "transcode" && seekOffset > 0
           ? seekOffset + (videoRef.current.currentTime || 0)
           : videoRef.current.currentTime || 0
       );
@@ -1679,12 +1717,13 @@ export function NativePlayer({
       setActiveSubtitleText(activeCue ? activeCue.text : "");
     }
 
-    if (streamMode === "transcode") {
+    if (streamMode === "transcode" && mediaInfo?.hasFFmpeg !== false) {
       setSeekOffset(clampedTarget);
       if (videoRef.current) {
         videoRef.current.currentTime = 0;
       }
     } else {
+      setSeekOffset(0);
       if (videoRef.current) {
         try {
           videoRef.current.currentTime = clampedTarget;
@@ -2003,6 +2042,18 @@ export function NativePlayer({
                     setIsBuffering(false);
                   }
                   setHasPlaybackError(false);
+                  // Ensure saved position (e.g. 10 mins) is restored when media is ready to play
+                  const savedTarget = latestPositionRef.current || currentPosition;
+                  if (
+                    savedTarget > 2 &&
+                    videoRef.current &&
+                    (streamMode !== "transcode" || seekOffset === 0) &&
+                    videoRef.current.currentTime < 1
+                  ) {
+                    try {
+                      videoRef.current.currentTime = savedTarget;
+                    } catch {}
+                  }
                   if (audioSwitchResumePosRef.current > 0 && videoRef.current) {
                     if (streamMode !== "transcode") {
                       try {
@@ -2019,7 +2070,10 @@ export function NativePlayer({
                 }}
                 onWaiting={() => {
                   if (!isSwitchingAudioRef.current) {
-                    setIsBuffering(true);
+                    // Only show buffering indicator if video is paused, seeking, or genuinely stalled
+                    if (!videoRef.current || videoRef.current.paused || videoRef.current.currentTime === 0) {
+                      setIsBuffering(true);
+                    }
                   }
                 }}
                 onStalled={() => {
@@ -2054,7 +2108,11 @@ export function NativePlayer({
                 onPause={() => {
                   setIsPlaying(false);
                   if (videoRef.current) {
-                    const pos = Math.floor(seekOffset + (videoRef.current.currentTime || 0));
+                    const pos = Math.floor(
+                      streamMode === "transcode" && seekOffset > 0
+                        ? seekOffset + (videoRef.current.currentTime || 0)
+                        : videoRef.current.currentTime || 0
+                    );
                     latestPositionRef.current = pos;
                     savePlaybackPosition(pos);
                   }
@@ -2062,14 +2120,22 @@ export function NativePlayer({
                 onEnded={() => {
                   setIsPlaying(false);
                   if (videoRef.current) {
-                    const pos = Math.floor(seekOffset + (videoRef.current.currentTime || 0));
+                    const pos = Math.floor(
+                      streamMode === "transcode" && seekOffset > 0
+                        ? seekOffset + (videoRef.current.currentTime || 0)
+                        : videoRef.current.currentTime || 0
+                    );
                     latestPositionRef.current = pos;
                     savePlaybackPosition(pos);
                   }
                 }}
                 onError={() => {
                   if (videoRef.current) {
-                    const pos = Math.floor(seekOffset + (videoRef.current.currentTime || 0));
+                    const pos = Math.floor(
+                      streamMode === "transcode" && seekOffset > 0
+                        ? seekOffset + (videoRef.current.currentTime || 0)
+                        : videoRef.current.currentTime || 0
+                    );
                     if (pos > 0) {
                       latestPositionRef.current = pos;
                       savePlaybackPosition(pos);

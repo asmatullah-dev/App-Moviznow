@@ -81,6 +81,7 @@ export interface MediaProbeInfo {
   subtitleTracks: Array<{ id: number; language: string; title: string }>;
   needsTranscode: boolean;
   playable?: boolean;
+  hasFFmpeg?: boolean;
 }
 
 export function decodeBase64Safe(input?: string): string {
@@ -543,6 +544,8 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       } catch {}
     }
 
+    const hasFFmpeg = await checkFFmpegAvailable();
+
     const defaultData: MediaProbeInfo = {
       duration: 0,
       format: isMkv ? "matroska,webm" : "mp4",
@@ -555,8 +558,9 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
         { id: 0, language: "English", title: "English" },
         { id: 1, language: "Hindi", title: "Hindi" },
       ],
-      needsTranscode,
+      needsTranscode: hasFFmpeg ? needsTranscode : false,
       playable: true,
+      hasFFmpeg,
     };
 
     const hasFfprobe = await checkFFprobeAvailable();
@@ -702,8 +706,9 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
             { id: 0, language: "English", title: "English" },
             { id: 1, language: "Hindi", title: "Hindi" },
           ],
-          needsTranscode,
+          needsTranscode: hasFFmpeg ? needsTranscode : false,
           playable: true,
+          hasFFmpeg,
         };
 
         return finishProbe(resultInfo);
@@ -721,6 +726,7 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
           subtitleTracks: [],
           needsTranscode: false,
           playable: true,
+          hasFFmpeg,
         });
       }
     });
@@ -739,6 +745,7 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
         subtitleTracks: [],
         needsTranscode: false,
         playable: true,
+        hasFFmpeg,
       });
     });
   } catch (err: any) {
