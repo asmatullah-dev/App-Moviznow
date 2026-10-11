@@ -760,12 +760,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               if (found && typeof found.timeSpent === 'number') cachedUserTime = found.timeSpent;
             }
           } catch (e) {}
+          const userEmailLower = (currentUser.email || "").toLowerCase();
+          const isOwner = userEmailLower === "asmatn628@gmail.com";
+          const isAdmin = [
+            "asmatullah9327@gmail.com",
+            "kabirahmaddev@gmail.com",
+            "wamoviesstation@gmail.com",
+          ].includes(userEmailLower);
           mergedProfile = {
             uid: currentUser.uid,
             email: currentUser.email || "",
             displayName: currentUser.displayName || currentUser.email?.split("@")[0] || "Movie Fan",
-            role: "user",
-            status: "active",
+            role: isOwner ? "owner" : (isAdmin ? "admin" : "user"),
+            status: isOwner || isAdmin ? "active" : "pending",
+            expiryDate: isOwner || isAdmin ? "Lifetime" : null,
             createdAt: new Date().toISOString(),
             favorites: [],
             watchLater: [],
@@ -2144,7 +2152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (result.user.displayName) updates.displayName = result.user.displayName;
         if (result.user.photoURL) updates.photoURL = result.user.photoURL;
       } else {
-        // New Google user — Google users are automatically whitelisted & active!
+        // New Google user — keep status as pending for new users (active for owner/admin)
         const userEmailLower = (result.user.email || "").toLowerCase();
         const isOwner = userEmailLower === "asmatn628@gmail.com";
         const isAdmin = [
@@ -2153,8 +2161,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           "wamoviesstation@gmail.com",
         ].includes(userEmailLower);
         updates.role = isOwner ? "owner" : (isAdmin ? "admin" : "user");
-        updates.status = "active";
-        updates.expiryDate = "Lifetime";
+        updates.status = isOwner || isAdmin ? "active" : "pending";
+        updates.expiryDate = isOwner || isAdmin ? "Lifetime" : null;
         updates.email = result.user.email || "";
         updates.displayName = result.user.displayName || "Movie Fan";
         updates.photoURL = result.user.photoURL || "";
