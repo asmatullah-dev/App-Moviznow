@@ -126,7 +126,7 @@ function formatTime(seconds: number): string {
  * Uses the clean, full language name (e.g. Hindi, English, Tamil).
  * If the language name exceeds 8 characters, gracefully truncates with an ellipsis (e.g. Portugue...).
  */
-export function formatAudioLanguageLabel(lang?: string): string {
+export function formatAudioLanguageLabel(lang?: string, options?: { forButton?: boolean }): string {
   if (!lang || typeof lang !== "string") return "Audio";
   let clean = lang.trim();
 
@@ -342,8 +342,8 @@ export function formatAudioLanguageLabel(lang?: string): string {
     fullName = clean.charAt(0).toUpperCase() + clean.slice(1);
   }
 
-  // If the language name is too long (> 8 characters), truncate with ellipsis
-  if (fullName.length > 8) {
+  // For button labels (or when forButton is true), if the language name is too long (> 8 chars), truncate with ellipsis
+  if (options?.forButton && fullName.length > 8) {
     return fullName.slice(0, 8) + "...";
   }
 
@@ -354,7 +354,7 @@ export function formatAudioLanguageLabel(lang?: string): string {
  * Backward compatibility export
  */
 export function getLanguageShortCode(lang?: string): string {
-  return formatAudioLanguageLabel(lang);
+  return formatAudioLanguageLabel(lang, { forButton: true });
 }
 
 export interface ParsedHeaderTitle {
@@ -381,7 +381,7 @@ export function parsePlayerHeaderTitle(
 
   // Strip quality suffixes (e.g. " - 720p", " - 480p HEVC", " - 1080p", " 4K", etc.)
   titleStr = titleStr
-    .replace(/\s*[-–—|•]?\s*\b(\d{3,4}p(?:\s*hevc)?|4k(?:\s*hevc)?|2160p|1080p|720p|480p|hevc|hdrip|webrip|web-dl|bluray|dvdrip|remux)\b.*$/i, "")
+    .replace(/\s*[-–—|•]?\s*\b(\d{3,4}p(?:[\s._\-–—]*\[?\(?hevc\)?\]?)?|4k(?:[\s._\-–—]*\[?\(?hevc\)?\]?)?|2160p|1080p|720p|480p|hevc|hdrip|webrip|web-dl|bluray|dvdrip|remux)\b.*$/i, "")
     .trim();
 
   const sNum = seasonInfo?.number ?? seasonInfo?.seasonNumber;
@@ -398,7 +398,7 @@ export function parsePlayerHeaderTitle(
     let epName = episodeInfo?.title || (epMatch ? (epMatch[4] || epMatch[5] || epMatch[6] || "") : "");
     epName = epName
       .replace(/^[:\s\-–—]+/, "")
-      .replace(/\s*[-–—|•]?\s*\b(\d{3,4}p(?:\s*hevc)?|4k|hevc).*/i, "")
+      .replace(/\s*[-–—|•]?\s*\b(\d{3,4}p(?:[\s._\-–—]*\[?\(?hevc\)?\]?)?|4k|hevc).*/i, "")
       .trim();
 
     return {
@@ -663,7 +663,6 @@ export function useNativePlayerCheck(hubcloudUrl?: string) {
 
     return () => {
       isMounted = false;
-      controller.abort();
     };
   }, [hubcloudUrl]);
 
@@ -1189,7 +1188,7 @@ export function NativePlayer({
 
   const hasStartedPlaybackRef = useRef<boolean>(false);
 
-  // 15-second fallback: if playing on FSL server and it fails to start playing in 15 seconds, change to Pixeldrain
+  // 20-second fallback: if playing on FSL server and it fails to start playing in 20 seconds, change to Pixeldrain only if it really failed
   useEffect(() => {
     if (!isOpen || engine !== "native") return;
     if (activeServer !== "fsl") return;
@@ -1197,9 +1196,10 @@ export function NativePlayer({
 
     hasStartedPlaybackRef.current = false;
     const timerId = setTimeout(() => {
-      // If FSL server failed to start playback in 15 seconds
-      if (!hasStartedPlaybackRef.current) {
-        console.warn("[NativePlayer] FSL Server failed to start playback within 15 seconds. Switching to Pixeldrain Server...");
+      // Check if FSL server is actually playing or has played
+      const isCurrentlyPlaying = videoRef.current && !videoRef.current.paused && videoRef.current.currentTime > 0;
+      if (!hasStartedPlaybackRef.current && !isCurrentlyPlaying) {
+        console.warn("[NativePlayer] FSL Server failed to play within 20 seconds. Switching to Pixeldrain Server...");
         showToast(t("FSL server took too long. Switching to Pixeldrain..."));
         setActiveServer("pixeldrain");
         const needsTc = isDirectMkv || mediaInfo?.isMkv || mediaInfo?.needsTranscode;
@@ -1208,7 +1208,7 @@ export function NativePlayer({
         setStreamAttempt((prev) => prev + 1);
         setIsBuffering(true);
       }
-    }, 15000);
+    }, 20000);
 
     return () => {
       clearTimeout(timerId);
@@ -1249,15 +1249,14 @@ export function NativePlayer({
       Boolean(mediaInfo?.isMkv) ||
       Boolean(mediaInfo?.needsTranscode);
 
-    // If on Pixeldrain and proxy failed on retry (streamAttempt >= 1), only stream directly if file DOES NOT require transcoding
-    // Pixeldrain supports CORS (Access-Control-Allow-Origin: *), completely bypassing serverless limits for native mp4
+    // Pixeldrain natively provides Access-Control-Allow-Origin: * (CORS).
+    // Stream directly from Pixeldrain to bypass server proxy latency and Vercel execution limits
+    // whenever transcoding is not required and default audio track is selected.
     if (
       !requiresTranscode &&
       activeServer === "pixeldrain" &&
-      streamAttempt >= 1 &&
       directStreamUrl.startsWith("http") &&
-      selectedAudioTrack === 0 &&
-      seekOffset === 0
+      selectedAudioTrack === 0
     ) {
       return directStreamUrl;
     }
@@ -1580,9 +1579,14 @@ export function NativePlayer({
 
   const handleVideoError = () => {
     setIsBuffering(false);
-    // If on FSL server and Pixeldrain candidate is available, switch immediately to Pixeldrain!
+    // If the video is actually playing and healthy, ignore spurious error events
+    if (videoRef.current && !videoRef.current.paused && videoRef.current.currentTime > 0 && !videoRef.current.error) {
+      return;
+    }
+
+    // If on FSL server and Pixeldrain candidate is available, switch to Pixeldrain only if FSL truly failed
     if (activeServer === "fsl" && pixeldrainCandidate) {
-      console.warn("[NativePlayer] FSL server error encountered. Switching to Pixeldrain Server...");
+      console.warn("[NativePlayer] Genuine FSL server error encountered. Switching to Pixeldrain Server...");
       showToast(t("FSL server error. Switching to Pixeldrain..."));
       setActiveServer("pixeldrain");
       const needsTc = isDirectMkv || mediaInfo?.isMkv || mediaInfo?.needsTranscode;
@@ -2019,12 +2023,13 @@ export function NativePlayer({
                   }
                 }}
                 onStalled={() => {
-                  if (!isSwitchingAudioRef.current) {
+                  // Only mark buffering if video is paused or genuinely blocked at beginning (not playing)
+                  if (!isSwitchingAudioRef.current && videoRef.current && (videoRef.current.paused || videoRef.current.currentTime === 0)) {
                     setIsBuffering(true);
                   }
                 }}
                 onLoadStart={() => {
-                  if (!isSwitchingAudioRef.current) {
+                  if (!isSwitchingAudioRef.current && (!videoRef.current || videoRef.current.currentTime === 0)) {
                     setIsBuffering(true);
                   }
                 }}
@@ -2516,7 +2521,7 @@ export function NativePlayer({
                     >
                       <Mic className="w-3.5 h-3.5 text-emerald-400" />
                       <span className="max-w-[95px] truncate">
-                        {formatAudioLanguageLabel(mediaInfo?.audioTracks?.find((a) => a.id === selectedAudioTrack)?.language)}
+                        {formatAudioLanguageLabel(mediaInfo?.audioTracks?.find((a) => a.id === selectedAudioTrack)?.language, { forButton: true })}
                       </span>
                     </button>
                   )}

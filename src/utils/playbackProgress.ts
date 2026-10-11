@@ -79,16 +79,23 @@ export function extractQualityLabel(name?: string): string {
   if (!name || typeof name !== 'string') return 'HD';
   const trimmed = name.trim();
   const match = trimmed.match(
-    /\b(480p|720p\s*hevc|720p|1080p\s*hevc|1080p|2160p|4k|hevc)\b/i
+    /\b(480p[\s._\-–—]*\[?\(?hevc\)?\]?|480p|720p[\s._\-–—]*\[?\(?hevc\)?\]?|720p|1080p[\s._\-–—]*\[?\(?hevc\)?\]?|1080p|2160p[\s._\-–—]*\[?\(?hevc\)?\]?|2160p|4k[\s._\-–—]*\[?\(?hevc\)?\]?|4k|hevc)\b/i
   );
-  if (match) return match[0].toUpperCase();
+  if (match) {
+    return match[0]
+      .toUpperCase()
+      .replace(/[\(\)\[\]\-_]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
 
   const lower = trimmed.toLowerCase();
-  if (lower.includes('480')) return '480P';
-  if (lower.includes('720')) return '720P';
-  if (lower.includes('1080')) return '1080P';
-  if (lower.includes('2160') || lower.includes('4k')) return '4K';
-  if (lower.includes('hevc')) return 'HEVC';
+  const isHevc = lower.includes('hevc') || lower.includes('x265') || lower.includes('h265') || lower.includes('h.265');
+  if (lower.includes('480')) return isHevc ? '480P HEVC' : '480P';
+  if (lower.includes('720')) return isHevc ? '720P HEVC' : '720P';
+  if (lower.includes('1080')) return isHevc ? '1080P HEVC' : '1080P';
+  if (lower.includes('2160') || lower.includes('4k')) return isHevc ? '4K HEVC' : '4K';
+  if (isHevc) return 'HEVC';
 
   return trimmed.length > 12 ? `${trimmed.slice(0, 10)}...` : trimmed;
 }
@@ -113,9 +120,11 @@ export function getPreferredQuality(): string {
 
     if (raw && !raw.startsWith('auto')) {
       const match = raw.match(/(\d{3,4}p?)/i);
+      const isHevc = raw.includes('hevc');
       if (match) {
         const val = match[1].toLowerCase();
-        return val.endsWith('p') ? val : `${val}p`;
+        const base = val.endsWith('p') ? val : `${val}p`;
+        return isHevc ? `${base} hevc` : base;
       }
       return raw;
     }
@@ -133,8 +142,9 @@ export function setPreferredQuality(quality: string): void {
   const clean = quality.trim().toLowerCase();
   if (!clean || clean.startsWith('auto')) return;
   const match = clean.match(/(\d{3,4}p?)/i);
+  const isHevc = clean.includes('hevc');
   const normalized = match
-    ? (match[1].toLowerCase().endsWith('p') ? match[1].toLowerCase() : `${match[1].toLowerCase()}p`)
+    ? `${match[1].toLowerCase().endsWith('p') ? match[1].toLowerCase() : `${match[1].toLowerCase()}p`}${isHevc ? ' hevc' : ''}`
     : clean;
 
   try {
@@ -189,6 +199,7 @@ export function findBestQualityLink<T extends { url: string; name?: string; labe
   if (!Array.isArray(links) || links.length === 0) return null;
   const pref = (preferredQuality || getPreferredQuality()).trim().toLowerCase();
   const targetH = parseInt(pref.replace(/[^0-9]/g, ''), 10) || 720;
+  const prefersHevc = pref.includes('hevc');
 
   const parseHeight = (item: T): number => {
     const str = `${item.name || ''} ${item.label || ''} ${item.url || ''}`.toLowerCase();
@@ -200,9 +211,20 @@ export function findBestQualityLink<T extends { url: string; name?: string; labe
     return 0;
   };
 
-  // 1. Direct exact height match
-  const exact = links.find((l) => parseHeight(l) === targetH);
-  if (exact) return exact;
+  const isItemHevc = (item: T): boolean => {
+    const str = `${item.name || ''} ${item.label || ''} ${item.url || ''}`.toLowerCase();
+    return str.includes('hevc') || str.includes('x265');
+  };
+
+  // 1. Direct exact height match (preferring HEVC if user prefers HEVC, or non-HEVC otherwise)
+  const exact = links.filter((l) => parseHeight(l) === targetH);
+  if (exact.length > 0) {
+    if (prefersHevc) {
+      const hevcMatch = exact.find(isItemHevc);
+      if (hevcMatch) return hevcMatch;
+    }
+    return exact[0];
+  }
 
   // 2. Highest lower height
   const parsedWithHeights = links.map((l) => ({ link: l, height: parseHeight(l) }));

@@ -86,6 +86,7 @@ import SharePreviewModal from "../../components/SharePreviewModal";
 import {
   getPreferredQuality,
   findBestQualityLink,
+  extractQualityLabel,
 } from "../../utils/playbackProgress";
 import PlayerFU, { PlayerFUButton, usePlayerFU } from "../../components/PlayerFU";
 import NativePlayer, {
@@ -873,8 +874,7 @@ export default function MovieDetails() {
     const targetLink = hc720 || hc1080 || hcAny || links.find((l) => isPd(l.url));
 
     if (targetLink?.name) {
-      const match = targetLink.name.match(/\b(480p|720p\s*hevc|720p|1080p\s*hevc|1080p|2160p|4k|hevc)\b/i);
-      if (match) return match[0].toUpperCase();
+      return extractQualityLabel(targetLink.name);
     }
     return "720p";
   }, [mergedContent]);
