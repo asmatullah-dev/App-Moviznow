@@ -199,99 +199,6 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
           opacity: 1 !important;
         }
 
-        /* Subtle Mini Progress Bar at the bottom edge when controls/menu are hidden (as in nativePlayer with PlayerFU signature amber color) */
-        .player-mini-progress,
-        #playerMiniProgress {
-          position: absolute !important;
-          bottom: 0 !important;
-          left: 0 !important;
-          right: 0 !important;
-          width: 100% !important;
-          height: 4px !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          z-index: 50 !important;
-          cursor: pointer !important;
-          pointer-events: auto !important;
-          opacity: 0 !important;
-          transition: opacity 0.3s ease, height 0.15s ease !important;
-        }
-        @media (min-width: 640px) {
-          .player-mini-progress,
-          #playerMiniProgress {
-            height: 6px !important;
-          }
-        }
-        .player-mini-progress:hover,
-        #playerMiniProgress:hover {
-          height: 8px !important;
-        }
-
-        /* Unplayed blurred black background */
-        .player-mini-progress .player-mini-bg,
-        #playerMiniProgress .player-mini-bg {
-          position: absolute !important;
-          inset: 0 !important;
-          background: rgba(0, 0, 0, 0.85) !important;
-          backdrop-filter: blur(8px) !important;
-          -webkit-backdrop-filter: blur(8px) !important;
-          border-top: 1px solid rgba(255, 255, 255, 0.2) !important;
-          pointer-events: none !important;
-        }
-
-        /* Buffer Bar (zinc-600/60) */
-        .player-mini-progress .player-mini-buffered,
-        #playerMiniProgress .player-mini-buffered {
-          position: absolute !important;
-          top: 0 !important;
-          bottom: 0 !important;
-          left: 0 !important;
-          width: 0% !important;
-          background: rgba(113, 113, 122, 0.6) !important;
-          transition: width 0.2s ease !important;
-          pointer-events: none !important;
-        }
-
-        /* Watched Progress Bar with PlayerFU signature amber color (#ff9000 gradient) */
-        .player-mini-progress .player-mini-played,
-        #playerMiniProgress .player-mini-played {
-          position: absolute !important;
-          top: 0 !important;
-          bottom: 0 !important;
-          left: 0 !important;
-          width: 0% !important;
-          background: linear-gradient(90deg, #ff7a00, #ff9000, #ffa42a) !important;
-          box-shadow: 0 0 10px rgba(255, 144, 0, 0.85) !important;
-          transition: width 0.15s ease !important;
-          pointer-events: none !important;
-        }
-
-        /* SHOW mini progress bar when controls/menu are hidden (player is idle) */
-        .player-mini-progress.is-visible,
-        #playerMiniProgress.is-visible,
-        .player.idle .player-mini-progress:not(.is-hidden),
-        .player.idle #playerMiniProgress:not(.is-hidden),
-        body.hide-controls .player .player-mini-progress:not(.is-hidden),
-        body.hide-controls .player #playerMiniProgress:not(.is-hidden) {
-          opacity: 1 !important;
-          pointer-events: auto !important;
-        }
-
-        /* STRICTLY HIDE mini progress bar when controls or menu are showing */
-        .player-mini-progress.is-hidden,
-        #playerMiniProgress.is-hidden,
-        .player:not(.idle) .player-mini-progress,
-        .player:not(.idle) #playerMiniProgress,
-        .player.show-controls .player-mini-progress,
-        .player.show-controls #playerMiniProgress,
-        .ps-sheet.open ~ .player-mini-progress,
-        .ps-sheet.open ~ #playerMiniProgress,
-        .ps-backdrop.visible ~ .player-mini-progress,
-        .ps-backdrop.visible ~ #playerMiniProgress {
-          opacity: 0 !important;
-          pointer-events: none !important;
-        }
-
         /* Center play/pause circle button styling */
         body.is-embed .player .big-play,
         body.is-watch .player .big-play,
@@ -340,13 +247,13 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
           fill: #fff !important;
         }
 
-        /* Center play icon: optical center nudge of +1px balances triangle centroid with its bounding box */
+        /* Center play icon: ensure perfectly centered inside circle without rightward offset */
         body.is-embed .player .big-play #bigIconPlay,
         body.is-watch .player .big-play #bigIconPlay,
         .big-play #bigIconPlay,
         #bigIconPlay {
-          transform: translateX(1px) !important;
-          margin: 0 !important;
+          transform: none !important;
+          margin: 0 auto !important;
         }
 
         /* Pause icon (two symmetric vertical bars) */
@@ -421,6 +328,71 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
           font-weight: 600 !important;
           font-size: 12.5px !important;
           color: #fff !important;
+        }
+
+        /* Subtle Mini Progress Bar on hidden menu in PlayerFU (clean, no codec) */
+        #playerMiniProgress {
+          position: absolute !important;
+          bottom: 0 !important;
+          left: 0 !important;
+          right: 0 !important;
+          width: 100% !important;
+          height: 3px !important;
+          z-index: 4 !important;
+          background: rgba(10, 13, 18, 0.75) !important;
+          backdrop-filter: blur(4px) !important;
+          -webkit-backdrop-filter: blur(4px) !important;
+          border-top: 1px solid rgba(255, 255, 255, 0.15) !important;
+          opacity: 0 !important;
+          pointer-events: none !important;
+          transition: opacity 0.25s ease !important;
+          cursor: pointer !important;
+        }
+
+        #playerMiniBuffered {
+          position: absolute !important;
+          top: 0 !important;
+          bottom: 0 !important;
+          left: 0 !important;
+          width: 0% !important;
+          background: rgba(255, 255, 255, 0.28) !important;
+          pointer-events: none !important;
+          transition: width 0.2s ease !important;
+        }
+
+        #playerMiniPlayed {
+          position: absolute !important;
+          top: 0 !important;
+          bottom: 0 !important;
+          left: 0 !important;
+          width: 0% !important;
+          background: linear-gradient(to right, #ff9000, #ffa42a) !important;
+          box-shadow: 0 0 8px rgba(255, 144, 0, 0.7) !important;
+          pointer-events: none !important;
+          transition: width 0.1s linear !important;
+        }
+
+        /* Remove codec text and badges on bottom progress bar */
+        #playerMiniProgress .codec-info,
+        #playerMiniProgress .stream-badge,
+        #playerMiniProgress span {
+          display: none !important;
+        }
+
+        /* Show ONLY when player controls are idle/hidden */
+        .player.idle #playerMiniProgress,
+        .player.hide-controls #playerMiniProgress,
+        body.hide-controls #playerMiniProgress {
+          opacity: 1 !important;
+          pointer-events: auto !important;
+        }
+
+        /* Hide whenever controls or menus are visible */
+        .player:not(.idle) #playerMiniProgress,
+        .player.show-controls #playerMiniProgress,
+        .player.has-sheet #playerMiniProgress {
+          opacity: 0 !important;
+          pointer-events: none !important;
         }
       </style>
     `;
@@ -498,11 +470,8 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
             video.addEventListener("canplay", doResume);
 
             // Auto-start playback helper with muted fallback on initial load only
-            var initialAutoplayTriggered = false;
-            var startInitialPlayback = function() {
-              if (initialAutoplayTriggered) return;
+            var startPlayback = function() {
               if (video && video.paused) {
-                initialAutoplayTriggered = true;
                 var p = video.play();
                 if (p && typeof p.catch === "function") {
                   p.catch(function() {
@@ -513,79 +482,124 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
               }
             };
 
-            video.addEventListener("canplay", startInitialPlayback, { once: true });
-            video.addEventListener("loadeddata", startInitialPlayback, { once: true });
-            setTimeout(startInitialPlayback, 600);
+            video.addEventListener("canplay", startPlayback);
+            video.addEventListener("loadeddata", startPlayback);
+            video.addEventListener("loadedmetadata", startPlayback);
+            setTimeout(startPlayback, 300);
+            setTimeout(startPlayback, 800);
+            setTimeout(startPlayback, 1600);
 
-            // One-time user interaction gesture handler to unmute if initial playback was muted
-            var hasInteracted = false;
-            var handleFirstInteraction = function() {
-              if (hasInteracted) return;
-              hasInteracted = true;
-              document.removeEventListener("click", handleFirstInteraction, true);
-              document.removeEventListener("touchend", handleFirstInteraction, true);
-              document.removeEventListener("pointerdown", handleFirstInteraction, true);
-
-              if (video && video.muted) {
-                video.muted = false;
+            // User gesture handler to unmute and ensure playback
+            var handleUserInteraction = function(e) {
+              if (video) {
+                if (video.muted) {
+                  video.muted = false;
+                }
+                if (video.paused && (!e || !e.target || !e.target.closest || !e.target.closest("#btnPlay, .big-play, #bigPlay"))) {
+                  video.play().catch(function() {});
+                }
               }
             };
-            document.addEventListener("click", handleFirstInteraction, true);
-            document.addEventListener("touchend", handleFirstInteraction, true);
-            document.addEventListener("pointerdown", handleFirstInteraction, true);
+            document.addEventListener("click", handleUserInteraction, true);
+            document.addEventListener("touchend", handleUserInteraction, true);
+            document.addEventListener("pointerdown", handleUserInteraction, true);
 
-            // Periodic progress saving and real-time message posting
-            var lastSave = 0;
-            function reportProgress() {
-              var cur = Math.floor(video.currentTime || 0);
-              var dur = Math.floor(video.duration || 0);
-              var pct = dur > 0 ? (cur / dur) * 100 : 0;
-              var realPlayed = document.getElementById("progressPlayed");
-              if (realPlayed && realPlayed.style.width) {
-                var parsedPct = parseFloat(realPlayed.style.width);
-                if (!isNaN(parsedPct) && parsedPct > 0) pct = parsedPct;
+            // Allow clicking video or stage to toggle play/pause
+            var stageEl = document.querySelector(".player-stage") || document.getElementById("player");
+            if (stageEl) {
+              stageEl.addEventListener("click", function(e) {
+                var t = e.target;
+                if (t === video || t === stageEl || t.id === "video" || (t.classList && t.classList.contains("player-stage"))) {
+                  if (video.paused) {
+                    video.play().catch(function() {
+                      video.muted = true;
+                      video.play().catch(function(){});
+                    });
+                  } else {
+                    video.pause();
+                  }
+                }
+              });
+            }
+
+            // Subtle Mini Progress Bar on hidden menu in PlayerFU
+            function ensureMiniProgress() {
+              var playerEl = document.getElementById("player") || document.querySelector(".player");
+              if (!playerEl || document.getElementById("playerMiniProgress")) return;
+              var bar = document.createElement("div");
+              bar.id = "playerMiniProgress";
+              bar.title = "Click to show controls";
+              bar.innerHTML = '<div id="playerMiniBuffered"></div><div id="playerMiniPlayed"></div>';
+              playerEl.appendChild(bar);
+              bar.addEventListener("click", function(e) {
+                e.stopPropagation();
+                playerEl.classList.remove("idle");
+                var controls = document.getElementById("controls");
+                if (controls) controls.style.opacity = "1";
+              });
+            }
+            ensureMiniProgress();
+            setInterval(ensureMiniProgress, 400);
+
+            function updateMiniProgress() {
+              var playedEl = document.getElementById("playerMiniPlayed");
+              var buffEl = document.getElementById("playerMiniBuffered");
+              if (!video) return;
+              var cur = video.currentTime || 0;
+              var dur = video.duration || 0;
+              if (playedEl && dur > 0) {
+                playedEl.style.width = Math.min(100, (cur / dur) * 100) + "%";
               }
-
-              var bufferedPct = 0;
-              if (video.buffered && video.buffered.length > 0 && dur > 0) {
-                try {
-                  var bEnd = video.buffered.end(video.buffered.length - 1);
-                  bufferedPct = Math.min(100, Math.max(0, (bEnd / dur) * 100));
-                } catch(e) {}
+              if (buffEl && dur > 0 && video.buffered && video.buffered.length > 0) {
+                var bEnd = video.buffered.end(video.buffered.length - 1);
+                buffEl.style.width = Math.min(100, (bEnd / dur) * 100) + "%";
               }
+              syncMiniVisibility();
+            }
 
-              var now = Date.now();
-              if (now - lastSave >= 2000 && cur > 2) {
-                lastSave = now;
-                try {
-                  localStorage.setItem(storageKey, cur.toString());
-                } catch(e) {}
-              }
-
-              if (window.parent && window.parent !== window) {
-                try {
-                  var isCtrlVis = true;
-                  var pEl = document.getElementById("player") || document.querySelector(".player");
-                  if (pEl && pEl.classList.contains("idle")) isCtrlVis = false;
-                  window.parent.postMessage({
-                    type: "MOVIZNOW_PLAYBACK_PROGRESS",
-                    contentId: rawContentId,
-                    cleanContentId: cleanContentId,
-                    currentTime: cur,
-                    duration: dur,
-                    percent: pct,
-                    bufferedPercent: bufferedPct,
-                    isControlsVisible: isCtrlVis
-                  }, "*");
-                } catch(e) {}
+            function syncMiniVisibility() {
+              var playerEl = document.getElementById("player");
+              var controlsEl = document.getElementById("controls");
+              var mini = document.getElementById("playerMiniProgress");
+              if (!playerEl || !mini) return;
+              var isIdle = playerEl.classList.contains("idle");
+              var controlsHidden = controlsEl && (window.getComputedStyle(controlsEl).opacity === "0" || window.getComputedStyle(controlsEl).visibility === "hidden" || window.getComputedStyle(controlsEl).display === "none");
+              var isSheetOpen = !!document.querySelector(".ps-sheet.open");
+              if ((isIdle || controlsHidden) && !isSheetOpen && video && !video.paused) {
+                mini.style.setProperty("opacity", "1", "important");
+                mini.style.setProperty("pointer-events", "auto", "important");
+              } else {
+                mini.style.setProperty("opacity", "0", "important");
+                mini.style.setProperty("pointer-events", "none", "important");
               }
             }
 
-            video.addEventListener("timeupdate", reportProgress);
-            video.addEventListener("loadedmetadata", reportProgress);
-            video.addEventListener("durationchange", reportProgress);
-            video.addEventListener("play", reportProgress);
-            video.addEventListener("pause", reportProgress);
+            video.addEventListener("timeupdate", updateMiniProgress);
+            video.addEventListener("progress", updateMiniProgress);
+            setInterval(syncMiniVisibility, 250);
+
+            // Periodic progress saving every 2 seconds
+            var lastSave = 0;
+            video.addEventListener("timeupdate", function() {
+              var now = Date.now();
+              if (now - lastSave >= 2000 && video.currentTime > 2) {
+                lastSave = now;
+                var cur = Math.floor(video.currentTime);
+                var dur = Math.floor(video.duration || 0);
+                try {
+                  localStorage.setItem(storageKey, cur.toString());
+                  if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                      type: "MOVIZNOW_PLAYBACK_PROGRESS",
+                      contentId: contentId,
+                      currentTime: cur,
+                      duration: dur,
+                      percent: dur > 0 ? (cur / dur) * 100 : 0
+                    }, "*");
+                  }
+                } catch(e) {}
+              }
+            });
 
             // Apply & persist playback speed preferences
             var currentSpeed = 1;
@@ -745,167 +759,26 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
             setInterval(syncButtonsVisibility, 350);
             syncButtonsVisibility();
 
-            // 2. Slim progress bar when menu/controls are hidden (identical to nativePlayer, keeping PlayerFU amber color)
-            function ensureMiniProgressBar() {
-              var player = document.getElementById("player") || document.querySelector(".player");
-              if (player && !document.getElementById("playerMiniProgress")) {
-                var bar = document.createElement("div");
-                bar.className = "player-mini-progress";
-                bar.id = "playerMiniProgress";
-                bar.title = "Click to show controls";
-                bar.innerHTML = '<div class="player-mini-bg" id="playerMiniBg"></div><div class="player-mini-buffered" id="playerMiniBuffered"></div><div class="player-mini-played" id="playerMiniPlayed"></div>';
-                player.appendChild(bar);
-
-                var wakeControls = function(e) {
-                  if (e && e.stopPropagation) e.stopPropagation();
-                  if (typeof resetIdle === "function") {
-                    resetIdle();
-                  } else if (player) {
-                    player.classList.remove("idle");
-                  }
-                  syncMiniProgressVisibility();
-                };
-
-                var handleSeekAndWake = function(e) {
-                  if (e && e.stopPropagation) e.stopPropagation();
-                  var rect = bar.getBoundingClientRect();
-                  if (rect.width > 0) {
-                    var clickX = e.clientX - rect.left;
-                    var clickPct = Math.max(0, Math.min(1, clickX / rect.width));
-                    var vid = document.getElementById("video") || document.querySelector("video");
-                    if (vid && vid.duration && isFinite(vid.duration)) {
-                      try {
-                        vid.currentTime = clickPct * vid.duration;
-                      } catch(err) {}
-                    }
-                  }
-                  wakeControls(e);
-                };
-
-                bar.addEventListener("click", handleSeekAndWake);
-                bar.addEventListener("pointerdown", wakeControls, { passive: true });
-                bar.addEventListener("touchend", wakeControls, { passive: true });
-              }
-            }
-            ensureMiniProgressBar();
-            setInterval(ensureMiniProgressBar, 400);
-
-            var lastReportedControlState = null;
-            function syncMiniProgressVisibility() {
-              var bar = document.getElementById("playerMiniProgress");
-              var player = document.getElementById("player") || document.querySelector(".player");
-              if (!bar || !player) return;
-
-              // In Play4U, when controls or menu are showing, player does NOT have idle class.
-              // When idle auto-hides controls into hidden menu mode, player HAS idle class.
-              var isIdle = player.classList.contains("idle") || document.body.classList.contains("hide-controls");
-              var psSheet = document.getElementById("psSheet") || document.querySelector(".ps-sheet");
-              var isSheetOpen = psSheet ? (psSheet.classList.contains("open") || psSheet.getAttribute("aria-hidden") === "false") : false;
-              var isBackdropOpen = Boolean(document.querySelector(".ps-backdrop.visible"));
-
-              // Menu or controls are showing if NOT idle OR a sheet/menu is open
-              var isShowing = (!isIdle) || isSheetOpen || isBackdropOpen || player.classList.contains("show-controls");
-
-              if (isShowing) {
-                // DO NOT show bottom progress bar when menu or controls are showing!
-                bar.classList.add("is-hidden");
-                bar.classList.remove("is-visible");
-              } else {
-                // Show bottom progress bar when menu and controls are hidden (idle mode)
-                bar.classList.remove("is-hidden");
-                bar.classList.add("is-visible");
-              }
-
-              if (lastReportedControlState !== isShowing) {
-                lastReportedControlState = isShowing;
-                if (window.parent && window.parent !== window) {
-                  try {
-                    window.parent.postMessage({
-                      type: "MOVIZNOW_CONTROLS_VISIBILITY",
-                      visible: isShowing
-                    }, "*");
-                  } catch(e) {}
-                }
-              }
-            }
-
-            function updateMiniProgress() {
-              var vid = document.getElementById("video") || document.querySelector("video");
-              if (!vid) return;
-              var miniPlayed = document.getElementById("playerMiniPlayed");
-              var miniBuffered = document.getElementById("playerMiniBuffered");
-              var dur = vid.duration || 0;
-              var cur = vid.currentTime || 0;
-              if (miniPlayed && dur > 0) {
-                var pct = (cur / dur) * 100;
-                miniPlayed.style.width = Math.min(100, Math.max(0, pct)) + "%";
-              }
-              if (miniBuffered && dur > 0 && vid.buffered && vid.buffered.length > 0) {
-                try {
-                  var bEnd = vid.buffered.end(vid.buffered.length - 1);
-                  miniBuffered.style.width = Math.min(100, Math.max(0, (bEnd / dur) * 100)) + "%";
-                } catch(e) {}
-              }
-              syncMiniProgressVisibility();
-            }
-
-            // Immediately sync on player events and user interactions
-            ["mousemove", "mousedown", "pointerdown", "touchstart", "keydown", "click"].forEach(function(evt) {
-              window.addEventListener(evt, syncMiniProgressVisibility, { passive: true });
-            });
-
-            var playerStage = document.getElementById("player") || document.querySelector(".player");
-            if (playerStage && window.MutationObserver) {
-              var observer = new MutationObserver(syncMiniProgressVisibility);
-              observer.observe(playerStage, { attributes: true, attributeFilter: ["class"] });
-            }
-
-            video.addEventListener("timeupdate", updateMiniProgress);
-            video.addEventListener("progress", updateMiniProgress);
-            video.addEventListener("seeking", updateMiniProgress);
-            video.addEventListener("seeked", updateMiniProgress);
-            video.addEventListener("pause", syncMiniProgressVisibility);
-            video.addEventListener("play", syncMiniProgressVisibility);
-            setInterval(updateMiniProgress, 250);
-
-            // Listen for wake controls & seek requests from parent window
-            window.addEventListener("message", function(e) {
-              if (!e.data) return;
-              if (e.data.type === "MOVIZNOW_WAKE_CONTROLS") {
-                var player = document.getElementById("player") || document.querySelector(".player");
-                if (player) {
-                  player.classList.remove("idle");
-                  player.classList.add("show-controls");
-                  var controls = document.getElementById("controls");
-                  if (controls) controls.style.opacity = "1";
-                  setTimeout(function() {
-                    player.classList.remove("show-controls");
-                  }, 3500);
-                }
-              } else if (e.data.type === "MOVIZNOW_SEEK" && typeof e.data.percent === "number") {
-                var vid = document.getElementById("video") || document.querySelector("video");
-                if (vid && vid.duration && isFinite(vid.duration)) {
-                  try {
-                    vid.currentTime = e.data.percent * vid.duration;
-                  } catch(err) {}
-                }
-              }
-            });
-
-            // Mutual exclusivity for center circle Play vs Pause icons
+            // Mutual exclusivity for Play vs Pause icons
             function syncCenterButtonIcons() {
               var vid = document.getElementById("video") || document.querySelector("video");
               var playIcon = document.getElementById("bigIconPlay");
               var pauseIcon = document.getElementById("bigIconPause");
-              if (!playIcon || !pauseIcon) return;
+              var iconPlay = document.getElementById("iconPlay");
+              var iconPause = document.getElementById("iconPause");
+              if (!vid) return;
 
-              var isPaused = vid ? vid.paused : true;
+              var isPaused = vid.paused;
               if (isPaused) {
-                playIcon.style.setProperty("display", "block", "important");
-                pauseIcon.style.setProperty("display", "none", "important");
+                if (playIcon) playIcon.style.setProperty("display", "block", "important");
+                if (pauseIcon) pauseIcon.style.setProperty("display", "none", "important");
+                if (iconPlay) iconPlay.style.setProperty("display", "block", "important");
+                if (iconPause) iconPause.style.setProperty("display", "none", "important");
               } else {
-                playIcon.style.setProperty("display", "none", "important");
-                pauseIcon.style.setProperty("display", "block", "important");
+                if (playIcon) playIcon.style.setProperty("display", "none", "important");
+                if (pauseIcon) pauseIcon.style.setProperty("display", "block", "important");
+                if (iconPlay) iconPlay.style.setProperty("display", "none", "important");
+                if (iconPause) iconPause.style.setProperty("display", "block", "important");
               }
             }
 
@@ -1031,7 +904,7 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
     // If this is player.css, normalize optical centering for play icon
     if (assetPath.includes("player.css")) {
       let css = await response.text();
-      css = css.replace(/transform:\s*translateX\(5px\);?/g, "transform: translateX(1px);");
+      css = css.replace(/transform:\s*translateX\([^)]+\)[^;]*;?/gi, "transform: none !important;");
       res.setHeader("Content-Type", "text/css; charset=utf-8");
       res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
       return res.send(css);
@@ -1117,6 +990,9 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
           setQualityLevel(chosenIdx);
           applied = true;
         }
+        if (typeof applyStartAt === "function") {
+          applyStartAt();
+        }
         if (typeof window.__PA_TRY_PLAY__ === "function") {
           window.__PA_TRY_PLAY__();
         } else if (video && video.paused) {
@@ -1160,59 +1036,17 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
         }`
       );
 
-      // 5. Patch openSheet to support "speed" sheet type and expose global opener
+      // 5. Initialize & persist playback speed properly using player.js native speed module
       js = js.replace(
-        "function openSheet(type) {",
-        `function openSheet(type) {
-          window.__PA_OPEN_SPEED_SHEET__ = function() { openSheet("speed"); };`
+        'let playbackRate = 1;',
+        'let playbackRate = (function(){ try { var s = parseFloat(localStorage.getItem("moviznow_playback_speed")); if (!isNaN(s) && s >= 0.25 && s <= 4) return s; } catch(_) {} return 1; })();'
       );
       js = js.replace(
-        /if\s*\(type\s*===\s*["']quality["']\)\s*\{\s*psTitle\.textContent\s*=\s*["']Quality["'];\s*populateQualitySheet\(\);\s*\}/g,
-        `if (type === "speed") {
-          psTitle.textContent = "Playback speed";
-          populateSpeedSheet();
-        } else if (type === "quality") {
-          psTitle.textContent = "Quality";
-          populateQualitySheet();
-        }`
+        'playbackRate = next;',
+        'playbackRate = next; try { localStorage.setItem("moviznow_playback_speed", String(next)); } catch(_) {}'
       );
 
-      // 6. Update outside click dismiss to include #btnSpeed
-      js = js.replace(
-        /\.ps-sheet,\s*#btnAudio,\s*#btnImax,\s*#btnSubs,\s*#btnQuality,\s*\.ps-backdrop/g,
-        '.ps-sheet, #btnAudio, #btnImax, #btnSubs, #btnQuality, #btnSpeed, .ps-backdrop'
-      );
-
-      // 7. Inject Playback Speed button into control bar
-      js = js.replace(
-        /btnQuality\.addEventListener\(["']click["'],\s*\(e\)\s*=>\s*\{\s*e\.stopPropagation\(\);\s*openSheet\(["']quality["']\);\s*\}\);/g,
-        `btnQuality.addEventListener("click", (e) => {
-          e.stopPropagation();
-          openSheet("quality");
-        });
-        if (!document.getElementById("btnSpeed") && btnQuality && btnQuality.parentNode) {
-          var btnSpeed = document.createElement("button");
-          btnSpeed.type = "button";
-          btnSpeed.id = "btnSpeed";
-          btnSpeed.className = btnQuality.className || "cbtn text";
-          btnSpeed.title = "Playback speed";
-          btnSpeed.setAttribute("aria-haspopup", "dialog");
-          btnSpeed.setAttribute("aria-label", "Playback speed");
-          var savedSpeed = 1;
-          try {
-            var sp = parseFloat(localStorage.getItem("moviznow_playback_speed") || "1");
-            if (!isNaN(sp) && sp >= 0.25 && sp <= 4) savedSpeed = sp;
-          } catch(e) {}
-          btnSpeed.innerHTML = '<span id="btnSpeedVal" class="lbl-val">' + (savedSpeed ? (savedSpeed + "x") : "1x") + '</span>';
-          btnQuality.parentNode.insertBefore(btnSpeed, btnQuality);
-          btnSpeed.addEventListener("click", (e) => {
-            e.stopPropagation();
-            openSheet("speed");
-          });
-        }`
-      );
-
-      // 8. Patch preferredAudioLang to automatically prefer Hindi ('hi') unless user changed
+      // 6. Patch preferredAudioLang to automatically prefer Hindi ('hi') unless user changed
       js = js.replace(
         /function preferredAudioLang\(\)\s*\{[\s\S]*?return readStoredAudioLang\(\);\s*\}/,
         `function preferredAudioLang() {
@@ -1251,73 +1085,8 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
           if (typeof btnQuality !== "undefined" && btnQuality) btnQuality.style.display = "inline-flex";`
       );
 
-      // 9. Inject Speed Sheet builder, Quality Fallback & Auto-Play Protection INSIDE player.js IIFE
+      // 7. Inject Quality Fallback & Auto-Play Protection INSIDE player.js IIFE
       const insideIifeCode = `
-        /* MovizNow Playback Speed Sheet inside player.js IIFE */
-        function populateSpeedSheet() {
-          if (typeof psBody === "undefined" || !psBody) return;
-          psBody.innerHTML = "";
-          var speeds = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3, 3.5, 4];
-          var vid = $("video") || document.getElementById("video") || document.querySelector("video");
-          var savedSpeedStr = "";
-          try { savedSpeedStr = localStorage.getItem("moviznow_playback_speed") || ""; } catch(e) {}
-          var savedSpeedNum = parseFloat(savedSpeedStr);
-          var curRate = (typeof window.__PA_TARGET_SPEED__ === "number" && window.__PA_TARGET_SPEED__ >= 0.25)
-            ? window.__PA_TARGET_SPEED__
-            : (!isNaN(savedSpeedNum) && savedSpeedNum >= 0.25
-              ? savedSpeedNum
-              : ((vid && vid.playbackRate) ? vid.playbackRate : 1));
-
-          speeds.forEach(function(s) {
-            var isSel = Math.abs(curRate - s) < 0.01;
-            var label = s === 1 ? "1x (Normal)" : (s + "x");
-            var item = makeSheetItem({
-              label: label,
-              selected: isSel,
-              keepOpen: true,
-              onPick: function() {
-                // Immediately show tick/check icon on clicked item and remove from others
-                if (psBody) {
-                  var allItems = psBody.querySelectorAll(".ps-item");
-                  allItems.forEach(function(el) {
-                    el.classList.remove("selected");
-                    el.setAttribute("aria-selected", "false");
-                  });
-                  item.classList.add("selected");
-                  item.setAttribute("aria-selected", "true");
-                }
-
-                // Apply rate and persist
-                window.__PA_TARGET_SPEED__ = s;
-                if (typeof window.__PA_SET_SPEED__ === "function") {
-                  window.__PA_SET_SPEED__(s);
-                }
-                if (vid) {
-                  try {
-                    vid.playbackRate = s;
-                    vid.defaultPlaybackRate = s;
-                  } catch(e) {}
-                }
-                try {
-                  localStorage.setItem("moviznow_playback_speed", String(s));
-                } catch(e) {}
-                var btnSpeedVal = document.getElementById("btnSpeedVal");
-                if (btnSpeedVal) {
-                  btnSpeedVal.textContent = s + "x";
-                }
-
-                // Brief visual confirmation of the tick before closing sheet
-                setTimeout(function() {
-                  if (typeof closeSheet === "function") {
-                    closeSheet();
-                  }
-                }, 220);
-              }
-            });
-            psBody.appendChild(item);
-          });
-        }
-
         /* MovizNow Smart Quality Fallback & Auto-Play Protection */
         var __lastSelectedNonAutoIndex = -1;
         var __lastSelectedNonAutoHeight = 0;
