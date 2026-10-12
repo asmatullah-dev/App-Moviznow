@@ -617,15 +617,15 @@ export function findWatchOnlineCandidate(
   candidates?: Array<{ text?: string; href?: string }>
 ): { text: string; href: string } | null {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
-  // 1. Always prioritize FSL Server
-  const fsl = findFslCandidate(candidates);
-  if (fsl) {
-    return fsl;
-  }
-  // 2. If FSL Server is missing, prioritize Pixeldrain server
+  // 1. Always prioritize Pixeldrain Server first
   const pixel = findPixeldrainCandidate(candidates);
   if (pixel) {
     return { text: pixel.text, href: pixel.streamUrl };
+  }
+  // 2. If Pixeldrain Server is missing, fallback to FSL server
+  const fsl = findFslCandidate(candidates);
+  if (fsl) {
+    return fsl;
   }
   // 3. Fallback to watch online, stream, or hbplay
   const match = candidates.find((c) => {
@@ -771,30 +771,30 @@ export function NativePlayer({
   });
   const [isSwitchingQuality, setIsSwitchingQuality] = useState<boolean>(false);
 
-  // Parse direct stream URL (prioritizing FSL candidate, Pixeldrain candidate if FSL missing, decoded meta, activeStreamUrl, or direct watchUrl)
+  // Parse direct stream URL (prioritizing Pixeldrain candidate first, FSL candidate if Pixeldrain missing, decoded meta, activeStreamUrl, or direct watchUrl)
   const fslCandidate = useMemo(() => findFslCandidate(activeCandidates), [activeCandidates]);
   const pixeldrainCandidate = useMemo(() => findPixeldrainCandidate(activeCandidates), [activeCandidates]);
   const decodedMeta = useMemo(() => decodeWatchUrl(activeWatchUrl), [activeWatchUrl]);
 
-  // Active server: default to "fsl" if fslCandidate exists, otherwise "pixeldrain" if pixeldrainCandidate exists, else "default"
+  // Active server: default to "pixeldrain" if pixeldrainCandidate exists, otherwise "fsl" if fslCandidate exists, else "default"
   const [activeServer, setActiveServer] = useState<"fsl" | "pixeldrain" | "default">(() => {
-    if (fslCandidate) return "fsl";
     if (pixeldrainCandidate) return "pixeldrain";
+    if (fslCandidate) return "fsl";
     return "default";
   });
 
-  // Keep activeServer in sync when modal opens or candidates change
+  // Keep activeServer in sync when modal opens or candidates change (Pixeldrain first, fallback to FSL)
   useEffect(() => {
     if (isOpen) {
-      if (fslCandidate) {
-        setActiveServer("fsl");
-      } else if (pixeldrainCandidate) {
+      if (pixeldrainCandidate) {
         setActiveServer("pixeldrain");
+      } else if (fslCandidate) {
+        setActiveServer("fsl");
       } else {
         setActiveServer("default");
       }
     }
-  }, [isOpen, fslCandidate, pixeldrainCandidate]);
+  }, [isOpen, pixeldrainCandidate, fslCandidate]);
 
   const rawStreamUrl = useMemo(() => {
     if (activeServer === "pixeldrain" && pixeldrainCandidate) {
@@ -804,13 +804,13 @@ export function NativePlayer({
       return fslCandidate.href;
     }
     return (
-      fslCandidate?.href ||
       pixeldrainCandidate?.streamUrl ||
+      fslCandidate?.href ||
       activeStreamUrl ||
       decodedMeta.streamUrl ||
       (activeWatchUrl && !activeWatchUrl.includes("hbplay.pages.dev") ? activeWatchUrl : "")
     );
-  }, [activeServer, fslCandidate, pixeldrainCandidate, activeStreamUrl, decodedMeta, activeWatchUrl]);
+  }, [activeServer, pixeldrainCandidate, fslCandidate, activeStreamUrl, decodedMeta, activeWatchUrl]);
 
   const directStreamUrl = normalizePixeldrainUrl(rawStreamUrl);
 
@@ -1164,7 +1164,7 @@ export function NativePlayer({
 
       setActiveMenu(null);
       setCurrentQuality(opt.name || opt.label);
-      setPreferredQuality(opt.label.toLowerCase());
+      setPreferredQuality(opt.label || opt.name);
 
       const targetUrl = (opt.url || "").trim();
       const lowerUrl = targetUrl.toLowerCase();
@@ -1223,14 +1223,14 @@ export function NativePlayer({
 
         if (data) {
           const newCandidates = Array.isArray(data.candidates) ? data.candidates : [];
-          const fsl = findFslCandidate(newCandidates);
           const pixel = findPixeldrainCandidate(newCandidates);
+          const fsl = findFslCandidate(newCandidates);
           const watch = findWatchOnlineCandidate(newCandidates);
-          const chosen = fsl || pixel || watch;
-          const rawStream = fsl
-            ? fsl.href
-            : pixel
+          const chosen = pixel || fsl || watch;
+          const rawStream = pixel
             ? pixel.streamUrl
+            : fsl
+            ? fsl.href
             : chosen
             ? chosen.href
             : data.streamUrl || targetUrl;
@@ -1245,7 +1245,7 @@ export function NativePlayer({
               ? [{ text: pixel.text, href: pixel.streamUrl }]
               : []
           );
-          setActiveServer(fsl ? "fsl" : pixel ? "pixeldrain" : "default");
+          setActiveServer(pixel ? "pixeldrain" : fsl ? "fsl" : "default");
           const isMkv =
             normalizedStream.includes(".mkv") ||
             normalizedStream.toLowerCase().includes("matroska");
@@ -1279,20 +1279,20 @@ export function NativePlayer({
 
   const hasStartedPlaybackRef = useRef<boolean>(false);
 
-  // 20-second fallback: if playing on FSL server and it fails to start playing in 20 seconds, change to Pixeldrain only if it really failed
+  // Fallback timer: if playing on Pixeldrain and it fails to start playing within 6 seconds, fallback to FSL
   useEffect(() => {
     if (!isOpen || engine !== "native") return;
-    if (activeServer !== "fsl") return;
-    if (!pixeldrainCandidate) return;
+    if (activeServer !== "pixeldrain") return;
+    if (!fslCandidate) return;
 
     const timerId = setTimeout(() => {
-      // Check if FSL server is actually playing, paused after playing, or has buffered frames
+      // Check if Pixeldrain server is actually playing, paused after playing, or has buffered frames
       const vid = videoRef.current;
       const isCurrentlyPlaying = vid && (!vid.paused || vid.currentTime > 0 || vid.readyState >= 2);
       if (!hasStartedPlaybackRef.current && !isCurrentlyPlaying) {
-        console.warn("[NativePlayer] FSL Server failed to play within 6 seconds. Switching to Pixeldrain Server...");
-        showToast(t("FSL server slow. Switched to Pixeldrain..."));
-        setActiveServer("pixeldrain");
+        console.warn("[NativePlayer] Pixeldrain Server slow or failed. Falling back to FSL Server...");
+        showToast(t("Pixeldrain slow. Falling back to FSL..."));
+        setActiveServer("fsl");
         const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
         setStreamMode(needsTc ? "transcode" : "proxy");
         setHasPlaybackError(false);
@@ -1304,7 +1304,7 @@ export function NativePlayer({
     return () => {
       clearTimeout(timerId);
     };
-  }, [isOpen, activeServer, pixeldrainCandidate, engine, contentKey]);
+  }, [isOpen, activeServer, fslCandidate, engine, contentKey]);
 
   // Fetch probe media info (exact duration, audio streams, subtitles)
   useEffect(() => {
@@ -1711,6 +1711,19 @@ export function NativePlayer({
       return;
     }
 
+    // If on Pixeldrain server and FSL candidate is available, switch to FSL if Pixeldrain truly failed before starting
+    if (activeServer === "pixeldrain" && fslCandidate && !hasStartedPlaybackRef.current) {
+      console.warn("[NativePlayer] Pixeldrain server error before playback. Falling back to FSL Server...");
+      showToast(t("Pixeldrain error. Falling back to FSL..."));
+      setActiveServer("fsl");
+      const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
+      setStreamMode(needsTc ? "transcode" : "proxy");
+      setHasPlaybackError(false);
+      setStreamAttempt((prev) => prev + 1);
+      setIsBuffering(true);
+      return;
+    }
+
     // If on FSL server and Pixeldrain candidate is available, switch to Pixeldrain only if FSL truly failed before starting
     if (activeServer === "fsl" && pixeldrainCandidate && !hasStartedPlaybackRef.current) {
       console.warn("[NativePlayer] Genuine FSL server error encountered before playback. Switching to Pixeldrain Server...");
@@ -1796,12 +1809,32 @@ export function NativePlayer({
     resetControlsTimeout();
   };
 
+  // Check if target seek time is already buffered in video element
+  const isTimeBuffered = useCallback((v: HTMLVideoElement | null, targetTime: number): boolean => {
+    if (!v || !v.buffered) return false;
+    const b = v.buffered;
+    for (let i = 0; i < b.length; i++) {
+      if (targetTime >= b.start(i) - 0.25 && targetTime <= b.end(i) + 0.1) {
+        return true;
+      }
+    }
+    return false;
+  }, []);
+
   // Perform seek
   const executeSeek = (targetSeconds: number) => {
     const duration = totalDuration || 100;
     const clampedTarget = Math.max(0, Math.min(duration, targetSeconds));
 
-    setIsBuffering(true);
+    // Do NOT show loading stream spinner if target seek is ALREADY buffered!
+    const alreadyBuffered =
+      streamMode !== "transcode" &&
+      videoRef.current &&
+      isTimeBuffered(videoRef.current, clampedTarget);
+
+    if (!alreadyBuffered) {
+      setIsBuffering(true);
+    }
     setCurrentPosition(clampedTarget);
     latestPositionRef.current = Math.floor(clampedTarget);
     savePlaybackPosition(clampedTarget);
@@ -2049,9 +2082,22 @@ export function NativePlayer({
     safeStorage.setItem("moviznow_subtitle_size", size);
   };
 
-  // Double tap to seek on touch screens
+  // Double tap to seek on touch screens (strictly on video viewport background)
   const lastTapRef = useRef<{ time: number; x: number }>({ time: 0, x: 0 });
   const handleTouchEnd = (e: React.TouchEvent<HTMLDivElement>) => {
+    // If touch originated on or inside ANY button, slider, control bar, popup menu, or interactive element:
+    // NEVER seek and clear tap memory!
+    const target = e.target as HTMLElement | null;
+    if (
+      target &&
+      target.closest(
+        'button, input, select, a, [role="button"], .control-bar, .popup-menu, [data-player-control="true"]'
+      )
+    ) {
+      lastTapRef.current = { time: 0, x: 0 };
+      return;
+    }
+
     const now = Date.now();
     const touch = e.changedTouches[0];
     const rect = containerRef.current?.getBoundingClientRect();
@@ -2064,11 +2110,12 @@ export function NativePlayer({
     }
 
     const diff = now - lastTapRef.current.time;
-    if (diff < 300) {
+    // Require rapid double tap between 60ms and 300ms strictly on edges (left 35% or right 35%)
+    if (diff > 60 && diff < 300) {
       const clickX = touch.clientX - rect.left;
-      if (clickX < rect.width / 2) {
+      if (clickX < rect.width * 0.35) {
         seekBy(-10);
-      } else {
+      } else if (clickX > rect.width * 0.65) {
         seekBy(10);
       }
       lastTapRef.current = { time: 0, x: 0 };
@@ -2188,8 +2235,13 @@ export function NativePlayer({
                   }
                 }}
                 onSeeking={() => {
-                  if (!isSwitchingAudioRef.current) {
-                    setIsBuffering(true);
+                  if (!isSwitchingAudioRef.current && videoRef.current) {
+                    const alreadyBuffered =
+                      streamMode !== "transcode" &&
+                      isTimeBuffered(videoRef.current, videoRef.current.currentTime);
+                    if (!alreadyBuffered) {
+                      setIsBuffering(true);
+                    }
                   }
                 }}
                 onSeeked={() => {
@@ -2347,7 +2399,7 @@ export function NativePlayer({
             </AnimatePresence>
 
 
-            {/* Playback Error Fallback Card */}
+            {/* Playback Error Fallback Card (No buttons on Playback notice) */}
             {hasPlaybackError && engine === "native" && (
               <div className="absolute inset-0 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-30">
                 <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-500 mb-4">
@@ -2356,30 +2408,9 @@ export function NativePlayer({
                 <h3 className="text-base sm:text-lg font-black text-white mb-2">
                   {t("Playback Notice")}
                 </h3>
-                <p className="text-zinc-400 text-xs sm:text-sm max-w-sm mb-6 leading-relaxed">
-                  {t("Playback paused due to a temporary network delay. Click Replay or switch Stream Server.")}
+                <p className="text-zinc-400 text-xs sm:text-sm max-w-sm leading-relaxed">
+                  {t("Playback paused due to a temporary network delay. Retrying automatically...")}
                 </p>
-                <div className="flex flex-wrap items-center justify-center gap-3">
-                  <button
-                    type="button"
-                    onClick={handleRetryPlayback}
-                    className="px-5 py-3 bg-emerald-500 hover:bg-emerald-400 active:scale-95 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-500/25 transition-all flex items-center gap-2 cursor-pointer"
-                  >
-                    <RefreshCw className="w-4 h-4" />
-                    <span>{t("Replay Video")}</span>
-                  </button>
-                  {downloadUrl && (
-                    <a
-                      href={downloadUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-5 py-3 bg-zinc-800/80 hover:bg-zinc-700/80 active:scale-95 text-zinc-300 font-semibold text-sm rounded-xl border border-zinc-700/60 transition-all flex items-center gap-2 cursor-pointer"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>{t("Direct Download")}</span>
-                    </a>
-                  )}
-                </div>
               </div>
             )}
 
@@ -2452,6 +2483,8 @@ export function NativePlayer({
                   href={downloadUrl}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  onTouchEnd={(e) => e.stopPropagation()}
                   className="w-9 h-9 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white transition-all backdrop-blur-md border border-white/20 shadow-xl flex items-center justify-center cursor-pointer"
                   title={t("Download File")}
                 >
@@ -2462,7 +2495,11 @@ export function NativePlayer({
               {/* Minimalist Round Close Button (Unified from PlayerFU) */}
               <button
                 type="button"
-                onClick={onClose}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onClose();
+                }}
+                onTouchEnd={(e) => e.stopPropagation()}
                 className="w-9 h-9 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white transition-all backdrop-blur-md border border-white/20 shadow-xl flex items-center justify-center cursor-pointer group"
                 title={t("Close Player")}
                 aria-label={t("Close Player")}
@@ -2508,16 +2545,26 @@ export function NativePlayer({
           {/* Bottom Controls Bar (Unified layout from PlayerFU) */}
           {engine === "native" && (
             <div
-              className={`absolute bottom-0 inset-x-0 p-3 sm:p-4 md:p-5 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex flex-col gap-2 z-30 transition-opacity duration-300 ${
+              data-player-control="true"
+              onClick={(e) => {
+                e.stopPropagation();
+                resetControlsTimeout();
+              }}
+              onTouchEnd={(e) => {
+                e.stopPropagation();
+                resetControlsTimeout();
+              }}
+              className={`control-bar absolute bottom-0 inset-x-0 p-3 sm:p-4 md:p-5 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex flex-col gap-2 z-30 transition-opacity duration-300 ${
                 isControlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
               }`}
             >
               {/* Timeline Progress Bar (Full Width across controls, unified position from PlayerFU) */}
               <div
+                data-player-control="true"
                 className="relative w-full flex items-center h-4 cursor-pointer group mb-1"
                 onClick={(e) => {
+                  e.stopPropagation();
                   if (!canSeekNow()) {
-                    e.stopPropagation();
                     return;
                   }
                   const rect = e.currentTarget.getBoundingClientRect();
@@ -2525,6 +2572,9 @@ export function NativePlayer({
                   const pct = Math.max(0, Math.min(1, clickX / rect.width));
                   const target = pct * (totalDuration || 100);
                   executeSeek(target);
+                }}
+                onTouchEnd={(e) => {
+                  e.stopPropagation();
                 }}
               >
                 {/* Unplayed track background */}
@@ -2563,6 +2613,8 @@ export function NativePlayer({
                   value={currentPosition}
                   disabled={!isControlsVisible || Date.now() - controlsShownAtRef.current < 500}
                   onChange={handleScrubberChange}
+                  onClick={(e) => e.stopPropagation()}
+                  onTouchEnd={(e) => e.stopPropagation()}
                   className="w-full h-3 opacity-0 cursor-pointer z-10"
                 />
               </div>
@@ -2574,7 +2626,12 @@ export function NativePlayer({
                   {/* Priority 1: Dedicated Play/Pause button */}
                   <button
                     type="button"
-                    onClick={togglePlay}
+                    data-player-control="true"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      togglePlay();
+                    }}
+                    onTouchEnd={(e) => e.stopPropagation()}
                     className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-lg sm:rounded-xl border border-white/10 hover:border-emerald-500/40 bg-white/5 hover:bg-emerald-500/20 text-white hover:text-emerald-300 transition-all flex items-center justify-center cursor-pointer active:scale-95 shadow-sm shrink-0"
                     title={isPlaying ? "Pause (Space)" : "Play (Space)"}
                     aria-label={isPlaying ? "Pause (Space)" : "Play (Space)"}
@@ -2588,10 +2645,20 @@ export function NativePlayer({
 
                   {/* Priority 5: Mute + volume adjuster button */}
                   {showP5Volume && (
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div
+                      data-player-control="true"
+                      onClick={(e) => e.stopPropagation()}
+                      onTouchEnd={(e) => e.stopPropagation()}
+                      className="flex items-center gap-1.5 shrink-0"
+                    >
                       <button
                         type="button"
-                        onClick={() => setIsMuted(!isMuted)}
+                        data-player-control="true"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsMuted(!isMuted);
+                        }}
+                        onTouchEnd={(e) => e.stopPropagation()}
                         className="w-8 h-8 rounded-lg border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white flex items-center justify-center transition-all cursor-pointer"
                         title={isMuted ? "Unmute (M)" : "Mute (M)"}
                         aria-label={isMuted ? "Unmute (M)" : "Mute (M)"}
@@ -2610,6 +2677,8 @@ export function NativePlayer({
                         max={1}
                         step={0.05}
                         value={isMuted ? 0 : volume}
+                        onClick={(e) => e.stopPropagation()}
+                        onTouchEnd={(e) => e.stopPropagation()}
                         onChange={(e) => {
                           const val = parseFloat(e.target.value);
                           setVolume(val);
@@ -2644,7 +2713,12 @@ export function NativePlayer({
                   {showP6CropRatio && (
                     <button
                       type="button"
-                      onClick={handleToggleFitMode}
+                      data-player-control="true"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleFitMode();
+                      }}
+                      onTouchEnd={(e) => e.stopPropagation()}
                       className="h-8 px-2 sm:px-2.5 rounded-lg border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer active:scale-95 shrink-0"
                       title={`Screen Aspect: ${fitMode === "contain" ? "Fit (16:9)" : fitMode === "cover" ? "Cover" : "Fill"}`}
                     >
@@ -2657,7 +2731,12 @@ export function NativePlayer({
                   {showP3Speed && (
                     <button
                       type="button"
-                      onClick={() => setActiveMenu(activeMenu === "speed" ? null : "speed")}
+                      data-player-control="true"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveMenu(activeMenu === "speed" ? null : "speed");
+                      }}
+                      onTouchEnd={(e) => e.stopPropagation()}
                       className={`h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-semibold font-mono flex items-center justify-center transition-all cursor-pointer shrink-0 ${
                         activeMenu === "speed"
                           ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
@@ -2674,7 +2753,12 @@ export function NativePlayer({
                   {showP2Audio && (
                     <button
                       type="button"
-                      onClick={() => setActiveMenu(activeMenu === "audio" ? null : "audio")}
+                      data-player-control="true"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveMenu(activeMenu === "audio" ? null : "audio");
+                      }}
+                      onTouchEnd={(e) => e.stopPropagation()}
                       className={`h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                         activeMenu === "audio"
                           ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
@@ -2694,7 +2778,12 @@ export function NativePlayer({
                   {showP4Subtitles && (
                     <button
                       type="button"
-                      onClick={() => setActiveMenu(activeMenu === "subtitles" ? null : "subtitles")}
+                      data-player-control="true"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveMenu(activeMenu === "subtitles" ? null : "subtitles");
+                      }}
+                      onTouchEnd={(e) => e.stopPropagation()}
                       className={`h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                         selectedSubtitleTrack !== null
                           ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
@@ -2717,7 +2806,12 @@ export function NativePlayer({
                   {/* Priority 1: Quality Button (btnQuality) */}
                   <button
                     type="button"
-                    onClick={() => setActiveMenu(activeMenu === "quality" ? null : "quality")}
+                    data-player-control="true"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveMenu(activeMenu === "quality" ? null : "quality");
+                    }}
+                    onTouchEnd={(e) => e.stopPropagation()}
                     className={`h-8 px-2 sm:px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                       activeMenu === "quality"
                         ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
@@ -2734,7 +2828,12 @@ export function NativePlayer({
                   {/* Priority 1: Fullscreen Button (btnFullscreen) */}
                   <button
                     type="button"
-                    onClick={toggleFullscreen}
+                    data-player-control="true"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleFullscreen();
+                    }}
+                    onTouchEnd={(e) => e.stopPropagation()}
                     className="w-8 h-8 rounded-lg border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
                     title={isFullscreen ? "Exit Fullscreen (F)" : "Fullscreen (F)"}
                     aria-label={isFullscreen ? "Exit Fullscreen (F)" : "Fullscreen (F)"}
@@ -2763,8 +2862,10 @@ export function NativePlayer({
               {/* Safe bounding container: bounded above bottom controls/progress bar and below top bar */}
               <div className="absolute inset-x-0 top-10 sm:top-12 bottom-16 sm:bottom-18 md:bottom-20 pointer-events-none flex items-end justify-end px-2 sm:px-3 md:px-5">
                 <div
+                  data-player-control="true"
                   onClick={(e) => e.stopPropagation()}
-                  className={`pointer-events-auto w-auto min-w-[210px] sm:min-w-[230px] max-w-[calc(100%-1rem)] max-h-full bg-[#141414]/95 border border-zinc-700/80 rounded-2xl shadow-2xl backdrop-blur-2xl flex flex-col p-2 sm:p-2.5 overflow-hidden ring-1 ring-white/10 animate-in fade-in zoom-in-95 duration-150 ${
+                  onTouchEnd={(e) => e.stopPropagation()}
+                  className={`popup-menu pointer-events-auto w-auto min-w-[210px] sm:min-w-[230px] max-w-[calc(100%-1rem)] max-h-full bg-[#141414]/95 border border-zinc-700/80 rounded-2xl shadow-2xl backdrop-blur-2xl flex flex-col p-2 sm:p-2.5 overflow-hidden ring-1 ring-white/10 animate-in fade-in zoom-in-95 duration-150 ${
                     activeMenu === "quality"
                       ? "mr-0 sm:mr-1 md:mr-3"
                       : activeMenu === "subtitles"

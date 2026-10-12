@@ -1054,9 +1054,11 @@ export default function MovieDetails() {
 
       if (extractedResult && chosenLink) {
         const candidates = extractedResult.candidates || [];
-        const fsl = findFslCandidate(candidates);
         const pixel = findPixeldrainCandidate(candidates);
-        const streamUrl = normalizePixeldrainUrl(extractedResult.streamUrl || extractedResult.url);
+        const fsl = findFslCandidate(candidates);
+        const watch = findWatchOnlineCandidate(candidates);
+        const rawTargetStream = pixel ? pixel.streamUrl : fsl ? fsl.href : (extractedResult.streamUrl || extractedResult.url);
+        const streamUrl = normalizePixeldrainUrl(rawTargetStream);
 
         setActiveNativePlayerConfig({
           watchUrl: extractedResult.watchUrl || chosenLink.url,
@@ -1076,7 +1078,7 @@ export default function MovieDetails() {
           logEvent("link_click", profile.uid, {
             contentId: mergedContent.id,
             contentTitle: mergedContent.title,
-            linkName: `Native Player - ${fsl ? "FSL Server" : pixel ? "Pixeldrain Server" : "Watch Online"} - ${chosenLink.name || "720p"}`,
+            linkName: `Native Player - ${pixel ? "Pixeldrain Server" : fsl ? "FSL Server" : "Watch Online"} - ${chosenLink.name || "720p"}`,
           });
         }
       } else {
@@ -4978,15 +4980,15 @@ export default function MovieDetails() {
                       !linkPopup.url.toLowerCase().includes("vcloud.zip"))
                   ) ? (
                     <>
-                      {/* Place 2: Above Play in Video Player, if extraction found FSL server or watch online, add Play Movie/Season/Episode */}
+                      {/* Place 2: Above Play in Video Player, if extraction found Pixeldrain/FSL server or watch online, add Play Movie/Season/Episode */}
                       {(() => {
-                        const fslCandidate = findFslCandidate(linkPopup.candidates);
                         const pixelCandidate = findPixeldrainCandidate(linkPopup.candidates);
+                        const fslCandidate = findFslCandidate(linkPopup.candidates);
                         const watchCandidate = findWatchOnlineCandidate(linkPopup.candidates);
-                        // If linkPopup.url matches an extracted candidate, prioritize it, else FSL or Pixeldrain
+                        // If linkPopup.url matches an extracted candidate, prioritize it, else Pixeldrain or FSL
                         const matchedCandidate = linkPopup.candidates?.find((c: any) => c && c.href && c.href === linkPopup.url);
-                        const chosenCandidate = matchedCandidate || fslCandidate || pixelCandidate || watchCandidate;
-                        const chosenHref = chosenCandidate ? chosenCandidate.href : linkPopup.url;
+                        const chosenCandidate = matchedCandidate || pixelCandidate || fslCandidate || watchCandidate;
+                        const chosenHref = chosenCandidate ? ((chosenCandidate as any).streamUrl || chosenCandidate.href) : linkPopup.url;
                         if (!chosenHref) return null;
 
                         const isEp = Boolean(

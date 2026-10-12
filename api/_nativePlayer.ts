@@ -472,19 +472,19 @@ export function findWatchCandidate(
 ): { text: string; href: string } | null {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
 
-  // 1. Prioritize FSL server candidate if available
-  const fslCandidate = findFslCandidate(candidates);
-  if (fslCandidate) {
-    return fslCandidate;
-  }
-
-  // 2. Prioritize Pixeldrain server candidate if FSL is missing
+  // 1. Prioritize Pixeldrain server candidate first
   const pixelCandidate = findPixeldrainCandidate(candidates);
   if (pixelCandidate) {
     return {
       text: pixelCandidate.text,
       href: pixelCandidate.streamUrl,
     };
+  }
+
+  // 2. Fallback to FSL server candidate if Pixeldrain is missing
+  const fslCandidate = findFslCandidate(candidates);
+  if (fslCandidate) {
+    return fslCandidate;
   }
 
   // 3. Explicit "watch online" or "watch" text
@@ -602,11 +602,11 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
     // 2. Check in-memory Hubcloud extraction cache
     const cachedHub = getCachedHubcloudData(url);
     if (cachedHub && Array.isArray(cachedHub.candidates) && cachedHub.candidates.length > 0) {
-      const fsl = findFslCandidate(cachedHub.candidates);
       const pixel = findPixeldrainCandidate(cachedHub.candidates);
+      const fsl = findFslCandidate(cachedHub.candidates);
       const match = findWatchCandidate(cachedHub.candidates);
-      if (fsl || pixel || match) {
-        const rawStream = fsl ? fsl.href : pixel ? pixel.streamUrl : (match ? match.href : "");
+      if (pixel || fsl || match) {
+        const rawStream = pixel ? pixel.streamUrl : (fsl ? fsl.href : (match ? match.href : ""));
         const streamUrl = normalizePixeldrainUrl(rawStream);
         const parsed = parseWatchUrl(streamUrl);
         const title = parsed.title || cachedHub.title || "Movie";
@@ -660,12 +660,12 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
       }
 
       if (data) {
-        const fsl = findFslCandidate(data.candidates);
         const pixel = findPixeldrainCandidate(data.candidates);
+        const fsl = findFslCandidate(data.candidates);
         const match = findWatchCandidate(data.candidates);
 
-        if (fsl || pixel || match) {
-          const rawStream = fsl ? fsl.href : pixel ? pixel.streamUrl : (match ? match.href : "");
+        if (pixel || fsl || match) {
+          const rawStream = pixel ? pixel.streamUrl : (fsl ? fsl.href : (match ? match.href : ""));
           const streamUrl = normalizePixeldrainUrl(rawStream);
           const parsed = parseWatchUrl(streamUrl);
           const title = parsed.title || data.title || data.original_title || "Movie";
@@ -744,12 +744,12 @@ nativePlayerRouter.get(["/api/native-player/resolve", "/native-player/resolve"],
     }
 
     if (data) {
-      const fsl = findFslCandidate(data.candidates);
       const pixel = findPixeldrainCandidate(data.candidates);
+      const fsl = findFslCandidate(data.candidates);
       const match = findWatchCandidate(data.candidates);
-      const chosen = fsl || pixel || match;
+      const chosen = pixel || fsl || match;
       if (chosen) {
-        const rawStream = fsl ? fsl.href : pixel ? pixel.streamUrl : chosen.href;
+        const rawStream = pixel ? pixel.streamUrl : (fsl ? fsl.href : chosen.href);
         const streamUrl = normalizePixeldrainUrl(rawStream);
         const parsed = parseWatchUrl(streamUrl);
         return res.json({
@@ -797,7 +797,7 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
     }
 
     let pdFileName = "";
-    let isMkv = isPixeldrain || targetUrl.toLowerCase().includes(".mkv") || targetUrl.toLowerCase().includes("matroska");
+    let isMkv = targetUrl.toLowerCase().includes(".mkv") || targetUrl.toLowerCase().includes("matroska");
     let needsTranscode = isMkv;
     let detectedWidth = 1920;
     let detectedHeight = 1080;
@@ -830,6 +830,10 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
             isMkv = true;
             needsTranscode = true;
             detectedVCodec = "hevc";
+          } else {
+            isMkv = false;
+            needsTranscode = false;
+            detectedVCodec = "h264";
           }
         }
       } catch {}
@@ -1679,7 +1683,6 @@ nativePlayerRouter.all(
         targetUrl.toLowerCase().includes("pixeldra.in");
 
       const isMkvTarget =
-        isPixeldrain ||
         targetUrl.toLowerCase().includes(".mkv") ||
         targetUrl.toLowerCase().includes("matroska") ||
         Boolean(cachedProbe?.isMkv) ||
@@ -1735,11 +1738,11 @@ nativePlayerRouter.all(
         const ffmpegArgs: string[] = [
           "-headers",
           `${referer}User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`,
-          "-analyzeduration", "15M",
-          "-probesize", "15M",
+          "-analyzeduration", "1500k",
+          "-probesize", "1500k",
           "-reconnect", "1",
           "-reconnect_streamed", "1",
-          "-reconnect_delay_max", "5",
+          "-reconnect_delay_max", "3",
         ];
 
         // Instant seeking support with fast input seek

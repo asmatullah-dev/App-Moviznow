@@ -119,7 +119,7 @@ export function getPreferredQuality(): string {
     ).trim().toLowerCase();
 
     if (raw && !raw.startsWith('auto')) {
-      const match = raw.match(/(\d{3,4}p?)/i);
+      const match = raw.match(/(?:^|\D)(480|720|1080|2160|4k)(?:p|\b|\D|$)/i);
       const isHevc = raw.includes('hevc');
       if (match) {
         const val = match[1].toLowerCase();
@@ -141,7 +141,7 @@ export function setPreferredQuality(quality: string): void {
   if (!quality || typeof quality !== 'string') return;
   const clean = quality.trim().toLowerCase();
   if (!clean || clean.startsWith('auto')) return;
-  const match = clean.match(/(\d{3,4}p?)/i);
+  const match = clean.match(/(?:^|\D)(480|720|1080|2160|4k)(?:p|\b|\D|$)/i);
   const isHevc = clean.includes('hevc');
   const normalized = match
     ? `${match[1].toLowerCase().endsWith('p') ? match[1].toLowerCase() : `${match[1].toLowerCase()}p`}${isHevc ? ' hevc' : ''}`
@@ -203,7 +203,7 @@ export function findBestQualityLink<T extends { url: string; name?: string; labe
 
   const parseHeight = (item: T): number => {
     const str = `${item.name || ''} ${item.label || ''} ${item.url || ''}`.toLowerCase();
-    const m = str.match(/\b(480|720|1080|2160|4k)\b/);
+    const m = str.match(/(?:^|\D)(480|720|1080|2160|4k)(?:p|\b|\D|$)/i);
     if (m) {
       if (m[1] === '4k' || m[1] === '2160') return 2160;
       return parseInt(m[1], 10);
