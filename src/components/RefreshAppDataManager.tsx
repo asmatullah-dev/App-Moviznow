@@ -111,7 +111,7 @@ export function RefreshAppDataManager() {
         const localUserTime = parseVersionTime(localUserVer);
         
         const isExplicitlyDeleted = serverUserVer === -1 || (typeof serverUserVer === 'object' && (serverUserVer as any)?.deleted === true) || (versions as any)?.[`users.${user.uid}`] === -1;
-        const isUserMismatch = isExplicitlyDeleted || isManualTrigger || (serverUserTime > 0 && serverUserTime !== localUserTime) || !safeStorage.getItem('profile_cache');
+        const isUserMismatch = isExplicitlyDeleted || isManualTrigger || isAutoTrigger || (serverUserTime > 0 && serverUserTime !== localUserTime) || !safeStorage.getItem('profile_cache');
 
         if (isUserMismatch) {
           const profileFetched = await refreshProfile(true, isManualTrigger ? 'manual' : 'auto').catch((err) => {
@@ -251,57 +251,53 @@ export function RefreshAppDataManager() {
   }, []);
 
   // 10-Hour Unified Refresh & Sync Checker:
-  // Auto refresh & sync user data every 10 hours in the background.
-  // Triggers automatically on mount if last refresh was > 10 hours ago,
-  // on tab visibility resume, on network reconnect, and via periodic background checks.
+  // Auto refresh & sync user data every 10 hours, trigger auto refresh sync if last refresh was more than 10 hours in the background
   useEffect(() => {
     if (!user?.uid) return;
 
+    const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
+
     const check10HourUnified = () => {
-      if (!user?.uid || isRefreshingRef.current) return;
+      if (!navigator.onLine || !user?.uid) return;
       const storageKey = `last_user_refresh_and_sync_time_${user.uid}`;
       const legacyStorageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
       const lastUnifiedStr = localStorage.getItem(storageKey) || localStorage.getItem(legacyStorageKey);
       const lastUnifiedTime = lastUnifiedStr ? parseInt(lastUnifiedStr, 10) : 0;
       const now = Date.now();
-      const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 
-      // If last refresh was more than 10 hours ago (or never performed), trigger auto refresh & sync in background
+      // Trigger auto refresh & sync if last refresh was more than 10 hours ago (or never synced)
       if (!lastUnifiedTime || now - lastUnifiedTime >= TEN_HOURS_MS) {
-        console.log(`[RefreshAppDataManager] Last refresh was ${lastUnifiedTime ? Math.round((now - lastUnifiedTime) / 3600000) + 'h ago' : 'never'}. Triggering auto 10-hour refresh & sync in background...`);
-        executeUnifiedRef.current('auto_10h');
+        console.log(`[RefreshAppDataManager] Background 10-hour Auto Refresh & Sync triggered (last sync: ${lastUnifiedTime ? Math.round((now - lastUnifiedTime) / 3600000) + 'h ago' : 'never'}).`);
+        executeUnifiedRef.current('10_hour_sync');
       }
     };
 
-    // 1. Initial trigger on authenticate / app load (if > 10 hours have passed)
+    // 1. Check on app open / mount after short 1.5s grace period so initial render settles smoothly
     const initialTimer = setTimeout(() => {
       check10HourUnified();
-    }, 2000);
+    }, 1500);
 
-    // 2. Trigger when tab becomes visible (user returns to app after hours)
-    const handleVisibility = () => {
+    // 2. Periodic background check every 60 seconds (purely local timestamp comparison, 0 Firestore calls until 10h threshold arrives)
+    const interval = setInterval(() => {
+      check10HourUnified();
+    }, 60 * 1000);
+
+    // 3. Check on tab visibility resume, window focus, or device back online
+    const handleActivity = () => {
       if (document.visibilityState === 'visible') {
         check10HourUnified();
       }
     };
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    // 3. Trigger when internet connection recovers
-    const handleOnline = () => {
-      check10HourUnified();
-    };
-    window.addEventListener('online', handleOnline);
-
-    // 4. Periodic background interval (check every 2 minutes for zero-lag background sync when 10h expires)
-    const interval = setInterval(() => {
-      check10HourUnified();
-    }, 2 * 60 * 1000);
+    document.addEventListener('visibilitychange', handleActivity);
+    window.addEventListener('focus', handleActivity);
+    window.addEventListener('online', check10HourUnified);
 
     return () => {
       clearTimeout(initialTimer);
       clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibility);
-      window.removeEventListener('online', handleOnline);
+      document.removeEventListener('visibilitychange', handleActivity);
+      window.removeEventListener('focus', handleActivity);
+      window.removeEventListener('online', check10HourUnified);
     };
   }, [user?.uid]);
 

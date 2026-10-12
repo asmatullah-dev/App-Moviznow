@@ -1313,11 +1313,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           setProfile(data);
           safeStorage.setItem("profile_cache", JSON.stringify(data));
-          persistProfileCache(data);
-          const syncNowStr = Date.now().toString();
-          localStorage.setItem(`last_user_refresh_and_sync_time_${currentUser.uid}`, syncNowStr);
-          localStorage.setItem(`last_unified_10h_refresh_sync_time_v2_${currentUser.uid}`, syncNowStr);
-          localStorage.setItem(`last_user_sync_time_v2_${currentUser.uid}`, syncNowStr);
         } else {
           // User document does not exist yet in Firestore — self-heal and create initial profile!
           // Authenticated users (especially Google users) must NEVER be signed out.
@@ -1801,24 +1796,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setProfile(normCachedP);
               persistProfileCache(normCachedP);
               hasValidCachedProfile = true;
-
-              // Check 10-hour sync timestamp: if last refresh was more than 10 hours ago, trigger auto refresh sync in background
-              const syncKey = `last_user_refresh_and_sync_time_${currentUser.uid}`;
-              const legacySyncKey = `last_unified_10h_refresh_sync_time_v2_${currentUser.uid}`;
-              const lastSyncStr = localStorage.getItem(syncKey) || localStorage.getItem(legacySyncKey);
-              const lastSyncTime = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
-              const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
-              const isOver10Hours = !lastSyncTime || (Date.now() - lastSyncTime >= TEN_HOURS_MS);
-
-              if (isOver10Hours) {
-                setTimeout(() => {
-                  if (typeof (window as any).triggerRefreshAppData === "function") {
-                    (window as any).triggerRefreshAppData("auto_10h");
-                  } else {
-                    refreshProfile(false, "auto").catch(() => {});
-                  }
-                }, 2000);
-              }
             }
           } catch (e) {}
         }
@@ -1829,6 +1806,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const lastSessionStart = localStorage.getItem(sessionKey);
 
         // Only refresh user profile on app open if local profile cache was completely missing (e.g. brand new install)
+        // Normal users with existing profile cache rely on offline local cache and the 10-hour background scheduler!
         if (!hasValidCachedProfile) {
           refreshProfile(false, "auto").catch((err) => {
             console.warn("Initial profile sync failed:", err);
