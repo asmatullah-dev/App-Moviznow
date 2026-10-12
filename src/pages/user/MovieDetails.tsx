@@ -975,6 +975,8 @@ export default function MovieDetails() {
         contentId: mergedContent.id,
         poster: mergedContent.posterUrl || mergedContent.backdropUrl,
         year: mergedContent.year,
+        runtime: mergedContent.runtime || (mergedContent as any)?.duration,
+        duration: (mergedContent as any)?.duration || mergedContent.runtime,
         candidates: [
           { text: "Pixeldrain Server", href: streamUrl }
         ],
@@ -1069,6 +1071,8 @@ export default function MovieDetails() {
           contentId: mergedContent.id,
           poster: mergedContent.posterUrl || mergedContent.backdropUrl,
           year: mergedContent.year,
+          runtime: mergedContent.runtime || (mergedContent as any)?.duration,
+          duration: (mergedContent as any)?.duration || mergedContent.runtime,
           candidates: candidates.length > 0 ? candidates : (pixel ? [{ text: pixel.text, href: pixel.streamUrl }] : []),
           availableQualities: links,
         });
@@ -5468,6 +5472,8 @@ export default function MovieDetails() {
         poster={activeNativePlayerConfig?.poster || mergedContent?.posterUrl || mergedContent?.backdropUrl}
         year={activeNativePlayerConfig?.year || mergedContent?.year}
         quality={activeNativePlayerConfig?.quality || "720p"}
+        duration={activeNativePlayerConfig?.duration || (activeNativePlayerConfig as any)?.runtime || (mergedContent as any)?.duration || mergedContent?.runtime}
+        runtime={activeNativePlayerConfig?.runtime || (activeNativePlayerConfig as any)?.duration || mergedContent?.runtime || (mergedContent as any)?.duration}
         seasonInfo={activeNativePlayerConfig?.seasonInfo}
         episodeInfo={activeNativePlayerConfig?.episodeInfo}
         candidates={activeNativePlayerConfig?.candidates}

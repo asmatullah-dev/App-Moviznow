@@ -250,11 +250,15 @@ export function RefreshAppDataManager() {
     };
   }, []);
 
-  // 10-Hour Unified Refresh & Sync Checker (checked periodically, never on app open/mount or visibility resume)
+  // 10-Hour Unified Refresh & Sync Checker:
+  // Auto refresh & sync user data every 10 hours in the background.
+  // Triggers automatically on mount if last refresh was > 10 hours ago,
+  // on tab visibility resume, on network reconnect, and via periodic background checks.
   useEffect(() => {
     if (!user?.uid) return;
 
     const check10HourUnified = () => {
+      if (!user?.uid || isRefreshingRef.current) return;
       const storageKey = `last_user_refresh_and_sync_time_${user.uid}`;
       const legacyStorageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
       const lastUnifiedStr = localStorage.getItem(storageKey) || localStorage.getItem(legacyStorageKey);
@@ -262,29 +266,42 @@ export function RefreshAppDataManager() {
       const now = Date.now();
       const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 
-      if (!lastUnifiedTime) {
-        if (safeStorage.getItem('profile_cache')) {
-          const nowStr = now.toString();
-          localStorage.setItem(storageKey, nowStr);
-          localStorage.setItem(legacyStorageKey, nowStr);
-          return;
-        }
-        executeUnifiedRef.current('10_hour_sync');
-        return;
-      }
-
-      if (now - lastUnifiedTime >= TEN_HOURS_MS) {
-        executeUnifiedRef.current('10_hour_sync');
+      // If last refresh was more than 10 hours ago (or never performed), trigger auto refresh & sync in background
+      if (!lastUnifiedTime || now - lastUnifiedTime >= TEN_HOURS_MS) {
+        console.log(`[RefreshAppDataManager] Last refresh was ${lastUnifiedTime ? Math.round((now - lastUnifiedTime) / 3600000) + 'h ago' : 'never'}. Triggering auto 10-hour refresh & sync in background...`);
+        executeUnifiedRef.current('auto_10h');
       }
     };
 
-    // Periodic check every 1 hour (purely local time comparison, 0 Firestore calls unless 10h has arrived)
+    // 1. Initial trigger on authenticate / app load (if > 10 hours have passed)
+    const initialTimer = setTimeout(() => {
+      check10HourUnified();
+    }, 2000);
+
+    // 2. Trigger when tab becomes visible (user returns to app after hours)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        check10HourUnified();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // 3. Trigger when internet connection recovers
+    const handleOnline = () => {
+      check10HourUnified();
+    };
+    window.addEventListener('online', handleOnline);
+
+    // 4. Periodic background interval (check every 2 minutes for zero-lag background sync when 10h expires)
     const interval = setInterval(() => {
       check10HourUnified();
-    }, 60 * 60 * 1000);
+    }, 2 * 60 * 1000);
 
     return () => {
+      clearTimeout(initialTimer);
       clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('online', handleOnline);
     };
   }, [user?.uid]);
 

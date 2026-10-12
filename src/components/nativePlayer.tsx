@@ -118,32 +118,41 @@ export interface MediaProbeInfo {
 export function parseRuntimeSeconds(val?: number | string): number {
   if (!val) return 0;
   if (typeof val === "number" && !isNaN(val) && val > 0) {
+    if (val <= 60) return 0; // A <= 60s runtime is never a legitimate movie/stream duration
     if (val > 300) return Math.round(val);
     return Math.round(val * 60);
   }
   if (typeof val === "string") {
     const s = val.trim().toLowerCase();
+    if (s === "1s" || s === "1 sec" || s === "1 second" || s === "1" || s === "0:01" || s === "00:01") {
+      return 0;
+    }
     const minMatch = s.match(/(\d+)\s*(?:min|mins|m)\b/);
     const hrMatch = s.match(/(\d+)\s*(?:hr|hrs|h)\b/);
     if (hrMatch || minMatch) {
       const hrs = hrMatch ? parseInt(hrMatch[1], 10) : 0;
       const mins = minMatch ? parseInt(minMatch[1], 10) : 0;
-      return (hrs * 60 + mins) * 60;
+      const totalSec = (hrs * 60 + mins) * 60;
+      return totalSec > 60 ? totalSec : 0;
     }
     const colonParts = s.split(":");
     if (colonParts.length === 3) {
       const h = parseFloat(colonParts[0]) || 0;
       const m = parseFloat(colonParts[1]) || 0;
       const sec = parseFloat(colonParts[2]) || 0;
-      return Math.round(h * 3600 + m * 60 + sec);
+      const total = Math.round(h * 3600 + m * 60 + sec);
+      return total > 60 ? total : 0;
     } else if (colonParts.length === 2) {
       const m = parseFloat(colonParts[0]) || 0;
       const sec = parseFloat(colonParts[1]) || 0;
-      return Math.round(m * 60 + sec);
+      const total = Math.round(m * 60 + sec);
+      return total > 60 ? total : 0;
     }
     const num = parseFloat(s);
     if (!isNaN(num) && num > 0) {
-      return num > 300 ? Math.round(num) : Math.round(num * 60);
+      if (num <= 1) return 0; // Reject 1 sec or 1 min placeholder
+      const total = num > 300 ? Math.round(num) : Math.round(num * 60);
+      return total > 60 ? total : 0;
     }
   }
   return 0;
@@ -155,14 +164,38 @@ export function parseRuntimeSeconds(val?: number | string): number {
  */
 export function getPixeldrainDownloadUrl(url?: string): string {
   if (!url || typeof url !== "string") return "";
-  const trimmed = url.trim();
+  let trimmed = url.trim();
+  try {
+    if (trimmed.includes("%")) {
+      const decoded = decodeURIComponent(trimmed);
+      if (
+        decoded.includes("pixeldrain") ||
+        decoded.includes("pixel.drain") ||
+        decoded.includes("/u/") ||
+        decoded.includes("/api/file/")
+      ) {
+        trimmed = decoded;
+      }
+    }
+  } catch {}
+
   const pdMatch = trimmed.match(
     /(?:https?:\/\/)?(?:www\.)?(pixeldrain\.(?:dev|com|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i
   );
   if (pdMatch && pdMatch[2]) {
-    const host = pdMatch[1].toLowerCase().includes("dev") ? "pixeldrain.dev" : "pixeldrain.com";
-    return `https://${host}/u/${pdMatch[2]}`;
+    return `https://pixeldrain.com/u/${pdMatch[2]}`;
   }
+
+  const idMatch = trimmed.match(/(?:pixeldrain[^\/]*)\/(?:api\/file|u)\/([a-zA-Z0-9_-]+)/i);
+  if (idMatch && idMatch[1]) {
+    return `https://pixeldrain.com/u/${idMatch[1]}`;
+  }
+
+  const fallbackMatch = trimmed.match(/\/(?:api\/file|u)\/([a-zA-Z0-9_-]{6,})/i);
+  if (fallbackMatch && fallbackMatch[1] && (trimmed.toLowerCase().includes("pixel") || trimmed.toLowerCase().includes("drain"))) {
+    return `https://pixeldrain.com/u/${fallbackMatch[1]}`;
+  }
+
   return trimmed;
 }
 
@@ -911,12 +944,12 @@ export function NativePlayer({
   }, [isDirectMkv, mediaInfo]);
   const [seekOffset, setSeekOffset] = useState<number>(0);
   const [totalDuration, setTotalDuration] = useState<number>(() => {
-    return propDurationSeconds > 10 ? propDurationSeconds : 0;
+    return propDurationSeconds > 60 ? propDurationSeconds : 0;
   });
 
   // Ensure totalDuration is populated from prop runtime if stream metadata hasn't loaded yet
   useEffect(() => {
-    if (propDurationSeconds > 10 && totalDuration <= 10) {
+    if (propDurationSeconds > 60 && totalDuration <= 60) {
       setTotalDuration(propDurationSeconds);
     }
   }, [propDurationSeconds, totalDuration]);
@@ -1084,7 +1117,7 @@ export function NativePlayer({
     setCurrentPosition(targetPosition);
     setSeekOffset(0);
     latestPositionRef.current = targetPosition;
-    setTotalDuration(propDurationSeconds > 10 ? propDurationSeconds : 0);
+    setTotalDuration(propDurationSeconds > 60 ? propDurationSeconds : 0);
     setBufferedPercent(0);
 
     setHasPlaybackError(false);
@@ -1546,7 +1579,7 @@ export function NativePlayer({
       .then((data: MediaProbeInfo) => {
         if (!isMounted) return;
         setMediaInfo(data);
-        if (data.duration && data.duration > 10) {
+        if (data.duration && data.duration > 60) {
           setTotalDuration(Math.round(data.duration));
         }
         if ((data.isMkv || data.needsTranscode) && data.hasFFmpeg !== false) {
@@ -1890,8 +1923,8 @@ export function NativePlayer({
       setActiveSubtitleText("");
     }
 
-    // Dynamically capture duration if video reports legitimate duration > 10s and totalDuration is unset
-    if (videoRef.current && videoRef.current.duration > 10 && isFinite(videoRef.current.duration) && totalDuration <= 10) {
+    // Dynamically capture duration if video reports legitimate duration > 60s and totalDuration is unset
+    if (videoRef.current && videoRef.current.duration > 60 && isFinite(videoRef.current.duration) && totalDuration <= 60) {
       setTotalDuration(Math.round(videoRef.current.duration));
     }
 
@@ -1901,8 +1934,8 @@ export function NativePlayer({
   const handleLoadedMetadata = () => {
     if (!videoRef.current) return;
     const vidDur = videoRef.current.duration;
-    // Piped / fragmented mp4 streams report duration = 1 (or 0.04 or Infinity). Never accept <= 10s as real media duration.
-    if (vidDur && isFinite(vidDur) && vidDur > 10) {
+    // Piped / fragmented mp4 streams report duration = 1 (or 0.04 or Infinity). Never accept <= 60s as real media duration.
+    if (vidDur && isFinite(vidDur) && vidDur > 60) {
       if (!totalDuration || Math.abs(totalDuration - vidDur) > 30) {
         setTotalDuration(Math.round(vidDur));
       }
@@ -2859,7 +2892,7 @@ export function NativePlayer({
               )}
               <div className="flex items-center gap-2 text-[11px] sm:text-xs text-zinc-300 font-medium flex-wrap">
                 {year && <span>{year}</span>}
-                {totalDuration > 10 && <span>• {formatTime(totalDuration)}</span>}
+                {totalDuration > 60 && <span>• {formatTime(totalDuration)}</span>}
                 {mediaInfo?.audioTracks && mediaInfo.audioTracks.length > 0 && (
                   <span className="text-zinc-400 font-normal">
                     • {mediaInfo.audioTracks.map((a: any) => formatAudioLanguageLabel(a.language)).filter(Boolean).join(", ")}
@@ -2872,10 +2905,16 @@ export function NativePlayer({
             <div className="flex items-center gap-2 shrink-0">
               {downloadUrl && (
                 <a
-                  href={downloadUrl}
+                  href={getPixeldrainDownloadUrl(downloadUrl)}
                   target="_blank"
                   rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const targetUrl = getPixeldrainDownloadUrl(downloadUrl);
+                    if (targetUrl) {
+                      window.open(targetUrl, "_blank", "noopener,noreferrer");
+                    }
+                  }}
                   onTouchEnd={(e) => e.stopPropagation()}
                   className="w-9 h-9 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white transition-all backdrop-blur-md border border-white/20 shadow-xl flex items-center justify-center cursor-pointer"
                   title={t("Download File")}
@@ -3087,7 +3126,7 @@ export function NativePlayer({
                   {/* Priority 1: Running progress duration time; Priority 7: Total duration under progress bar when enough space */}
                   <div className="flex items-center text-xs sm:text-[12.5px] font-mono font-semibold ml-0.5 sm:ml-1 shrink-0">
                     <span className="text-white">{formatTime(currentPosition)}</span>
-                    {showP7TotalDuration && totalDuration > 10 && (
+                    {showP7TotalDuration && totalDuration > 60 && (
                       <>
                         <span className="text-zinc-500 mx-1">/</span>
                         <span className="text-zinc-400">{formatTime(totalDuration)}</span>

@@ -301,6 +301,7 @@ export default function App() {
                     <OfflineBanner />
                     <SyncBanner />
                     <RefreshAppDataManager />
+                    <SyncUserDataManager />
                     <SystemNotificationWrapper />
                     <NotificationPermissionPrompt />
                     <BrowserRouter>

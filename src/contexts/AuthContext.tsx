@@ -1313,6 +1313,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           setProfile(data);
           safeStorage.setItem("profile_cache", JSON.stringify(data));
+          persistProfileCache(data);
+          const syncNowStr = Date.now().toString();
+          localStorage.setItem(`last_user_refresh_and_sync_time_${currentUser.uid}`, syncNowStr);
+          localStorage.setItem(`last_unified_10h_refresh_sync_time_v2_${currentUser.uid}`, syncNowStr);
+          localStorage.setItem(`last_user_sync_time_v2_${currentUser.uid}`, syncNowStr);
         } else {
           // User document does not exist yet in Firestore — self-heal and create initial profile!
           // Authenticated users (especially Google users) must NEVER be signed out.
@@ -1797,13 +1802,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               persistProfileCache(normCachedP);
               hasValidCachedProfile = true;
 
-              // Ensure 10-hour sync timestamp is initialized so app open does not trigger network calls
+              // Check 10-hour sync timestamp: if last refresh was more than 10 hours ago, trigger auto refresh sync in background
               const syncKey = `last_user_refresh_and_sync_time_${currentUser.uid}`;
               const legacySyncKey = `last_unified_10h_refresh_sync_time_v2_${currentUser.uid}`;
-              if (!localStorage.getItem(syncKey) && !localStorage.getItem(legacySyncKey)) {
-                const nowStr = Date.now().toString();
-                localStorage.setItem(syncKey, nowStr);
-                localStorage.setItem(legacySyncKey, nowStr);
+              const lastSyncStr = localStorage.getItem(syncKey) || localStorage.getItem(legacySyncKey);
+              const lastSyncTime = lastSyncStr ? parseInt(lastSyncStr, 10) : 0;
+              const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
+              const isOver10Hours = !lastSyncTime || (Date.now() - lastSyncTime >= TEN_HOURS_MS);
+
+              if (isOver10Hours) {
+                setTimeout(() => {
+                  if (typeof (window as any).triggerRefreshAppData === "function") {
+                    (window as any).triggerRefreshAppData("auto_10h");
+                  } else {
+                    refreshProfile(false, "auto").catch(() => {});
+                  }
+                }, 2000);
               }
             }
           } catch (e) {}
@@ -1815,7 +1829,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const lastSessionStart = localStorage.getItem(sessionKey);
 
         // Only refresh user profile on app open if local profile cache was completely missing (e.g. brand new install)
-        // Normal users with existing profile cache rely on offline local cache and the 10-hour background scheduler!
         if (!hasValidCachedProfile) {
           refreshProfile(false, "auto").catch((err) => {
             console.warn("Initial profile sync failed:", err);
@@ -2043,40 +2056,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await setPersistence(auth, indexedDBLocalPersistence).catch(() => setPersistence(auth, browserLocalPersistence));
       } catch (pErr) {}
       const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider, browserPopupRedirectResolver);
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const result = await signInWithPopup(auth, provider);
 
-      // Force refresh app data
-      safeStorage.removeItem("profile_cache");
-      safeStorage.removeItem("cached_chunk_users_versions");
-      localStorage.removeItem(`last_user_sync_time_v2_${result.user.uid}`);
+      if (!result || !result.user) {
+        throw new Error("Google authentication failed. No user returned.");
+      }
 
-      // Check if we need to link phone/email in Firestore
-      const userRef = doc(db, "users", result.user.uid);
-      
-      // Before getting the new uid doc, check if email already exists for merging
-      let oldDocData = null;
-      if (result.user.email) {
+      const currentUser = result.user;
+      safeStorage.removeItem("user_explicit_logged_out");
+      setUser(currentUser);
+      setAuthLoading(false);
+
+      const userRef = doc(db, "users", currentUser.uid);
+      const localSessionId = getLocalSessionId();
+      const userEmailLower = (currentUser.email || "").toLowerCase();
+      const isOwner = userEmailLower === "asmatn628@gmail.com";
+      const isAdmin = [
+        "asmatullah9327@gmail.com",
+        "kabirahmaddev@gmail.com",
+        "wamoviesstation@gmail.com",
+      ].includes(userEmailLower);
+
+      // Check if existing doc or merge candidate exists in Firestore
+      let oldDocData: any = null;
+      if (currentUser.email) {
         try {
           const { collection, query, where, getDocs, limit } = await import("firebase/firestore");
           const usersRef = collection(db, "users");
-          const q = query(usersRef, where("email", "==", result.user.email), limit(10));
-          const qs = await getDocs(q);
-          
-          // Find existing doc with different UID for data merging
-          const existingDoc = qs.docs.find(d => d.id !== result.user.uid);
+          const q = query(usersRef, where("email", "==", currentUser.email), limit(5));
+          const qs = await Promise.race([
+            getDocs(q),
+            new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 3000))
+          ]);
+          const existingDoc = qs?.docs?.find((d: any) => d.id !== currentUser.uid);
           if (existingDoc) {
             oldDocData = existingDoc.data();
           }
         } catch (queryErr) {
-          // Fallback to locally cached users list if Firestore query is restricted or offline
+          // Fallback to locally cached users list if Firestore query is restricted or slow
           try {
             const cachedUsersStr = safeStorage.getItem("cached_all_users");
             if (cachedUsersStr) {
               const cachedUsers = JSON.parse(cachedUsersStr);
               if (Array.isArray(cachedUsers)) {
-                const lowerEmail = result.user.email.toLowerCase();
                 const existing = cachedUsers.find(
-                  (u: any) => u.uid !== result.user.uid && u.email?.toLowerCase() === lowerEmail
+                  (u: any) => u.uid !== currentUser.uid && u.email?.toLowerCase() === userEmailLower
                 );
                 if (existing) {
                   oldDocData = existing;
@@ -2089,57 +2114,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       let snap: any = null;
       try {
-        snap = await getDoc(userRef);
+        snap = await Promise.race([
+          getDoc(userRef),
+          new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Timeout")), 3500))
+        ]);
       } catch (getErr) {
-        console.warn("Could not fetch user document directly, onAuthStateChanged will synchronize:", getErr);
-      }
-      const localSessionId = getLocalSessionId();
-
-      const updates: any = { uid: result.user.uid };
-      const { getDeviceDetails } = await import("../utils/deviceInfo");
-      const deviceDetails = await getDeviceDetails();
-
-      if (deviceDetails) {
-        try {
-          const pendingStr =
-            safeStorage.getItem("pending_user_updates") || "{}";
-          let pendingAll = JSON.parse(pendingStr);
-          pendingAll[result.user.uid] = pendingAll[result.user.uid] || {};
-          pendingAll[result.user.uid].device = deviceDetails;
-          safeStorage.setItem(
-            "pending_user_updates",
-            JSON.stringify(pendingAll),
-          );
-        } catch (e) {}
+        console.warn("Could not fetch user document directly within timeout:", getErr);
       }
 
+      let deviceDetails: any = undefined;
       try {
-        const pendingStr = safeStorage.getItem("pending_user_updates");
-        if (pendingStr) {
-          const pendingAll = JSON.parse(pendingStr);
-          if (pendingAll[result.user.uid]) {
-            Object.assign(updates, pendingAll[result.user.uid]);
-            // Preserving pendingAll for onAuthStateChanged
-          }
-        }
+        const { getDeviceDetails } = await import("../utils/deviceInfo");
+        deviceDetails = await getDeviceDetails();
       } catch (e) {}
 
       let docExists = false;
+      let fullProfile: UserProfile;
+
       if (snap && snap.exists()) {
         docExists = true;
-        const data = snap.data();
-        updates.sessionId = localSessionId;
-        if (!data.email && result.user.email) {
-          updates.email = result.user.email;
+        const data = snap.data() as UserProfile;
+        const updates: any = {
+          uid: currentUser.uid,
+          sessionId: localSessionId,
+          isGoogleUser: true,
+          provider: "google.com",
+        };
+        if (!data.email && currentUser.email) updates.email = currentUser.email;
+        if (currentUser.displayName && (!data.displayName || data.displayName === "No Name" || data.displayName === "null" || data.displayName === "undefined" || data.displayName.startsWith("User ("))) {
+          updates.displayName = currentUser.displayName;
         }
-        if (result.user.displayName && (!data.displayName || data.displayName === "No Name" || data.displayName === "null" || data.displayName === "undefined" || data.displayName.startsWith("User ("))) {
-          updates.displayName = result.user.displayName;
-        }
-        if (result.user.photoURL && !data.photoURL) {
-          updates.photoURL = result.user.photoURL;
-        }
+        if (currentUser.photoURL && !data.photoURL) updates.photoURL = currentUser.photoURL;
+        if (deviceDetails) updates.device = deviceDetails;
+
+        fullProfile = normalizeUserStatusAndExpiry({
+          ...data,
+          ...updates,
+          uid: currentUser.uid,
+        });
       } else if (oldDocData) {
-        // Safely merge existing email data into new uid (preserve timeSpent and user stats)
+        docExists = true;
+        const updates: any = {
+          uid: currentUser.uid,
+          sessionId: localSessionId,
+          isGoogleUser: true,
+          provider: "google.com",
+          email: currentUser.email || oldDocData.email || "",
+          displayName: currentUser.displayName || oldDocData.displayName || "Movie Fan",
+          photoURL: currentUser.photoURL || oldDocData.photoURL || "",
+        };
         for (const key of Object.keys(oldDocData)) {
           if (key !== "uid" && key !== "sessionId" && key !== "createdAt" && key !== "updatedAt") {
             updates[key] = oldDocData[key];
@@ -2148,67 +2171,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (oldDocData.timeSpent !== undefined) {
           updates.timeSpent = Math.max(updates.timeSpent || 0, oldDocData.timeSpent || 0);
         }
-        updates.email = result.user.email;
-        if (result.user.displayName) updates.displayName = result.user.displayName;
-        if (result.user.photoURL) updates.photoURL = result.user.photoURL;
+        if (deviceDetails) updates.device = deviceDetails;
+        fullProfile = normalizeUserStatusAndExpiry({
+          ...oldDocData,
+          ...updates,
+          uid: currentUser.uid,
+        });
       } else {
-        // New Google user — keep status as pending for new users (active for owner/admin)
-        const userEmailLower = (result.user.email || "").toLowerCase();
-        const isOwner = userEmailLower === "asmatn628@gmail.com";
-        const isAdmin = [
-          "asmatullah9327@gmail.com",
-          "kabirahmaddev@gmail.com",
-          "wamoviesstation@gmail.com",
-        ].includes(userEmailLower);
-        updates.role = isOwner ? "owner" : (isAdmin ? "admin" : "user");
-        updates.status = isOwner || isAdmin ? "active" : "pending";
-        updates.expiryDate = isOwner || isAdmin ? "Lifetime" : null;
-        updates.email = result.user.email || "";
-        updates.displayName = result.user.displayName || "Movie Fan";
-        updates.photoURL = result.user.photoURL || "";
-        updates.provider = "google.com";
-        updates.isGoogleUser = true;
-        updates.createdAt = getUtcVersion();
-        updates.updatedAt = getUtcVersion();
-        updates.sessionId = localSessionId;
+        // Brand new Google user
+        fullProfile = normalizeUserStatusAndExpiry({
+          uid: currentUser.uid,
+          email: currentUser.email || "",
+          displayName: currentUser.displayName || "Movie Fan",
+          photoURL: currentUser.photoURL || "",
+          role: isOwner ? "owner" : (isAdmin ? "admin" : "user"),
+          status: isOwner || isAdmin ? "active" : "pending",
+          expiryDate: isOwner || isAdmin ? "Lifetime" : null,
+          provider: "google.com",
+          isGoogleUser: true,
+          createdAt: getUtcVersion(),
+          updatedAt: getUtcVersion(),
+          sessionId: localSessionId,
+          favorites: [],
+          watchLater: [],
+          orders: [],
+          timeSpent: 0,
+          device: deviceDetails,
+        });
       }
 
-      safeStorage.removeItem("user_explicit_logged_out");
+      // Update state and persistent cache IMMEDIATELY so navigation and route protection unblock instantly
+      persistProfileCache(fullProfile);
+      setProfile(fullProfile);
+      setLoading(false);
+      setAuthLoading(false);
 
-      const applyUpdates = async () => {
-        if (Object.keys(updates).length > 0) {
+      // Write profile updates to Firestore in background without stalling the user
+      (async () => {
+        try {
+          const { setDoc } = await import("firebase/firestore");
+          await setDoc(userRef, fullProfile, { merge: true });
+          const googleUtcVer = getUtcVersion();
+          await setDoc(doc(db, "chunk_meta", "versions"), {
+            users: { [currentUser.uid]: googleUtcVer }
+          }, { merge: true }).catch(() => {});
           try {
-            const { setDoc } = await import("firebase/firestore");
-            await setDoc(userRef, updates, { merge: true });
-            const googleUtcVer = getUtcVersion();
-            await setDoc(doc(db, "chunk_meta", "versions"), {
-              users: { [result.user.uid]: googleUtcVer }
-            }, { merge: true });
-            try {
-              const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
-              updateChunkMetaLocalCache({ users: { [result.user.uid]: googleUtcVer } });
-            } catch (e) {}
-            setProfile((prev: any) => {
-              const newProfile = { ...(prev || {}), ...updates };
-              persistProfileCache(newProfile);
-              return newProfile;
-            });
-          } catch (e) {
-            console.warn("Failed to write Google user updates to Firestore:", e);
-          }
+            const { updateChunkMetaLocalCache } = await import("../utils/chunkMeta");
+            updateChunkMetaLocalCache({ users: { [currentUser.uid]: googleUtcVer } });
+          } catch (e) {}
+        } catch (e) {
+          console.warn("Background Firestore user update notice:", e);
         }
-      };
+      })();
 
-      await applyUpdates();
-
-      if (result.user) {
-        triggerWelcomeNotificationAndEmail(
-          result.user.uid,
-          result.user.email,
-          result.user.displayName,
-          !docExists
-        );
-      }
+      triggerWelcomeNotificationAndEmail(
+        currentUser.uid,
+        currentUser.email,
+        currentUser.displayName,
+        !docExists
+      );
 
       setTimeout(() => {
         justLoggedInRef.current = false;

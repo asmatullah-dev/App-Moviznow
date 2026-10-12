@@ -68,25 +68,24 @@ export function normalizeBrowserViewUrl(rawUrl: string): string {
   if (!rawUrl) return '';
   let url = rawUrl.trim();
 
+  try {
+    if (url.includes('%')) {
+      const decoded = decodeURIComponent(url);
+      if (decoded.includes('pixeldrain') || decoded.includes('pixel.drain') || decoded.includes('/u/') || decoded.includes('/api/file/')) {
+        url = decoded;
+      }
+    }
+  } catch {}
+
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     url = 'https://' + url;
   }
 
-  url = url.replace(
-    /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/api\/file\//i,
-    'pixeldrain.dev/u/'
+  const pdMatch = url.match(
+    /(?:https?:\/\/)?(?:www\.)?(pixeldrain\.(?:dev|com|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i
   );
-  url = url.replace(
-    /(?:pixeldrain\.(?:com|dev|net)|pixel\.drain|pixeldra\.in)\/u\//i,
-    'pixeldrain.dev/u/'
-  );
-
-  if (url.includes('pixeldrain.dev/u/')) {
-    try {
-      const urlObj = new URL(url);
-      urlObj.search = '';
-      url = urlObj.toString();
-    } catch (e) {}
+  if (pdMatch && pdMatch[2]) {
+    return `https://pixeldrain.com/u/${pdMatch[2]}`;
   }
 
   return url;
