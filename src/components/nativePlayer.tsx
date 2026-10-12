@@ -1178,20 +1178,32 @@ export function NativePlayer({
           lowerUrl.includes(".mkv") ||
           lowerUrl.includes("workers.dev");
 
+        let data: any = null;
         if (isDirect) {
           candidateRawStream = normalizePixeldrainUrl(targetUrl);
           newWatchUrl = targetUrl;
           newCandidates = [{ text: "Direct Stream", href: candidateRawStream }];
+          try {
+            const apiBase = getStreamingApiBase();
+            const res = await fetch(`${apiBase}/api/native-player/check`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: targetUrl }),
+              signal: AbortSignal.timeout(3500),
+            }).catch(() => null);
+            if (res && res.ok) {
+              data = await res.json();
+            }
+          } catch {}
         } else {
           // Extract link in background without pausing active playback
           const apiBase = getStreamingApiBase();
-          let data: any = null;
           const doCheck = async (base: string) => {
             const res = await fetch(`${base}/api/native-player/check`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ url: targetUrl }),
-              signal: AbortSignal.timeout(6500),
+              signal: AbortSignal.timeout(10000),
             });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
@@ -1207,7 +1219,7 @@ export function NativePlayer({
             }
           }
 
-          if (!data) {
+          if (!data || (!data.streamUrl && !data.watchUrl && (!data.candidates || data.candidates.length === 0))) {
             // Extraction failed: fallback to previous quality with zero interruption
             console.warn(`[NativePlayer] Failed to extract link for ${opt.label}, keeping ${prevQualityLabel}`);
             showToast(`${t("Failed to load")} ${opt.label}, ${t("keeping")} ${prevQualityLabel}`);
@@ -1250,10 +1262,17 @@ export function NativePlayer({
           ? "pixeldrain"
           : "default";
 
-        const isMkv =
+        const isTargetMkv =
+          Boolean(data?.isMkv) ||
+          Boolean(data?.needsTranscode) ||
+          (data?.mime || "").toLowerCase().includes("matroska") ||
           normalizedStream.includes(".mkv") ||
-          normalizedStream.toLowerCase().includes("matroska");
-        const needsTc = isMkv && mediaInfo?.hasFFmpeg !== false;
+          normalizedStream.toLowerCase().includes("matroska") ||
+          targetUrl.toLowerCase().includes(".mkv") ||
+          targetUrl.toLowerCase().includes("matroska") ||
+          (normalizedStream.includes("pixeldrain") && !normalizedStream.toLowerCase().includes(".mp4"));
+
+        const needsTc = isTargetMkv && mediaInfo?.hasFFmpeg !== false;
         const newStreamMode: "proxy" | "transcode" = needsTc ? "transcode" : "proxy";
 
         // Capture continuous playback position at this exact moment
@@ -1267,11 +1286,7 @@ export function NativePlayer({
 
         // Build stream URL for testing buffer in background
         let testStreamSrc = "";
-        if (
-          !needsTc &&
-          (newServer === "pixeldrain" || normalizedStream.includes("pixeldrain")) &&
-          normalizedStream.startsWith("http")
-        ) {
+        if (!needsTc && !isTargetMkv && normalizedStream.endsWith(".mp4") && normalizedStream.startsWith("http")) {
           testStreamSrc = normalizedStream;
         } else {
           const params = new URLSearchParams();
@@ -1296,6 +1311,7 @@ export function NativePlayer({
           const cleanup = () => {
             if (timeoutId) clearTimeout(timeoutId);
             testVid.oncanplay = null;
+            testVid.oncanplaythrough = null;
             testVid.onloadeddata = null;
             testVid.onerror = null;
             testVid.src = "";
@@ -1319,6 +1335,7 @@ export function NativePlayer({
           };
 
           testVid.oncanplay = onReady;
+          testVid.oncanplaythrough = onReady;
           testVid.onloadeddata = () => {
             if (testVid.readyState >= 2) onReady();
           };
@@ -1329,7 +1346,7 @@ export function NativePlayer({
               console.warn(`[NativePlayer] Buffering timeout for ${opt.label}`);
               onFail();
             }
-          }, 8000);
+          }, 15000);
 
           try {
             testVid.src = testStreamSrc;
@@ -1404,33 +1421,6 @@ export function NativePlayer({
 
   const hasStartedPlaybackRef = useRef<boolean>(false);
 
-  // Fallback timer: if playing on Pixeldrain and it fails to start playing within 6 seconds, fallback to FSL
-  useEffect(() => {
-    if (!isOpen || engine !== "native") return;
-    if (activeServer !== "pixeldrain") return;
-    if (!fslCandidate) return;
-
-    const timerId = setTimeout(() => {
-      // Check if Pixeldrain server is actually playing, paused after playing, or has buffered frames
-      const vid = videoRef.current;
-      const isCurrentlyPlaying = vid && (!vid.paused || vid.currentTime > 0 || vid.readyState >= 2);
-      if (!hasStartedPlaybackRef.current && !isCurrentlyPlaying) {
-        console.warn("[NativePlayer] Pixeldrain Server slow or failed. Falling back to FSL Server...");
-        showToast(t("Pixeldrain slow. Falling back to FSL..."));
-        setActiveServer("fsl");
-        const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
-        setStreamMode(needsTc ? "transcode" : "proxy");
-        setHasPlaybackError(false);
-        setStreamAttempt((prev) => prev + 1);
-        setIsBuffering(true);
-      }
-    }, 6000);
-
-    return () => {
-      clearTimeout(timerId);
-    };
-  }, [isOpen, activeServer, fslCandidate, engine, contentKey]);
-
   // Fetch probe media info (exact duration, audio streams, subtitles)
   useEffect(() => {
     if (!isOpen || !directStreamUrl) return;
@@ -1449,6 +1439,9 @@ export function NativePlayer({
         if (data.duration && data.duration > 10) {
           setTotalDuration(Math.round(data.duration));
         }
+        if ((data.isMkv || data.needsTranscode) && data.hasFFmpeg !== false) {
+          setStreamMode("transcode");
+        }
       })
       .catch((err) => {
         console.warn("[Media probe warning]:", err);
@@ -1463,17 +1456,23 @@ export function NativePlayer({
   const currentStreamSrc = useMemo(() => {
     if (!directStreamUrl) return "";
 
+    const isTargetMkv =
+      isDirectMkv ||
+      Boolean(mediaInfo?.isMkv) ||
+      Boolean(mediaInfo?.needsTranscode) ||
+      directStreamUrl.toLowerCase().includes(".mkv") ||
+      directStreamUrl.toLowerCase().includes("matroska");
+
     const requiresTranscode =
-      streamMode === "transcode" &&
-      mediaInfo?.hasFFmpeg !== false &&
-      (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
+      (streamMode === "transcode" || isTargetMkv || selectedAudioTrack > 0) &&
+      mediaInfo?.hasFFmpeg !== false;
 
     // Pixeldrain natively provides Access-Control-Allow-Origin: * (CORS).
-    // Stream directly from Pixeldrain to bypass server proxy latency and Vercel execution limits
-    // whenever transcoding is not required, default audio track is selected, and direct attempt hasn't failed.
+    // Stream directly from Pixeldrain ONLY IF it's a native MP4/WebM that does not need transcoding!
     if (
       streamAttempt === 0 &&
       !requiresTranscode &&
+      !isTargetMkv &&
       (activeServer === "pixeldrain" || directStreamUrl.toLowerCase().includes("pixeldrain")) &&
       directStreamUrl.startsWith("http") &&
       selectedAudioTrack === 0
@@ -1481,11 +1480,12 @@ export function NativePlayer({
       return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
     }
 
+    const effectiveMode = requiresTranscode ? "transcode" : streamMode;
     const params = new URLSearchParams();
     params.set("url", directStreamUrl);
-    params.set("mode", streamMode);
+    params.set("mode", effectiveMode);
 
-    if (streamMode === "transcode" && mediaInfo?.hasFFmpeg !== false && seekOffset > 0) {
+    if (effectiveMode === "transcode" && mediaInfo?.hasFFmpeg !== false && seekOffset > 0) {
       params.set("ss", String(seekOffset));
     }
     if (selectedAudioTrack > 0) {
@@ -2127,19 +2127,7 @@ export function NativePlayer({
       return;
     }
 
-    // 1. Try native client-side HTML5 audio tracks if available (instant with 0 reload)
-    const v = videoRef.current as any;
-    if (v && v.audioTracks && v.audioTracks.length > 1) {
-      for (let i = 0; i < v.audioTracks.length; i++) {
-        v.audioTracks[i].enabled = (i === trackId);
-      }
-      setSelectedAudioTrack(trackId);
-      setActiveMenu(null);
-      showToast(`Audio: ${formatAudioLanguageLabel(track?.language) || "Track " + (trackId + 1)}`);
-      return;
-    }
-
-    // 2. Server-side audio track switch: seamlessly preserve playback position without full-screen "Loading Stream"
+    // Server-side audio track switch: seamlessly preserve playback position without full-screen "Loading Stream"
     setIsSwitchingAudio(true);
     isSwitchingAudioRef.current = true;
     setTimeout(() => {
@@ -2147,12 +2135,24 @@ export function NativePlayer({
       isSwitchingAudioRef.current = false;
     }, 6000);
 
-    const targetPos = Math.floor(currentPosition);
+    const targetPos = videoRef.current
+      ? Math.floor(
+          (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) +
+            (videoRef.current.currentTime || 0)
+        )
+      : Math.floor(currentPosition);
+
     audioSwitchResumePosRef.current = targetPos;
-    if (streamMode === "transcode") {
-      setSeekOffset(targetPos);
-    }
+    pendingQualitySwitchPosRef.current = targetPos;
+    latestPositionRef.current = targetPos;
+    setCurrentPosition(targetPos);
+    savePlaybackPosition(targetPos);
+
+    // Audio switching requires transcode/remux mode so backend FFmpeg maps 0:a:${trackId}
+    setStreamMode("transcode");
+    setSeekOffset(targetPos);
     setSelectedAudioTrack(trackId);
+    setStreamAttempt((p) => p + 1);
     setActiveMenu(null);
     showToast(`Audio: ${formatAudioLanguageLabel(track?.language) || "Track " + (trackId + 1)}`);
   };
@@ -2167,7 +2167,7 @@ export function NativePlayer({
       return;
     }
     const sub = computedSubtitleTracks.find((s) => s.id === subId);
-    const subLabel = sub?.title || sub?.language || `Subtitle ${subId + 1}`;
+    const subLabel = formatAudioLanguageLabel(sub?.language) || sub?.title || `Subtitle ${subId + 1}`;
     showToast(`Loading ${subLabel}...`);
 
     const apiBase = getStreamingApiBase();
@@ -2180,7 +2180,9 @@ export function NativePlayer({
       .then((res) => {
         if (res.cues && Array.isArray(res.cues) && res.cues.length > 0) {
           setSubtitleCues(res.cues);
-          const curTime = videoRef.current ? videoRef.current.currentTime : currentPosition;
+          const curTime = videoRef.current
+            ? (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) + (videoRef.current.currentTime || 0)
+            : currentPosition;
           const activeCue = res.cues.find(
             (cue: any) => curTime >= (cue.start - 0.25) && curTime <= (cue.end + 0.25)
           );
@@ -2303,6 +2305,12 @@ export function NativePlayer({
                 onProgress={handleProgress}
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
+                onLoadedData={() => {
+                  if (!isSwitchingAudioRef.current) {
+                    setIsBuffering(false);
+                  }
+                  setHasPlaybackError(false);
+                }}
                 onCanPlay={() => {
                   if (!isSwitchingAudioRef.current) {
                     setIsBuffering(false);
@@ -3101,21 +3109,33 @@ export function NativePlayer({
                             {t("No embedded subtitles")}
                           </div>
                         ) : (
-                          computedSubtitleTracks.map((sub) => (
-                            <button
-                              key={sub.id}
-                              type="button"
-                              onClick={() => handleSubtitleSelect(sub.id)}
-                              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
-                                selectedSubtitleTrack === sub.id
-                                  ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
-                                  : "text-zinc-300 hover:bg-white/10 hover:text-white"
-                              }`}
-                            >
-                              <span className="truncate">{sub.title || sub.language || `Sub ${sub.id + 1}`}</span>
-                              {selectedSubtitleTrack === sub.id && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
-                            </button>
-                          ))
+                          computedSubtitleTracks.map((sub) => {
+                            const cleanSubLabel =
+                              formatAudioLanguageLabel(sub.language) ||
+                              (sub.title &&
+                              !/(?:\.com|\.net|\.org|\.tv|\.in|\.to|\.site|\.app|\.dev|\.me|www\.|https?:|moviesdrive|hdhub)/i.test(
+                                sub.title
+                              )
+                                ? sub.title
+                                : sub.language) ||
+                              `Subtitle ${sub.id + 1}`;
+
+                            return (
+                              <button
+                                key={sub.id}
+                                type="button"
+                                onClick={() => handleSubtitleSelect(sub.id)}
+                                className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
+                                  selectedSubtitleTrack === sub.id
+                                    ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
+                                    : "text-zinc-300 hover:bg-white/10 hover:text-white"
+                                }`}
+                              >
+                                <span className="truncate">{cleanSubLabel}</span>
+                                {selectedSubtitleTrack === sub.id && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
+                              </button>
+                            );
+                          })
                         )}
 
                         {/* Subtitle Size Adjuster */}

@@ -93,6 +93,22 @@ export function isoLangToName(code?: string): string {
 }
 
 /**
+ * Sanitize track titles from uploader domain spam (e.g. "moviesdrives.com" -> "Hindi" or "English")
+ */
+export function sanitizeTrackTitle(rawTitle: string | undefined, defaultName: string): string {
+  if (!rawTitle) return defaultName;
+  const clean = rawTitle.trim();
+  if (
+    /(?:\.com|\.net|\.org|\.tv|\.in|\.to|\.site|\.app|\.dev|\.me|www\.|https?:|hdhub|moviesdrive|vega|bolly)/i.test(
+      clean
+    )
+  ) {
+    return defaultName;
+  }
+  return clean || defaultName;
+}
+
+/**
  * Parse audio and subtitle languages from filenames or movie titles
  */
 export function parseLanguagesFromText(text?: string): Array<{ name: string; code: string }> {
@@ -329,7 +345,8 @@ export function parseMkvEbml(buf: Buffer): {
           audioCodec = "opus";
         }
 
-        const titleStr = name ? name : audioIdx === 0 ? `${langName} (Default)` : langName;
+        const defaultAudioTitle = audioIdx === 0 ? `${langName} (Default)` : langName;
+        const titleStr = sanitizeTrackTitle(name, defaultAudioTitle);
         audioTracks.push({
           id: audioIdx,
           language: langName,
@@ -347,7 +364,7 @@ export function parseMkvEbml(buf: Buffer): {
           else subLang = "eng";
         }
         const langName = isoLangToName(subLang);
-        const titleStr = name ? name : langName;
+        const titleStr = sanitizeTrackTitle(name, langName);
         subtitleTracks.push({
           id: subIdx,
           language: langName,
@@ -589,15 +606,56 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
       url.includes(".r2.") ||
       url.includes("pixeldrain") ||
       url.includes("pixel.drain") ||
+      url.includes("pixeldra.in") ||
       url.includes(".mp4") ||
       url.includes(".mkv") ||
       url.includes(".webm")
     ) {
       const resolvedStreamUrl = normalizePixeldrainUrl(url);
-      const isMkv =
+      let isMkv =
         resolvedStreamUrl.includes(".mkv") ||
         url.includes(".mkv") ||
         url.toLowerCase().includes("matroska");
+      let streamTitle = "Movie Stream";
+      let streamSize: string | undefined = undefined;
+      let streamQuality = "720p";
+
+      // If Pixeldrain, inspect metadata immediately for accurate mime and filename
+      const pdMatch = resolvedStreamUrl.match(/pixeldrain\.(?:dev|com|net)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i);
+      if (pdMatch && pdMatch[1]) {
+        try {
+          const pdId = pdMatch[1];
+          const primaryHost = resolvedStreamUrl.includes("pixeldrain.dev") ? "pixeldrain.dev" : "pixeldrain.com";
+          const pdRes = await fetch(`https://${primaryHost}/api/file/${pdId}/info`, {
+            signal: AbortSignal.timeout(1800),
+          }).catch(() => null);
+          if (pdRes && pdRes.ok) {
+            const pdData: any = await pdRes.json();
+            if (pdData.name) {
+              streamTitle = pdData.name;
+              const lowerName = pdData.name.toLowerCase();
+              if (lowerName.includes("1080p")) streamQuality = "1080p";
+              else if (lowerName.includes("2160p") || lowerName.includes("4k")) streamQuality = "4K";
+              else if (lowerName.includes("480p")) streamQuality = "480p";
+            }
+            if (pdData.size) {
+              const mb = Math.round(pdData.size / (1024 * 1024));
+              streamSize = mb > 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+            }
+            const mime = (pdData.mime_type || "").toLowerCase();
+            const lowerName = (pdData.name || "").toLowerCase();
+            if (
+              mime.includes("matroska") ||
+              lowerName.endsWith(".mkv") ||
+              lowerName.includes(".mkv") ||
+              lowerName.includes("mkv")
+            ) {
+              isMkv = true;
+            }
+          }
+        } catch {}
+      }
+
       const result: NativeStreamData = {
         hasWatchOnline: true,
         playable: true,
@@ -605,12 +663,14 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
         streamUrl: resolvedStreamUrl,
         directUrl: `/api/native-player/stream?url=${encodeURIComponent(resolvedStreamUrl)}${isMkv ? "&mode=transcode" : ""}`,
         sourceUrl: resolvedStreamUrl,
-        title: "Movie Stream",
+        title: streamTitle,
+        size: streamSize,
         mime: isMkv ? "video/x-matroska" : "video/mp4",
-        quality: "720p",
+        quality: streamQuality,
         candidates: [{ text: "Pixeldrain Server", href: resolvedStreamUrl }],
       };
       checkCache.set(url, { data: result, timestamp: Date.now() });
+      checkCache.set(resolvedStreamUrl, { data: result, timestamp: Date.now() });
       return res.json(result);
     }
 
@@ -834,7 +894,11 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
     let needsTranscode = isMkv;
     let detectedWidth = 1920;
     let detectedHeight = 1080;
-    let detectedVCodec = isMkv ? "hevc" : "h264";
+    let detectedVCodec = isMkv
+      ? targetUrl.includes("hevc") || targetUrl.includes("h265")
+        ? "hevc"
+        : "h264"
+      : "h264";
 
     if (isPixeldrain && pixeldrainId) {
       try {
@@ -862,7 +926,7 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
           ) {
             isMkv = true;
             needsTranscode = true;
-            detectedVCodec = "hevc";
+            detectedVCodec = fname.includes("hevc") || fname.includes("h265") || mime.includes("hevc") ? "hevc" : "h264";
           } else {
             isMkv = false;
             needsTranscode = false;
@@ -1054,7 +1118,8 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
           const lang = s.tags?.language || s.tags?.LANGUAGE || "";
           const title = s.tags?.title || s.tags?.TITLE || "";
           const langName = isoLangToName(lang);
-          const label = title || (lang ? langName : `Audio Track ${idx + 1}`);
+          const defaultLabel = lang ? langName : (idx === 0 ? "Default Audio" : `Audio Track ${idx + 1}`);
+          const label = sanitizeTrackTitle(title, defaultLabel);
           return {
             id: idx,
             language: langName,
@@ -1071,7 +1136,8 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
           const lang = s.tags?.language || s.tags?.LANGUAGE || "";
           const title = s.tags?.title || s.tags?.TITLE || "";
           const langName = isoLangToName(lang);
-          const label = title || (lang ? langName : `Sub ${idx + 1}`);
+          const defaultLabel = lang ? langName : `Sub ${idx + 1}`;
+          const label = sanitizeTrackTitle(title, defaultLabel);
           return {
             id: idx,
             language: langName,
@@ -1341,6 +1407,7 @@ export async function fetchOnlineSubtitles(
 }
 
 const subtitleCuesCache = new Map<string, { cues: Array<{ start: number; end: number; text: string }>; timestamp: number }>();
+const inFlightSubtitles = new Map<string, Promise<{ ok: boolean; cues: Array<{ start: number; end: number; text: string }> }>>();
 
 /**
  * 4. Subtitle extraction endpoint (Returns parsed JSON cues for in-player HD overlay)
@@ -1353,17 +1420,18 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
     }
     const targetUrl = normalizePixeldrainUrl(rawTarget) || rawTarget;
 
-    const titleQuery = ((req.query.title as string) || "").trim();
-    const langQuery = ((req.query.lang as string) || "eng").trim();
-    const imdbIdQuery = ((req.query.imdbId as string) || "").trim();
-    const seasonQuery = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
-    const episodeQuery = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
     const subIdx = parseInt((req.query.sub as string) || "0", 10) || 0;
+    const cacheKey = `${targetUrl}_sub_${subIdx}`;
 
-    const cacheKey = `${targetUrl}_sub_${subIdx}_${langQuery}_${imdbIdQuery || titleQuery}_s${seasonQuery || ""}_e${episodeQuery || ""}`;
     const cached = subtitleCuesCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < 30 * 60 * 1000) {
+    if (cached && Date.now() - cached.timestamp < 60 * 60 * 1000) {
       return res.json({ ok: true, cues: cached.cues });
+    }
+
+    // Deduplicate concurrent requests for the same subtitle track
+    if (inFlightSubtitles.has(cacheKey)) {
+      const inFlightResult = await inFlightSubtitles.get(cacheKey)!;
+      return res.json(inFlightResult);
     }
 
     const hasFFmpeg = await checkFFmpegAvailable();
@@ -1371,68 +1439,78 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
       return res.json({ ok: false, cues: [], error: "FFmpeg not available for embedded subtitles" });
     }
 
-    // Extract embedded subtitles strictly from stream link using ffmpeg
-    let referer = "";
-    if (targetUrl.includes("hbplay.pages.dev")) {
-      referer = "https://hbplay.pages.dev/";
-    }
+    const extractPromise = new Promise<{ ok: boolean; cues: Array<{ start: number; end: number; text: string }> }>(
+      (resolve) => {
+        let referer = "";
+        if (targetUrl.includes("hbplay.pages.dev")) {
+          referer = "https://hbplay.pages.dev/";
+        }
 
-    const subHeaders = referer
-      ? `Referer: ${referer}\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`
-      : `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`;
+        const subHeaders = referer
+          ? `Referer: ${referer}\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`
+          : `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`;
 
-    const ffmpegArgs: string[] = [
-      "-headers",
-      subHeaders,
-      "-analyzeduration", "5M",
-      "-probesize", "5M",
-      "-reconnect", "1",
-      "-reconnect_streamed", "1",
-      "-reconnect_delay_max", "3",
-      "-i", targetUrl,
-      "-vn", "-an",
-      "-map", `0:s:${subIdx}?`,
-      "-c:s", "webvtt",
-      "-f", "webvtt",
-      "pipe:1",
-    ];
+        const ffmpegArgs: string[] = [
+          "-headers",
+          subHeaders,
+          "-analyzeduration", "3M",
+          "-probesize", "3M",
+          "-reconnect", "1",
+          "-reconnect_streamed", "1",
+          "-reconnect_delay_max", "3",
+          "-i", targetUrl,
+          "-vn", "-an",
+          "-map", `0:s:${subIdx}?`,
+          "-c:s", "webvtt",
+          "-f", "webvtt",
+          "pipe:1",
+        ];
 
-    let child: any;
-    try {
-      child = spawn("ffmpeg", ffmpegArgs, {
-        stdio: ["ignore", "pipe", "ignore"],
-      });
-    } catch {
-      return res.json({ ok: false, cues: [] });
-    }
+        let child: any;
+        try {
+          child = spawn("ffmpeg", ffmpegArgs, {
+            stdio: ["ignore", "pipe", "ignore"],
+          });
+        } catch {
+          return resolve({ ok: false, cues: [] });
+        }
 
-    let vttText = "";
-    let responded = false;
+        let vttText = "";
+        let settled = false;
 
-    child.stdout.on("data", (chunk: any) => {
-      vttText += chunk.toString();
-    });
+        child.stdout.on("data", (chunk: any) => {
+          vttText += chunk.toString();
+        });
 
-    const sendResponse = async () => {
-      if (responded) return;
-      responded = true;
-      try {
-        child.kill("SIGKILL");
-      } catch {}
+        const finish = () => {
+          if (settled) return;
+          settled = true;
+          try {
+            child.kill("SIGKILL");
+          } catch {}
 
-      const cues = parseWebVTT(vttText);
-      if (cues.length > 0) {
-        subtitleCuesCache.set(cacheKey, { cues, timestamp: Date.now() });
+          const cues = parseWebVTT(vttText);
+          if (cues.length > 0) {
+            subtitleCuesCache.set(cacheKey, { cues, timestamp: Date.now() });
+            resolve({ ok: true, cues });
+          } else {
+            resolve({ ok: false, cues: [] });
+          }
+        };
+
+        child.on("close", finish);
+        child.on("error", finish);
+
+        // Allow up to 35 seconds for full remote stream subtitle demuxing
+        setTimeout(finish, 35000);
       }
-      return res.json({ ok: cues.length > 0, cues });
-    };
+    );
 
-    child.on("close", sendResponse);
-    child.on("error", sendResponse);
+    inFlightSubtitles.set(cacheKey, extractPromise);
+    const result = await extractPromise;
+    inFlightSubtitles.delete(cacheKey);
 
-    setTimeout(() => {
-      sendResponse();
-    }, 4500);
+    return res.json(result);
   } catch (err: any) {
     return res.status(500).json({ error: err.message, cues: [] });
   }
@@ -1769,13 +1847,11 @@ nativePlayerRouter.all(
           "-map", `0:a:${audioIdx}?`
         );
 
-        // Check cached probe info to see if video and audio can be fast-copied (0 CPU, 0 buffering!)
+        // Check cached probe info to see if video can be fast-copied (0 CPU, instant streaming!)
         const cachedProbe = infoCache.get(targetUrl)?.data;
         const videoIsH264 = cachedProbe
           ? (cachedProbe.videoCodec?.includes("h264") || cachedProbe.videoCodec?.includes("avc"))
-          : !isPixeldrain && !targetUrl.toLowerCase().includes("hevc") && !targetUrl.toLowerCase().includes("h265");
-        const selectedAudio = cachedProbe?.audioTracks?.find((a: any) => a.id === audioIdx);
-        const audioIsAac = (selectedAudio?.codec || "").toLowerCase().includes("aac");
+          : !targetUrl.toLowerCase().includes("hevc") && !targetUrl.toLowerCase().includes("h265");
 
         if (videoIsH264) {
           ffmpegArgs.push("-c:v", "copy");
@@ -1792,15 +1868,12 @@ nativePlayerRouter.all(
           );
         }
 
-        if (audioIsAac) {
-          ffmpegArgs.push("-c:a", "copy");
-        } else {
-          ffmpegArgs.push(
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-ac", "2"
-          );
-        }
+        // Always encode audio to high-quality stereo AAC 192k for flawless browser playback
+        ffmpegArgs.push(
+          "-c:a", "aac",
+          "-b:a", "192k",
+          "-ac", "2"
+        );
 
         ffmpegArgs.push(
           "-movflags", "frag_keyframe+empty_moov+default_base_moof",
