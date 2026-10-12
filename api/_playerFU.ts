@@ -147,6 +147,12 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
     if (autoplay) upstreamParams.set("autoplay", "1");
     const qs = upstreamParams.toString() ? `?${upstreamParams.toString()}` : "";
 
+    // Direct mode: redirect directly to upstream player with zero serverless overhead
+    if (req.query.mode === "direct") {
+      const cleanImdb = imdbId.startsWith("tt") ? imdbId : `tt${imdbId}`;
+      return res.redirect(302, `https://play4u.org/${cleanImdb}${qs}`);
+    }
+
     // Fetch upstream HTML server-side
     let response = await fetch(`https://play4u.org/${imdbId}${qs}`, {
       headers: {
@@ -1222,6 +1228,19 @@ play4uRouter.all(["/range/*", "/api/stream/range/*", "/api/range/*"], async (req
   try {
     const upstreamPath = req.originalUrl.replace(/^\/api\/stream/, "").replace(/^\/api/, "");
     const upstreamUrl = `https://uprising.best${upstreamPath}`;
+    const isVercel = Boolean(process.env.VERCEL || process.env.NOW_REGION || process.env.VERCEL_ENV);
+
+    // Bandwidth Protection for Vercel Serverless:
+    // When running on Vercel or when redirect mode is requested, do NOT proxy high-bandwidth video chunks.
+    // Media files (.ts, .m4s, .mp4) or requests with byte Range headers are redirected directly to upstream edge CDN.
+    const isM3U8 = upstreamPath.endsWith(".m3u8") || upstreamPath.includes("/playlist");
+    if ((isVercel || req.query.redirect === "1") && !isM3U8) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Headers", "*");
+      res.setHeader("Access-Control-Expose-Headers", "Location, Content-Length, Content-Range, Accept-Ranges");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      return res.redirect(302, upstreamUrl);
+    }
 
     const forwardHeaders: Record<string, string> = {
       "User-Agent": (req.headers["user-agent"] as string) || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -1265,7 +1284,8 @@ play4uRouter.all(["/range/*", "/api/stream/range/*", "/api/range/*"], async (req
       return res.end();
     }
 
-    // If upstream returns an HLS m3u8 playlist, rewrite child /range/ URLs to /api/stream/range/ so all audio, subtitle and video segments proxy through our API seamlessly
+    // If upstream returns an HLS m3u8 playlist, rewrite child URLs.
+    // On Vercel, point segments directly to upstream CDN (https://uprising.best/range/) so chunks do not consume Fast Origin Transfer bandwidth!
     const contentLength = parseInt(upstreamRes.headers.get("content-length") || "0", 10);
 
     if (upstreamRes.status === 200 && (!contentLength || contentLength < 500000)) {
@@ -1274,17 +1294,25 @@ play4uRouter.all(["/range/*", "/api/stream/range/*", "/api/range/*"], async (req
       const head = buf.subarray(0, 7).toString("utf-8");
       if (head === "#EXTM3U") {
         const text = buf.toString("utf-8");
+        const segmentPrefix = isVercel ? "https://uprising.best/range/" : "/api/stream/range/";
         const rewritten = text
-          .replace(/(URI=["'])(?:https?:\/\/[^\/]+)?\/range\//g, '$1/api/stream/range/')
-          .replace(/(URI=["'])\/api\/range\//g, '$1/api/stream/range/')
-          .replace(/(\r?\n)(?:https?:\/\/[^\/\r\n]+)?\/range\//g, '$1/api/stream/range/')
-          .replace(/(\r?\n)\/api\/range\//g, '$1/api/stream/range/');
+          .replace(/(URI=["'])(?:https?:\/\/[^\/]+)?\/range\//g, `$1${segmentPrefix}`)
+          .replace(/(URI=["'])\/api\/range\//g, `$1${segmentPrefix}`)
+          .replace(/(\r?\n)(?:https?:\/\/[^\/\r\n]+)?\/range\//g, `$1${segmentPrefix}`)
+          .replace(/(\r?\n)\/api\/range\//g, `$1${segmentPrefix}`);
         res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
         res.setHeader("Content-Length", Buffer.byteLength(rewritten).toString());
         return res.send(rewritten);
       }
       res.setHeader("Content-Length", buf.length.toString());
       return res.send(buf);
+    }
+
+    // If running in Vercel environment, prevent piping raw video streams through serverless function
+    if (isVercel) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Headers", "*");
+      return res.redirect(302, upstreamUrl);
     }
 
     const nodeStream = Readable.fromWeb(upstreamRes.body as any);

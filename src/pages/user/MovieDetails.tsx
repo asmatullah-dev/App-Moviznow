@@ -5455,6 +5455,10 @@ export default function MovieDetails() {
         onClose={() => setIsPlayerOpen(false)}
         content={mergedContent}
         imdbId={currentImdbId}
+        onSwitchToNative={() => {
+          setIsPlayerOpen(false);
+          handleNativePlayMovieClick();
+        }}
       />
 
       {/* Native Player Stream Modal */}

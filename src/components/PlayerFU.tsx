@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, X } from "lucide-react";
+import { Play, X, Film, Zap, Shield, RotateCw } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 import { safeStorage } from "../utils/safeStorage";
 import { useModalBehavior } from "../hooks/useModalBehavior";
@@ -45,6 +45,7 @@ export interface PlayerFUProps {
   className?: string;
   season?: number;
   episode?: number;
+  onSwitchToNative?: () => void;
 }
 
 export interface PlayerFUButtonProps {
@@ -276,9 +277,14 @@ export function PlayerFU({
   imdbId,
   season,
   episode,
+  onSwitchToNative,
 }: PlayerFUProps) {
   const { t } = useLanguage();
   const { streamMeta } = usePlayerFU(content, season, episode);
+
+  // Playback engine mode: "direct" (Direct Edge CDN - 0 Vercel Fast Origin Transfer) vs "proxy" (Backend masked player)
+  // Default to "direct" to completely eliminate Vercel serverless bandwidth and prevent fast origin transfer consumption!
+  const [streamEngine, setStreamEngine] = useState<"direct" | "proxy">("direct");
 
   // Snapshot the iframe URL once when opened so it NEVER changes during active playback
   const [activeIframeSrc, setActiveIframeSrc] = useState<string>("");
@@ -301,19 +307,39 @@ export function PlayerFU({
     // Determine remembered playback speed preference
     const savedSpeed = String(getPreferredPlaybackSpeed());
 
-    // Construct immutable URL for this session with explicit quality, speed & Hindi language preference
-    const apiBase = getStreamingApiBase();
-    let stableUrl = `${apiBase}/api/stream/player/${content.id}?imdb=${encodeURIComponent(
-      imdbId,
-    )}&t=${initialResumeTime}&quality=${encodeURIComponent(preferredQuality)}&speed=${encodeURIComponent(savedSpeed)}&lang=hi&autoplay=1&_v=2`;
-    if (season !== undefined && season !== null) {
-      stableUrl += `&season=${encodeURIComponent(String(season))}`;
+    if (streamEngine === "direct") {
+      // Direct CDN embed from Play4U (https://play4u.org/tt...): browser connects directly to play4u
+      // ZERO video bytes pass through Vercel serverless functions (0 Fast Origin Transfer)!
+      const cleanImdb = imdbId.startsWith("tt") ? imdbId : `tt${imdbId}`;
+      let directUrl = `https://play4u.org/${encodeURIComponent(cleanImdb)}`;
+      const params = new URLSearchParams();
+      params.set("autoplay", "1");
+      if (preferredQuality && preferredQuality !== "auto") {
+        params.set("quality", preferredQuality);
+      }
+      if (initialResumeTime > 2) {
+        params.set("t", String(Math.floor(initialResumeTime)));
+      }
+      const qs = params.toString();
+      if (qs) {
+        directUrl += `?${qs}`;
+      }
+      setActiveIframeSrc(directUrl);
+    } else {
+      // Masked Player Route through backend proxy
+      const apiBase = getStreamingApiBase();
+      let stableUrl = `${apiBase}/api/stream/player/${content.id}?imdb=${encodeURIComponent(
+        imdbId,
+      )}&t=${initialResumeTime}&quality=${encodeURIComponent(preferredQuality)}&speed=${encodeURIComponent(savedSpeed)}&lang=hi&autoplay=1&_v=2`;
+      if (season !== undefined && season !== null) {
+        stableUrl += `&season=${encodeURIComponent(String(season))}`;
+      }
+      if (episode !== undefined && episode !== null) {
+        stableUrl += `&episode=${encodeURIComponent(String(episode))}`;
+      }
+      setActiveIframeSrc(stableUrl);
     }
-    if (episode !== undefined && episode !== null) {
-      stableUrl += `&episode=${encodeURIComponent(String(episode))}`;
-    }
-    setActiveIframeSrc(stableUrl);
-  }, [isOpen, content?.id, imdbId, streamMeta?.qualities, season, episode]);
+  }, [isOpen, content?.id, imdbId, streamMeta?.qualities, season, episode, streamEngine]);
 
   // Listen to playback & status messages from the player iframe to save progress & remember quality & speed
   useEffect(() => {
@@ -455,16 +481,64 @@ export function PlayerFU({
             className="relative w-full max-w-6xl aspect-video bg-black rounded-2xl overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.8)] ring-1 ring-white/10 z-10 transform-gpu flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Floating Minimalist Close Button */}
-            <button
-              type="button"
-              onClick={onClose}
-              className="absolute top-3 right-3 z-50 p-2 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white transition-all backdrop-blur-md border border-white/20 shadow-xl group cursor-pointer"
-              title={t("Close Player")}
-              aria-label={t("Close Player")}
-            >
-              <X className="w-5 h-5 transition-transform group-hover:scale-110" />
-            </button>
+            {/* Unified Top Control Bar */}
+            <div className="absolute top-0 left-0 right-0 z-50 p-3 sm:p-4 flex items-center justify-between bg-gradient-to-b from-black/80 via-black/40 to-transparent pointer-events-none">
+              <div className="flex items-center gap-2.5 pointer-events-auto">
+                <div className="flex flex-col">
+                  <span className="text-white font-bold text-xs sm:text-sm drop-shadow line-clamp-1 max-w-[200px] sm:max-w-md">
+                    {content.title}
+                  </span>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                      <Zap className="w-2.5 h-2.5" />
+                      {streamEngine === "direct" ? t("Direct CDN") : t("Proxy")}
+                    </span>
+                    {streamEngine === "direct" && (
+                      <span className="hidden sm:inline-flex text-[10px] text-zinc-400">
+                        {t("0 Vercel Bandwidth")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pointer-events-auto">
+                {/* Switch to Native Player Button */}
+                {onSwitchToNative && (
+                  <button
+                    type="button"
+                    onClick={onSwitchToNative}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-white border border-emerald-500/40 text-xs font-semibold backdrop-blur-md transition-all shadow-lg active:scale-95 cursor-pointer"
+                    title={t("Switch to Native Player")}
+                  >
+                    <Film className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="hidden xs:inline">{t("Native Player")}</span>
+                  </button>
+                )}
+
+                {/* Engine Mode Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setStreamEngine((prev) => (prev === "direct" ? "proxy" : "direct"))}
+                  className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white border border-white/10 text-xs font-medium backdrop-blur-md transition-all cursor-pointer"
+                  title={streamEngine === "direct" ? t("Switch to Masked Proxy") : t("Switch to Direct CDN")}
+                >
+                  <RotateCw className="w-3 h-3" />
+                  <span>{streamEngine === "direct" ? t("Direct") : t("Proxy")}</span>
+                </button>
+
+                {/* Minimalist Close Button */}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="p-1.5 sm:p-2 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white transition-all backdrop-blur-md border border-white/20 shadow-xl group cursor-pointer"
+                  title={t("Close Player")}
+                  aria-label={t("Close Player")}
+                >
+                  <X className="w-4 h-4 sm:w-5 sm:h-5 transition-transform group-hover:scale-110" />
+                </button>
+              </div>
+            </div>
 
             {/* Native Play4U Stream Player */}
             <div className="w-full h-full relative bg-black">

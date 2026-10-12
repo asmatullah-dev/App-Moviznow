@@ -826,6 +826,9 @@ export function NativePlayer({
   const pixeldrainCandidate = useMemo(() => findPixeldrainCandidate(activeCandidates), [activeCandidates]);
   const decodedMeta = useMemo(() => decodeWatchUrl(activeWatchUrl), [activeWatchUrl]);
 
+  // Track server candidates that have failed during this session to eliminate bouncing loops
+  const triedServersRef = useRef<Set<string>>(new Set());
+
   // Active server: default to "pixeldrain" if pixeldrainCandidate exists, otherwise "fsl" if fslCandidate exists, else "default"
   const [activeServer, setActiveServer] = useState<"fsl" | "pixeldrain" | "default">(() => {
     if (pixeldrainCandidate) return "pixeldrain";
@@ -836,6 +839,7 @@ export function NativePlayer({
   // Keep activeServer in sync when modal opens or candidates change (Pixeldrain first, fallback to FSL)
   useEffect(() => {
     if (isOpen) {
+      triedServersRef.current.clear();
       if (pixeldrainCandidate) {
         setActiveServer("pixeldrain");
       } else if (fslCandidate) {
@@ -2014,7 +2018,7 @@ export function NativePlayer({
     }
 
     // If playback has successfully started previously and current time is progressing,
-    // do not treat transient network hiccups as fatal FSL server error
+    // do not treat transient network hiccups as fatal server error
     if (hasStartedPlaybackRef.current && vid && vid.currentTime > 2) {
       console.warn("[NativePlayer] Transient glitch during active playback; not switching server.");
       return;
@@ -2026,9 +2030,9 @@ export function NativePlayer({
       return;
     }
 
-    // If on Pixeldrain server and direct stream failed on attempt 0, FIRST retry with native proxy/transcoder!
+    // 1. Pixeldrain Direct (attempt 0) failed: escalate to proxy mode first
     if (activeServer === "pixeldrain" && streamAttempt === 0) {
-      console.warn("[NativePlayer] Direct Pixeldrain stream encountered error; escalating to native proxy/transcode...");
+      console.warn("[NativePlayer] Direct Pixeldrain stream encountered error; escalating to native proxy...");
       const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
       setStreamMode(needsTc ? "transcode" : "proxy");
       setStreamAttempt(1);
@@ -2036,7 +2040,7 @@ export function NativePlayer({
       return;
     }
 
-    // If proxy failed on Pixeldrain on attempt 1, try transcode engine if ffmpeg is available
+    // 2. Pixeldrain Proxy (attempt 1) failed: try transcode ONLY if FFmpeg is available
     if (activeServer === "pixeldrain" && streamAttempt === 1 && mediaInfo?.hasFFmpeg !== false) {
       console.warn("[NativePlayer] Pixeldrain proxy failed; escalating to transcode engine...");
       setStreamMode("transcode");
@@ -2045,48 +2049,47 @@ export function NativePlayer({
       return;
     }
 
-    // ONLY if Pixeldrain has exhausted retries (attempt >= 2) and FSL candidate is available, fall back to FSL
-    if (activeServer === "pixeldrain" && fslCandidate && streamAttempt >= 2 && !hasStartedPlaybackRef.current) {
-      console.warn("[NativePlayer] Pixeldrain retries exhausted before playback. Falling back to FSL Server...");
-      showToast(t("Pixeldrain error. Falling back to FSL..."));
+    // Mark current server as failed so we NEVER bounce back to it in this session
+    triedServersRef.current.add(activeServer);
+
+    // 3. Fallback from Pixeldrain to FSL Server (if FSL hasn't been tried yet)
+    if (activeServer === "pixeldrain" && fslCandidate && !triedServersRef.current.has("fsl") && !hasStartedPlaybackRef.current) {
+      console.warn("[NativePlayer] Pixeldrain server exhausted. Falling back to FSL Server...");
+      showToast(t("Pixeldrain stream error. Falling back to FSL..."));
       setActiveServer("fsl");
       const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
       setStreamMode(needsTc ? "transcode" : "proxy");
       setHasPlaybackError(false);
-      setStreamAttempt((prev) => prev + 1);
+      setStreamAttempt(0);
       setIsBuffering(true);
       return;
     }
 
-    // If on FSL server and Pixeldrain candidate is available, switch to Pixeldrain only if FSL truly failed before starting
-    if (activeServer === "fsl" && pixeldrainCandidate && !hasStartedPlaybackRef.current) {
-      console.warn("[NativePlayer] Genuine FSL server error encountered before playback. Switching to Pixeldrain Server...");
+    // 4. Fallback from FSL to Pixeldrain (if Pixeldrain hasn't been tried yet)
+    if (activeServer === "fsl" && pixeldrainCandidate && !triedServersRef.current.has("pixeldrain") && !hasStartedPlaybackRef.current) {
+      console.warn("[NativePlayer] FSL server error encountered before playback. Switching to Pixeldrain Server...");
       showToast(t("FSL server error. Switching to Pixeldrain..."));
       setActiveServer("pixeldrain");
       const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
       setStreamMode(needsTc ? "transcode" : "proxy");
       setHasPlaybackError(false);
-      setStreamAttempt((prev) => prev + 1);
+      setStreamAttempt(0);
       setIsBuffering(true);
       return;
     }
 
-    // If proxy failed on other streams and FFmpeg is available on backend, escalate to transcode mode
-    if (streamMode === "proxy" && mediaInfo?.hasFFmpeg !== false) {
+    // 5. If proxy mode failed on any other stream and FFmpeg is available, escalate to transcode once
+    if (streamMode === "proxy" && mediaInfo?.hasFFmpeg !== false && streamAttempt === 0) {
       console.warn("[NativePlayer] Proxy mode failed. Escalating to transcode engine...");
       setStreamMode("transcode");
-      setStreamAttempt((prev) => prev + 1);
-      setIsBuffering(true);
-      return;
-    }
-
-    // If transcode failed on attempt 0 or 1, retry once
-    if (streamAttempt === 0) {
       setStreamAttempt(1);
       setIsBuffering(true);
       return;
     }
 
+    // 6. All viable server candidates and stream modes have been attempted without looping
+    console.warn("[NativePlayer] All available stream servers exhausted. Showing playback notice.");
+    setIsBuffering(false);
     setHasPlaybackError(true);
   };
 
