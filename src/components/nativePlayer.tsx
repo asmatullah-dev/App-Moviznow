@@ -770,6 +770,8 @@ export function NativePlayer({
     return Array.isArray(candidates) ? candidates : [];
   });
   const [isSwitchingQuality, setIsSwitchingQuality] = useState<boolean>(false);
+  const [switchingQualityLabel, setSwitchingQualityLabel] = useState<string | null>(null);
+  const pendingQualitySwitchPosRef = useRef<number | null>(null);
 
   // Parse direct stream URL (prioritizing Pixeldrain candidate first, FSL candidate if Pixeldrain missing, decoded meta, activeStreamUrl, or direct watchUrl)
   const fslCandidate = useMemo(() => findFslCandidate(activeCandidates), [activeCandidates]);
@@ -1149,120 +1151,240 @@ export function NativePlayer({
         return;
       }
 
-      // 1. Unify and save current playback progress
-      const curPos =
-        latestPositionRef.current ||
-        (videoRef.current
-          ? Math.floor(
-              (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) +
-                (videoRef.current.currentTime || 0)
-            )
-          : 0);
-      savePlaybackPosition(curPos);
-      setCurrentPosition(curPos);
-      latestPositionRef.current = curPos;
-
+      // Close menu immediately so video view remains unobstructed
       setActiveMenu(null);
-      setCurrentQuality(opt.name || opt.label);
-      setPreferredQuality(opt.label || opt.name);
+
+      // Keep previous quality state for seamless fallback if new quality fails to play/buffer
+      const prevQualityLabel = currentQualityLabel;
+
+      // DO NOT pause the stream! The current stream continues playing smoothly with ZERO interruption!
+      setIsSwitchingQuality(true);
+      setSwitchingQualityLabel(opt.label);
+      showToast(`${t("Buffering")} ${opt.label}...`);
 
       const targetUrl = (opt.url || "").trim();
       const lowerUrl = targetUrl.toLowerCase();
 
-      // 2. Direct or Pixeldrain link check
-      const isDirect =
-        lowerUrl.includes("pixeldrain") ||
-        lowerUrl.includes("pixel.drain") ||
-        lowerUrl.includes("pixeldra.in") ||
-        lowerUrl.includes(".mp4") ||
-        lowerUrl.includes(".mkv") ||
-        lowerUrl.includes("workers.dev");
-
-      if (isDirect) {
-        const directUrl = normalizePixeldrainUrl(targetUrl);
-        setActiveWatchUrl(targetUrl);
-        setActiveStreamUrl(directUrl);
-        setActiveCandidates([{ text: "Direct Stream", href: directUrl }]);
-        setActiveServer("pixeldrain");
-        const isMkv = directUrl.includes(".mkv") || directUrl.toLowerCase().includes("matroska");
-        const needsTc = isMkv && mediaInfo?.hasFFmpeg !== false;
-        setStreamMode(needsTc ? "transcode" : "proxy");
-        setSeekOffset(needsTc ? curPos : 0);
-        setHasPlaybackError(false);
-        setStreamAttempt((p) => p + 1);
-        setIsBuffering(true);
-        showToast(`${t("Switched to")} ${opt.label}`);
-        return;
-      }
-
-      // 3. HubCloud or intermediate extraction
-      setIsSwitchingQuality(true);
-      setIsBuffering(true);
-      showToast(`${t("Extracting")} ${opt.label}...`);
-
       try {
-        const apiBase = getStreamingApiBase();
-        let data: any = null;
-        const doCheck = async (base: string) => {
-          const res = await fetch(`${base}/api/native-player/check`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: targetUrl }),
-          });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return res.json();
-        };
+        let newWatchUrl = targetUrl;
+        let candidateRawStream = "";
+        let newCandidates: Array<{ text: string; href: string }> = [];
 
-        try {
-          data = await doCheck(apiBase);
-        } catch {
-          if (apiBase) {
-            data = await doCheck("");
+        const isDirect =
+          lowerUrl.includes("pixeldrain") ||
+          lowerUrl.includes("pixel.drain") ||
+          lowerUrl.includes("pixeldra.in") ||
+          lowerUrl.includes(".mp4") ||
+          lowerUrl.includes(".mkv") ||
+          lowerUrl.includes("workers.dev");
+
+        if (isDirect) {
+          candidateRawStream = normalizePixeldrainUrl(targetUrl);
+          newWatchUrl = targetUrl;
+          newCandidates = [{ text: "Direct Stream", href: candidateRawStream }];
+        } else {
+          // Extract link in background without pausing active playback
+          const apiBase = getStreamingApiBase();
+          let data: any = null;
+          const doCheck = async (base: string) => {
+            const res = await fetch(`${base}/api/native-player/check`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url: targetUrl }),
+              signal: AbortSignal.timeout(6500),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+          };
+
+          try {
+            data = await doCheck(apiBase);
+          } catch {
+            if (apiBase) {
+              try {
+                data = await doCheck("");
+              } catch {}
+            }
           }
-        }
 
-        if (data) {
-          const newCandidates = Array.isArray(data.candidates) ? data.candidates : [];
+          if (!data) {
+            // Extraction failed: fallback to previous quality with zero interruption
+            console.warn(`[NativePlayer] Failed to extract link for ${opt.label}, keeping ${prevQualityLabel}`);
+            showToast(`${t("Failed to load")} ${opt.label}, ${t("keeping")} ${prevQualityLabel}`);
+            setIsSwitchingQuality(false);
+            setSwitchingQualityLabel(null);
+            return;
+          }
+
+          newCandidates = Array.isArray(data.candidates) ? data.candidates : [];
           const pixel = findPixeldrainCandidate(newCandidates);
           const fsl = findFslCandidate(newCandidates);
           const watch = findWatchOnlineCandidate(newCandidates);
           const chosen = pixel || fsl || watch;
-          const rawStream = pixel
+
+          candidateRawStream = pixel
             ? pixel.streamUrl
             : fsl
             ? fsl.href
             : chosen
             ? chosen.href
             : data.streamUrl || targetUrl;
-          const normalizedStream = normalizePixeldrainUrl(rawStream);
-
-          setActiveWatchUrl(data.watchUrl || targetUrl);
-          setActiveStreamUrl(normalizedStream);
-          setActiveCandidates(
-            newCandidates.length > 0
-              ? newCandidates
-              : pixel
-              ? [{ text: pixel.text, href: pixel.streamUrl }]
-              : []
-          );
-          setActiveServer(pixel ? "pixeldrain" : fsl ? "fsl" : "default");
-          const isMkv =
-            normalizedStream.includes(".mkv") ||
-            normalizedStream.toLowerCase().includes("matroska");
-          const needsTc = isMkv && mediaInfo?.hasFFmpeg !== false;
-          setStreamMode(needsTc ? "transcode" : "proxy");
-          setSeekOffset(needsTc ? curPos : 0);
-          setHasPlaybackError(false);
-          setStreamAttempt((p) => p + 1);
-          showToast(`${t("Switched to")} ${opt.label}`);
-        } else {
-          showToast(t("Stream extraction failed"));
+          newWatchUrl = data.watchUrl || targetUrl;
         }
+
+        const normalizedStream = normalizePixeldrainUrl(candidateRawStream);
+        if (!normalizedStream) {
+          showToast(`${t("Unable to play")} ${opt.label}, ${t("keeping")} ${prevQualityLabel}`);
+          setIsSwitchingQuality(false);
+          setSwitchingQualityLabel(null);
+          return;
+        }
+
+        const pixelCand = findPixeldrainCandidate(newCandidates);
+        const fslCand = findFslCandidate(newCandidates);
+        const newServer: "pixeldrain" | "fsl" | "default" = pixelCand
+          ? "pixeldrain"
+          : fslCand
+          ? "fsl"
+          : normalizedStream.includes("pixeldrain")
+          ? "pixeldrain"
+          : "default";
+
+        const isMkv =
+          normalizedStream.includes(".mkv") ||
+          normalizedStream.toLowerCase().includes("matroska");
+        const needsTc = isMkv && mediaInfo?.hasFFmpeg !== false;
+        const newStreamMode: "proxy" | "transcode" = needsTc ? "transcode" : "proxy";
+
+        // Capture continuous playback position at this exact moment
+        const currentPlaybackPos =
+          videoRef.current
+            ? Math.floor(
+                (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) +
+                  (videoRef.current.currentTime || 0)
+              )
+            : (latestPositionRef.current || currentPosition);
+
+        // Build stream URL for testing buffer in background
+        let testStreamSrc = "";
+        if (
+          !needsTc &&
+          (newServer === "pixeldrain" || normalizedStream.includes("pixeldrain")) &&
+          normalizedStream.startsWith("http")
+        ) {
+          testStreamSrc = normalizedStream;
+        } else {
+          const params = new URLSearchParams();
+          params.set("url", normalizedStream);
+          params.set("mode", newStreamMode);
+          if (newStreamMode === "transcode" && currentPlaybackPos > 0) {
+            params.set("ss", String(currentPlaybackPos));
+          }
+          testStreamSrc = `${getStreamingApiBase()}/api/native-player/stream?${params.toString()}`;
+        }
+
+        // Test-buffer the new stream in background using a background video element
+        const isBufferedOk = await new Promise<boolean>((resolve) => {
+          const testVid = document.createElement("video");
+          testVid.preload = "auto";
+          testVid.muted = true;
+          testVid.playsInline = true;
+
+          let resolved = false;
+          let timeoutId: any = null;
+
+          const cleanup = () => {
+            if (timeoutId) clearTimeout(timeoutId);
+            testVid.oncanplay = null;
+            testVid.onloadeddata = null;
+            testVid.onerror = null;
+            testVid.src = "";
+            try {
+              testVid.remove();
+            } catch {}
+          };
+
+          const onReady = () => {
+            if (resolved) return;
+            resolved = true;
+            cleanup();
+            resolve(true);
+          };
+
+          const onFail = () => {
+            if (resolved) return;
+            resolved = true;
+            cleanup();
+            resolve(false);
+          };
+
+          testVid.oncanplay = onReady;
+          testVid.onloadeddata = () => {
+            if (testVid.readyState >= 2) onReady();
+          };
+          testVid.onerror = onFail;
+
+          timeoutId = setTimeout(() => {
+            if (!resolved) {
+              console.warn(`[NativePlayer] Buffering timeout for ${opt.label}`);
+              onFail();
+            }
+          }, 8000);
+
+          try {
+            testVid.src = testStreamSrc;
+            testVid.load();
+          } catch {
+            onFail();
+          }
+        });
+
+        if (!isBufferedOk) {
+          // Buffering failed or timed out: safely keep previous quality without interrupting stream!
+          console.warn(`[NativePlayer] New quality ${opt.label} could not buffer; safely keeping ${prevQualityLabel}`);
+          showToast(`${t("Unable to buffer")} ${opt.label}, ${t("keeping")} ${prevQualityLabel}`);
+          setIsSwitchingQuality(false);
+          setSwitchingQualityLabel(null);
+          return;
+        }
+
+        // Success! New quality is verified buffered.
+        // Seamlessly switch on main player at exact current position without starting from 0!
+        const curExactTime = videoRef.current
+          ? Math.floor(
+              (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) +
+                (videoRef.current.currentTime || 0)
+            )
+          : (latestPositionRef.current || currentPosition);
+
+        pendingQualitySwitchPosRef.current = curExactTime;
+        latestPositionRef.current = curExactTime;
+        setCurrentPosition(curExactTime);
+        savePlaybackPosition(curExactTime);
+
+        setCurrentQuality(opt.name || opt.label);
+        setPreferredQuality(opt.label || opt.name);
+        setActiveWatchUrl(newWatchUrl);
+        setActiveStreamUrl(normalizedStream);
+        setActiveCandidates(
+          newCandidates.length > 0
+            ? newCandidates
+            : [{ text: "Direct Stream", href: normalizedStream }]
+        );
+        setActiveServer(newServer);
+        setStreamMode(newStreamMode);
+        setSeekOffset(newStreamMode === "transcode" ? curExactTime : 0);
+        setHasPlaybackError(false);
+        setStreamAttempt((p) => p + 1);
+
+        setIsSwitchingQuality(false);
+        setSwitchingQualityLabel(null);
+        showToast(`${t("Playing in")} ${opt.label}`);
       } catch (err) {
         console.warn("Quality switch error:", err);
-        showToast(t("Error switching quality"));
-      } finally {
+        showToast(`${t("Error switching quality")}, ${t("keeping")} ${prevQualityLabel}`);
         setIsSwitchingQuality(false);
+        setSwitchingQualityLabel(null);
       }
     },
     [
@@ -1270,7 +1392,10 @@ export function NativePlayer({
       activeWatchUrl,
       activeStreamUrl,
       isSwitchingQuality,
+      streamMode,
       seekOffset,
+      currentPosition,
+      mediaInfo,
       savePlaybackPosition,
       showToast,
       t,
@@ -1584,6 +1709,21 @@ export function NativePlayer({
 
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
+
+    // Guard against temporary 0s during quality transition
+    if (pendingQualitySwitchPosRef.current !== null) {
+      const targetPos = pendingQualitySwitchPosRef.current;
+      const vTime = videoRef.current.currentTime;
+      if (streamMode === "transcode" && seekOffset > 0) {
+        pendingQualitySwitchPosRef.current = null;
+      } else if (vTime < 1 && targetPos > 2) {
+        // Video element just reset to 0 before seeking; do not overwrite currentPosition or storage!
+        return;
+      } else if (vTime >= 1) {
+        pendingQualitySwitchPosRef.current = null;
+      }
+    }
+
     const current =
       streamMode === "transcode" && seekOffset > 0
         ? seekOffset + videoRef.current.currentTime
@@ -1638,7 +1778,10 @@ export function NativePlayer({
     setHasPlaybackError(false);
 
     // If resuming in proxy or direct mode (where full video duration is preserved), seek to remembered position
-    const savedTarget = latestPositionRef.current || currentPosition;
+    const savedTarget =
+      pendingQualitySwitchPosRef.current !== null
+        ? pendingQualitySwitchPosRef.current
+        : (latestPositionRef.current || currentPosition);
     if (savedTarget > 2 && (streamMode !== "transcode" || seekOffset === 0)) {
       try {
         videoRef.current.currentTime = savedTarget;
@@ -1971,17 +2114,10 @@ export function NativePlayer({
   };
 
   const computedSubtitleTracks = useMemo(() => {
-    const list: Array<{ id: number; language: string; title: string }> = [];
-    if (mediaInfo?.subtitleTracks && mediaInfo.subtitleTracks.length > 0) {
-      list.push(...mediaInfo.subtitleTracks);
+    if (mediaInfo?.subtitleTracks && Array.isArray(mediaInfo.subtitleTracks)) {
+      return mediaInfo.subtitleTracks.filter((s) => s && typeof s.id === "number");
     }
-    if (!list.some((s) => s.language.toLowerCase().includes("eng"))) {
-      list.push({ id: 100, language: "English", title: "English" });
-    }
-    if (!list.some((s) => s.language.toLowerCase().includes("hin"))) {
-      list.push({ id: 101, language: "Hindi", title: "Hindi" });
-    }
-    return list;
+    return [];
   }, [mediaInfo]);
 
   const handleAudioSelect = (trackId: number) => {
@@ -2031,31 +2167,14 @@ export function NativePlayer({
       return;
     }
     const sub = computedSubtitleTracks.find((s) => s.id === subId);
-    const subLang = sub?.language || "English";
-    showToast(`Loading ${subLang} Subtitles...`);
+    const subLabel = sub?.title || sub?.language || `Subtitle ${subId + 1}`;
+    showToast(`Loading ${subLabel}...`);
 
     const apiBase = getStreamingApiBase();
-    const epSuffix = (seasonInfo && episodeInfo)
-      ? ` S${seasonInfo.number ?? (seasonInfo as any).seasonNumber ?? 1}E${episodeInfo.number ?? (episodeInfo as any).episodeNumber ?? 1}`
-      : "";
-    const movieTitle = (displayTitle || title || "") + epSuffix;
-    const subLangLower = subLang.toLowerCase();
-    const langCode = subLangLower.includes("hin")
-      ? "hin"
-      : subLangLower.includes("tam")
-      ? "tam"
-      : subLangLower.includes("tel")
-      ? "tel"
-      : subLangLower.includes("spa")
-      ? "spa"
-      : "eng";
-
-    const sNumber = seasonInfo?.number ?? (seasonInfo as any)?.seasonNumber ?? "";
-    const eNumber = episodeInfo?.number ?? (episodeInfo as any)?.episodeNumber ?? "";
     fetch(
       `${apiBase}/api/native-player/subtitles?url=${encodeURIComponent(
         directStreamUrl
-      )}&sub=${subId}&title=${encodeURIComponent(movieTitle)}&lang=${encodeURIComponent(langCode)}&imdbId=${encodeURIComponent(imdbId || "")}&season=${sNumber}&episode=${eNumber}`
+      )}&sub=${subId}`
     )
       .then((r) => r.json())
       .then((res) => {
@@ -2066,14 +2185,14 @@ export function NativePlayer({
             (cue: any) => curTime >= (cue.start - 0.25) && curTime <= (cue.end + 0.25)
           );
           setActiveSubtitleText(activeCue ? activeCue.text : "");
-          showToast(`Subtitles: ${subLang}`);
+          showToast(`Subtitles: ${subLabel}`);
         } else {
-          showToast(`No ${subLang} subtitles found`);
+          showToast(`No embedded subtitles found`);
         }
       })
       .catch((err) => {
         console.warn("Subtitle fetch error:", err);
-        showToast("Subtitles unavailable");
+        showToast("Embedded subtitles unavailable");
       });
   };
 
@@ -2190,7 +2309,10 @@ export function NativePlayer({
                   }
                   setHasPlaybackError(false);
                   // Ensure saved position (e.g. 10 mins) is restored when media is ready to play
-                  const savedTarget = latestPositionRef.current || currentPosition;
+                  const savedTarget =
+                    pendingQualitySwitchPosRef.current !== null
+                      ? pendingQualitySwitchPosRef.current
+                      : (latestPositionRef.current || currentPosition);
                   if (
                     savedTarget > 2 &&
                     videoRef.current &&
@@ -2974,21 +3096,27 @@ export function NativePlayer({
                           <span>{t("Off")}</span>
                           {selectedSubtitleTrack === null && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
                         </button>
-                        {computedSubtitleTracks.map((sub) => (
-                          <button
-                            key={sub.id}
-                            type="button"
-                            onClick={() => handleSubtitleSelect(sub.id)}
-                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
-                              selectedSubtitleTrack === sub.id
-                                ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
-                                : "text-zinc-300 hover:bg-white/10 hover:text-white"
-                            }`}
-                          >
-                            <span className="truncate">{sub.language}</span>
-                            {selectedSubtitleTrack === sub.id && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
-                          </button>
-                        ))}
+                        {computedSubtitleTracks.length === 0 ? (
+                          <div className="px-2.5 py-1.5 text-[11px] text-zinc-400 italic">
+                            {t("No embedded subtitles")}
+                          </div>
+                        ) : (
+                          computedSubtitleTracks.map((sub) => (
+                            <button
+                              key={sub.id}
+                              type="button"
+                              onClick={() => handleSubtitleSelect(sub.id)}
+                              className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
+                                selectedSubtitleTrack === sub.id
+                                  ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
+                                  : "text-zinc-300 hover:bg-white/10 hover:text-white"
+                              }`}
+                            >
+                              <span className="truncate">{sub.title || sub.language || `Sub ${sub.id + 1}`}</span>
+                              {selectedSubtitleTrack === sub.id && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
+                            </button>
+                          ))
+                        )}
 
                         {/* Subtitle Size Adjuster */}
                         {selectedSubtitleTrack !== null && (
@@ -3022,6 +3150,7 @@ export function NativePlayer({
                       <>
                         {qualityOptions.map((opt, idx) => {
                           const isCurrent = opt.label.toUpperCase() === currentQualityLabel.toUpperCase();
+                          const isBufferingThis = isSwitchingQuality && switchingQualityLabel === opt.label;
                           const rawSize = opt.size ? String(opt.size).trim() : "";
                           const rawUnit = opt.unit ? String(opt.unit).trim() : "";
                           const sizeDisplay = rawSize
@@ -3050,7 +3179,14 @@ export function NativePlayer({
                                   </span>
                                 )}
                               </div>
-                              {isCurrent && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
+                              {isBufferingThis ? (
+                                <span className="text-[10px] text-amber-300 font-medium animate-pulse ml-auto shrink-0 flex items-center gap-1">
+                                  <Loader2 className="w-3 h-3 animate-spin text-amber-300" />
+                                  <span>{t("Buffering...")}</span>
+                                </span>
+                              ) : isCurrent ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />
+                              ) : null}
                             </button>
                           );
                         })}

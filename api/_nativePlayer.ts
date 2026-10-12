@@ -842,17 +842,17 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
     const hasFFmpeg = await checkFFmpegAvailable();
     const hasFfprobe = await checkFFprobeAvailable();
 
-    // 1. Try pure-JS MKV EBML header inspection (fast 128KB range request in <150ms)
+    // 1. Try pure-JS MKV EBML header inspection (fast 512KB range request)
     let ebmlParsed: ReturnType<typeof parseMkvEbml> = null;
     if (isMkv) {
       try {
         const headerRes = await fetch(targetUrl, {
           headers: {
-            Range: "bytes=0-131071",
+            Range: "bytes=0-524287",
             "User-Agent":
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           },
-          signal: AbortSignal.timeout(1800),
+          signal: AbortSignal.timeout(2500),
         }).catch(() => null);
 
         if (headerRes && (headerRes.ok || headerRes.status === 206)) {
@@ -908,21 +908,7 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       }
     }
 
-    // If subtitle tracks still not found from EBML, add detected languages + English & Hindi online subtitles
-    if (subtitleTracks.length === 0) {
-      const subLangs = [...detectedLangs];
-      if (!subLangs.some((l) => l.code === "eng")) {
-        subLangs.unshift({ name: "English", code: "eng" });
-      }
-      if (!subLangs.some((l) => l.code === "hin")) {
-        subLangs.push({ name: "Hindi", code: "hin" });
-      }
-      subtitleTracks = subLangs.map((l, idx) => ({
-        id: 100 + idx,
-        language: l.name,
-        title: l.name,
-      }));
-    }
+    // Only get subtitles from embedded media tracks in the file link (no fake online tracks)
 
     const compiledInfo: MediaProbeInfo = {
       duration: 0,
@@ -1348,17 +1334,11 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
     }
 
     const hasFFmpeg = await checkFFmpegAvailable();
-
-    // If subIdx >= 100 (explicit online sub track) or FFmpeg is not available (e.g. Vercel), query online subtitles immediately
-    if (subIdx >= 100 || !hasFFmpeg) {
-      const onlineCues = await fetchOnlineSubtitles(titleQuery, langQuery, imdbIdQuery, seasonQuery, episodeQuery);
-      if (onlineCues.length > 0) {
-        subtitleCuesCache.set(cacheKey, { cues: onlineCues, timestamp: Date.now() });
-      }
-      return res.json({ ok: onlineCues.length > 0, cues: onlineCues });
+    if (!hasFFmpeg) {
+      return res.json({ ok: false, cues: [], error: "FFmpeg not available for embedded subtitles" });
     }
 
-    // Try FFmpeg extraction for embedded subtitles with fast timeout and online fallback
+    // Extract embedded subtitles strictly from stream link using ffmpeg
     let referer = "";
     if (targetUrl.includes("hbplay.pages.dev")) {
       referer = "https://hbplay.pages.dev/";
@@ -1371,8 +1351,8 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
     const ffmpegArgs: string[] = [
       "-headers",
       subHeaders,
-      "-analyzeduration", "3M",
-      "-probesize", "3M",
+      "-analyzeduration", "5M",
+      "-probesize", "5M",
       "-reconnect", "1",
       "-reconnect_streamed", "1",
       "-reconnect_delay_max", "3",
@@ -1390,8 +1370,7 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
         stdio: ["ignore", "pipe", "ignore"],
       });
     } catch {
-      const cues = await fetchOnlineSubtitles(titleQuery, langQuery, imdbIdQuery, seasonQuery, episodeQuery);
-      return res.json({ ok: cues.length > 0, cues });
+      return res.json({ ok: false, cues: [] });
     }
 
     let vttText = "";
@@ -1408,11 +1387,10 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
         child.kill("SIGKILL");
       } catch {}
 
-      let cues = parseWebVTT(vttText);
-      if (cues.length === 0) {
-        cues = await fetchOnlineSubtitles(titleQuery, langQuery, imdbIdQuery, seasonQuery, episodeQuery);
+      const cues = parseWebVTT(vttText);
+      if (cues.length > 0) {
+        subtitleCuesCache.set(cacheKey, { cues, timestamp: Date.now() });
       }
-      subtitleCuesCache.set(cacheKey, { cues, timestamp: Date.now() });
       return res.json({ ok: cues.length > 0, cues });
     };
 
@@ -1421,7 +1399,7 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
 
     setTimeout(() => {
       sendResponse();
-    }, 3500);
+    }, 4500);
   } catch (err: any) {
     return res.status(500).json({ error: err.message, cues: [] });
   }
