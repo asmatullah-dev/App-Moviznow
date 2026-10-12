@@ -358,6 +358,8 @@ export default function MovieDetails() {
     contentId?: string;
     poster?: string;
     year?: string | number;
+    runtime?: string | number;
+    duration?: string | number;
     seasonInfo?: { number?: number; seasonNumber?: number; title?: string; id?: string };
     episodeInfo?: { number?: number; episodeNumber?: number; title?: string };
     candidates?: Array<{ text: string; href: string }>;
@@ -5032,6 +5034,7 @@ export default function MovieDetails() {
                                 contentId: mergedContent?.id || "default",
                                 poster: mergedContent?.posterUrl || mergedContent?.backdropUrl,
                                 year: mergedContent?.year,
+                                runtime: (linkPopup.episodeInfo as any)?.duration || (linkPopup.seasonInfo as any)?.duration || mergedContent?.runtime || (mergedContent as any)?.duration,
                                 seasonInfo: linkPopup.seasonInfo,
                                 episodeInfo: linkPopup.episodeInfo,
                                 candidates: linkPopup.candidates,

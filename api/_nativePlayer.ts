@@ -1,4 +1,5 @@
 import express from "express";
+import axios from "axios";
 import { Readable } from "stream";
 import { spawn } from "child_process";
 import { getCachedHubcloudData, setCachedHubcloudData, isExtractableIntermediate, performExtraction } from "./_LinkExtractionModal.js";

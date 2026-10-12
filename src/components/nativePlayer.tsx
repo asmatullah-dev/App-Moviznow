@@ -90,6 +90,8 @@ export interface NativePlayerProps {
   poster?: string;
   year?: string | number;
   quality?: string;
+  duration?: number | string;
+  runtime?: number | string;
   seasonInfo?: { number?: number; seasonNumber?: number; title?: string };
   episodeInfo?: { number?: number; episodeNumber?: number; title?: string };
   candidates?: Array<{ text: string; href: string }>;
@@ -107,6 +109,61 @@ export interface MediaProbeInfo {
   subtitleTracks: Array<{ id: number; language: string; title: string }>;
   needsTranscode: boolean;
   hasFFmpeg?: boolean;
+}
+
+/**
+ * Parses duration or runtime string/number into seconds.
+ * E.g. "142 min", "142m", "2h 15m", "02:15:00", 142 -> seconds
+ */
+export function parseRuntimeSeconds(val?: number | string): number {
+  if (!val) return 0;
+  if (typeof val === "number" && !isNaN(val) && val > 0) {
+    if (val > 300) return Math.round(val);
+    return Math.round(val * 60);
+  }
+  if (typeof val === "string") {
+    const s = val.trim().toLowerCase();
+    const minMatch = s.match(/(\d+)\s*(?:min|mins|m)\b/);
+    const hrMatch = s.match(/(\d+)\s*(?:hr|hrs|h)\b/);
+    if (hrMatch || minMatch) {
+      const hrs = hrMatch ? parseInt(hrMatch[1], 10) : 0;
+      const mins = minMatch ? parseInt(minMatch[1], 10) : 0;
+      return (hrs * 60 + mins) * 60;
+    }
+    const colonParts = s.split(":");
+    if (colonParts.length === 3) {
+      const h = parseFloat(colonParts[0]) || 0;
+      const m = parseFloat(colonParts[1]) || 0;
+      const sec = parseFloat(colonParts[2]) || 0;
+      return Math.round(h * 3600 + m * 60 + sec);
+    } else if (colonParts.length === 2) {
+      const m = parseFloat(colonParts[0]) || 0;
+      const sec = parseFloat(colonParts[1]) || 0;
+      return Math.round(m * 60 + sec);
+    }
+    const num = parseFloat(s);
+    if (!isNaN(num) && num > 0) {
+      return num > 300 ? Math.round(num) : Math.round(num * 60);
+    }
+  }
+  return 0;
+}
+
+/**
+ * On Pixeldrain streams, downloads are only available through /u/:id.
+ * Converts /api/file/:id into /u/:id for opening download page.
+ */
+export function getPixeldrainDownloadUrl(url?: string): string {
+  if (!url || typeof url !== "string") return "";
+  const trimmed = url.trim();
+  const pdMatch = trimmed.match(
+    /(?:https?:\/\/)?(?:www\.)?(pixeldrain\.(?:dev|com|net)|pixel\.drain|pixeldra\.in)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i
+  );
+  if (pdMatch && pdMatch[2]) {
+    const host = pdMatch[1].toLowerCase().includes("dev") ? "pixeldrain.dev" : "pixeldrain.com";
+    return `https://${host}/u/${pdMatch[2]}`;
+  }
+  return trimmed;
 }
 
 /**
@@ -689,6 +746,8 @@ export function NativePlayer({
   poster = "",
   year,
   quality = "720p",
+  duration: propDuration,
+  runtime,
   seasonInfo,
   episodeInfo,
   candidates,
@@ -754,6 +813,19 @@ export function NativePlayer({
   }, [activeServer, fslCandidate, pixeldrainCandidate, activeStreamUrl, decodedMeta, activeWatchUrl]);
 
   const directStreamUrl = normalizePixeldrainUrl(rawStreamUrl);
+
+  // Computes the official /u/:id download URL for Pixeldrain or standard direct URL
+  const downloadUrl = useMemo(() => {
+    const pdCandidateUrl = pixeldrainCandidate?.href || pixeldrainCandidate?.streamUrl;
+    const target = pdCandidateUrl || rawStreamUrl || directStreamUrl || activeWatchUrl || "";
+    return getPixeldrainDownloadUrl(target);
+  }, [pixeldrainCandidate, rawStreamUrl, directStreamUrl, activeWatchUrl]);
+
+  // Initial duration in seconds from content metadata/runtime
+  const propDurationSeconds = useMemo(() => {
+    return parseRuntimeSeconds(propDuration || runtime);
+  }, [propDuration, runtime]);
+
   const parsedHeaderTitle = useMemo(() => {
     return parsePlayerHeaderTitle(decodedMeta.title || title, seasonInfo, episodeInfo);
   }, [decodedMeta.title, title, seasonInfo, episodeInfo]);
@@ -821,7 +893,16 @@ export function NativePlayer({
     }
   }, [isDirectMkv, mediaInfo]);
   const [seekOffset, setSeekOffset] = useState<number>(0);
-  const [totalDuration, setTotalDuration] = useState<number>(0);
+  const [totalDuration, setTotalDuration] = useState<number>(() => {
+    return propDurationSeconds > 10 ? propDurationSeconds : 0;
+  });
+
+  // Ensure totalDuration is populated from prop runtime if stream metadata hasn't loaded yet
+  useEffect(() => {
+    if (propDurationSeconds > 10 && totalDuration <= 10) {
+      setTotalDuration(propDurationSeconds);
+    }
+  }, [propDurationSeconds, totalDuration]);
   const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(0);
   const [selectedSubtitleTrack, setSelectedSubtitleTrack] = useState<number | null>(null);
   const [subtitleCues, setSubtitleCues] = useState<Array<{ start: number; end: number; text: string }>>([]);
@@ -977,7 +1058,7 @@ export function NativePlayer({
     setCurrentPosition(targetPosition);
     setSeekOffset(0);
     latestPositionRef.current = targetPosition;
-    setTotalDuration(0);
+    setTotalDuration(propDurationSeconds > 10 ? propDurationSeconds : 0);
     setBufferedPercent(0);
 
     setHasPlaybackError(false);
@@ -1240,8 +1321,8 @@ export function NativePlayer({
       .then((data: MediaProbeInfo) => {
         if (!isMounted) return;
         setMediaInfo(data);
-        if (data.duration && data.duration > 0) {
-          setTotalDuration(data.duration);
+        if (data.duration && data.duration > 10) {
+          setTotalDuration(Math.round(data.duration));
         }
       })
       .catch((err) => {
@@ -1536,13 +1617,22 @@ export function NativePlayer({
       setActiveSubtitleText("");
     }
 
+    // Dynamically capture duration if video reports legitimate duration > 10s and totalDuration is unset
+    if (videoRef.current && videoRef.current.duration > 10 && isFinite(videoRef.current.duration) && totalDuration <= 10) {
+      setTotalDuration(Math.round(videoRef.current.duration));
+    }
+
     updateBufferMetrics();
   };
 
   const handleLoadedMetadata = () => {
     if (!videoRef.current) return;
-    if (!totalDuration && videoRef.current.duration && isFinite(videoRef.current.duration)) {
-      setTotalDuration(videoRef.current.duration);
+    const vidDur = videoRef.current.duration;
+    // Piped / fragmented mp4 streams report duration = 1 (or 0.04 or Infinity). Never accept <= 10s as real media duration.
+    if (vidDur && isFinite(vidDur) && vidDur > 10) {
+      if (!totalDuration || Math.abs(totalDuration - vidDur) > 30) {
+        setTotalDuration(Math.round(vidDur));
+      }
     }
     setIsBuffering(false);
     setHasPlaybackError(false);
@@ -2278,13 +2368,12 @@ export function NativePlayer({
                     <RefreshCw className="w-4 h-4" />
                     <span>{t("Replay Video")}</span>
                   </button>
-                  {directStreamUrl && (
+                  {downloadUrl && (
                     <a
-                      href={directStreamUrl}
-                      download
+                      href={downloadUrl}
                       target="_blank"
-                      rel="noreferrer"
-                      className="px-5 py-3 bg-zinc-800/80 hover:bg-zinc-700/80 active:scale-95 text-zinc-300 font-semibold text-sm rounded-xl border border-zinc-700/60 transition-all flex items-center gap-2"
+                      rel="noopener noreferrer"
+                      className="px-5 py-3 bg-zinc-800/80 hover:bg-zinc-700/80 active:scale-95 text-zinc-300 font-semibold text-sm rounded-xl border border-zinc-700/60 transition-all flex items-center gap-2 cursor-pointer"
                     >
                       <Download className="w-4 h-4" />
                       <span>{t("Direct Download")}</span>
@@ -2347,7 +2436,7 @@ export function NativePlayer({
               )}
               <div className="flex items-center gap-2 text-[11px] sm:text-xs text-zinc-300 font-medium flex-wrap">
                 {year && <span>{year}</span>}
-                {totalDuration > 0 && <span>• {formatTime(totalDuration)}</span>}
+                {totalDuration > 10 && <span>• {formatTime(totalDuration)}</span>}
                 {mediaInfo?.audioTracks && mediaInfo.audioTracks.length > 0 && (
                   <span className="text-zinc-400 font-normal">
                     • {mediaInfo.audioTracks.map((a: any) => formatAudioLanguageLabel(a.language)).filter(Boolean).join(", ")}
@@ -2358,12 +2447,11 @@ export function NativePlayer({
 
             {/* Top Right Actions: Direct Download & Floating Round Close Button */}
             <div className="flex items-center gap-2 shrink-0">
-              {directStreamUrl && (
+              {downloadUrl && (
                 <a
-                  href={directStreamUrl}
-                  download
+                  href={downloadUrl}
                   target="_blank"
-                  rel="noreferrer"
+                  rel="noopener noreferrer"
                   className="w-9 h-9 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white transition-all backdrop-blur-md border border-white/20 shadow-xl flex items-center justify-center cursor-pointer"
                   title={t("Download File")}
                 >
@@ -2538,7 +2626,7 @@ export function NativePlayer({
                   {/* Priority 1: Running progress duration time; Priority 7: Total duration under progress bar when enough space */}
                   <div className="flex items-center text-xs sm:text-[12.5px] font-mono font-semibold ml-0.5 sm:ml-1 shrink-0">
                     <span className="text-white">{formatTime(currentPosition)}</span>
-                    {showP7TotalDuration && (
+                    {showP7TotalDuration && totalDuration > 10 && (
                       <>
                         <span className="text-zinc-500 mx-1">/</span>
                         <span className="text-zinc-400">{formatTime(totalDuration)}</span>
