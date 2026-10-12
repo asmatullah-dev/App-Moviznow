@@ -243,7 +243,7 @@ export function parseMkvEbml(buf: Buffer): {
   const tracksEnd = Math.min(buf.length, offset + tracksSize.val);
 
   const audioTracks: Array<{ id: number; language: string; codec: string; title: string }> = [];
-  const subtitleTracks: Array<{ id: number; language: string; title: string }> = [];
+  const subtitleTracks: Array<{ id: number; language: string; title: string; trackNumber?: number }> = [];
   let videoCodec = "h264";
   let width = 1920;
   let height = 1080;
@@ -261,6 +261,7 @@ export function parseMkvEbml(buf: Buffer): {
     if (elId === 0xae) {
       // TrackEntry
       let trackType = 0;
+      let trackNumber = 0;
       let codecId = "";
       let lang = "";
       let name = "";
@@ -275,6 +276,11 @@ export function parseMkvEbml(buf: Buffer): {
         if (subId === 0x83) {
           // TrackType: 1=Video, 2=Audio, 17=Subtitle
           trackType = buf[offset];
+        } else if (subId === 0xd7) {
+          // TrackNumber
+          let tNum = 0;
+          for (let k = offset; k < subDataEnd; k++) tNum = tNum * 256 + buf[k];
+          trackNumber = tNum;
         } else if (subId === 0x86) {
           // CodecID
           codecId = buf.toString("utf8", offset, subDataEnd).replace(/\0/g, "").trim();
@@ -369,6 +375,7 @@ export function parseMkvEbml(buf: Buffer): {
           id: subIdx,
           language: langName,
           title: titleStr,
+          trackNumber: trackNumber || (subIdx + 1),
         });
         subIdx++;
       }
@@ -378,6 +385,281 @@ export function parseMkvEbml(buf: Buffer): {
   }
 
   return { audioTracks, subtitleTracks, videoCodec, width, height };
+}
+
+/**
+ * Pure-JS MKV Embedded Subtitle Demuxer & Cue Extractor
+ * Reads Matroska EBML Cues and extracts embedded subtitle text without needing FFmpeg binary
+ * (Works 100% in Vercel serverless environment and serverless edge functions)
+ */
+export async function extractMkvSubtitles(
+  targetUrl: string,
+  subIdx = 0
+): Promise<Array<{ start: number; end: number; text: string }>> {
+  try {
+    const directUrl = normalizePixeldrainUrl(targetUrl) || targetUrl;
+    // 1. Fetch first 130KB to get Segment header, Tracks, and SeekHead
+    const headRes = await fetch(directUrl, {
+      headers: {
+        Range: "bytes=0-131071",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      },
+      signal: AbortSignal.timeout(6000),
+    }).catch(() => null);
+
+    if (!headRes || (!headRes.ok && headRes.status !== 206)) return [];
+    const buf = Buffer.from(await headRes.arrayBuffer());
+    if (buf.length < 100) return [];
+
+    function readVint(b: Buffer, offset: number) {
+      if (offset >= b.length) return null;
+      const first = b[offset];
+      let len = 1;
+      let mask = 0x80;
+      while (!(first & mask) && len <= 8) {
+        mask >>= 1;
+        len++;
+      }
+      if (len > 8) return null;
+      let val = first & (mask - 1);
+      for (let i = 1; i < len; i++) {
+        val = val * 256 + b[offset + i];
+      }
+      return { val, len };
+    }
+
+    // Segment payload offset
+    let segPayloadOffset = 52;
+    const segIdx = buf.indexOf(Buffer.from([0x18, 0x53, 0x80, 0x67]));
+    if (segIdx !== -1) {
+      const v = readVint(buf, segIdx + 4);
+      if (v) segPayloadOffset = segIdx + 4 + v.len;
+    }
+
+    // Parse Tracks to find target subtitle track number
+    let targetTrackNumber = -1;
+    let currentSubIdx = 0;
+    for (let i = 0; i < buf.length - 8; i++) {
+      if (buf[i] === 0x16 && buf[i + 1] === 0x54 && buf[i + 2] === 0xae && buf[i + 3] === 0x6b) {
+        let tOffset = i + 4;
+        const sVint = readVint(buf, tOffset);
+        if (!sVint) continue;
+        tOffset += sVint.len;
+        const tEnd = Math.min(buf.length, tOffset + sVint.val);
+        while (tOffset < tEnd) {
+          if (buf[tOffset] === 0xae) {
+            tOffset++;
+            const entrySize = readVint(buf, tOffset);
+            if (!entrySize) break;
+            tOffset += entrySize.len;
+            const entryEnd = Math.min(tEnd, tOffset + entrySize.val);
+            let tType = 0;
+            let tNum = 0;
+            let inner = tOffset;
+            while (inner < entryEnd) {
+              const elId = buf[inner];
+              inner++;
+              const elSize = readVint(buf, inner);
+              if (!elSize) break;
+              inner += elSize.len;
+              const dEnd = Math.min(entryEnd, inner + elSize.val);
+              if (elId === 0x83) {
+                tType = buf[inner];
+              } else if (elId === 0xd7) {
+                for (let k = inner; k < dEnd; k++) tNum = tNum * 256 + buf[k];
+              }
+              inner = dEnd;
+            }
+            if (tType === 17) {
+              if (currentSubIdx === subIdx) {
+                targetTrackNumber = tNum;
+                break;
+              }
+              currentSubIdx++;
+            }
+            tOffset = entryEnd;
+          } else {
+            tOffset++;
+          }
+        }
+        break;
+      }
+    }
+
+    if (targetTrackNumber === -1) {
+      targetTrackNumber = subIdx === 0 ? 3 : subIdx + 1;
+    }
+
+    // Find Cues in SeekHead
+    let cuesFilePos = -1;
+    const cuesId = Buffer.from([0x1c, 0x53, 0xbb, 0x6b]);
+    const seekIdx = buf.indexOf(cuesId);
+    if (seekIdx !== -1) {
+      const posIdx = buf.indexOf(Buffer.from([0x53, 0xac]), seekIdx);
+      if (posIdx !== -1 && posIdx < seekIdx + 30) {
+        const pSize = readVint(buf, posIdx + 2);
+        if (pSize) {
+          let pVal = 0;
+          for (let i = 0; i < pSize.val; i++) pVal = pVal * 256 + buf[posIdx + 2 + pSize.len + i];
+          cuesFilePos = segPayloadOffset + pVal;
+        }
+      }
+    }
+
+    let cuesBuf: Buffer | null = null;
+    if (cuesFilePos > 0) {
+      const cuesRes = await fetch(directUrl, {
+        headers: { Range: `bytes=${cuesFilePos}-${cuesFilePos + 65535}` },
+        signal: AbortSignal.timeout(6000),
+      }).catch(() => null);
+      if (cuesRes && (cuesRes.ok || cuesRes.status === 206)) {
+        cuesBuf = Buffer.from(await cuesRes.arrayBuffer());
+      }
+    }
+
+    // Fallback: If SeekHead position failed, check the last 96KB of the file
+    if (!cuesBuf || cuesBuf.length < 50) {
+      const tailRes = await fetch(directUrl, {
+        headers: { Range: `bytes=-98304` },
+        signal: AbortSignal.timeout(6000),
+      }).catch(() => null);
+      if (tailRes && (tailRes.ok || tailRes.status === 206)) {
+        const tailBuf = Buffer.from(await tailRes.arrayBuffer());
+        const tailCuesIdx = tailBuf.indexOf(cuesId);
+        if (tailCuesIdx !== -1) {
+          cuesBuf = tailBuf.subarray(tailCuesIdx);
+        }
+      }
+    }
+
+    if (!cuesBuf || cuesBuf.length < 50) return [];
+
+    // Parse CuePoints for targetTrackNumber
+    let offset = cuesBuf.indexOf(0xbb);
+    const cues: Array<{ time: number; duration: number; pos: number }> = [];
+    while (offset < cuesBuf.length && offset !== -1) {
+      if (cuesBuf[offset] !== 0xbb) {
+        offset = cuesBuf.indexOf(0xbb, offset);
+        if (offset === -1) break;
+      }
+      offset++;
+      const cpSize = readVint(cuesBuf, offset);
+      if (!cpSize) break;
+      offset += cpSize.len;
+      const cpEnd = Math.min(cuesBuf.length, offset + cpSize.val);
+      let cueTime = 0;
+      let cueTrack = 0;
+      let clusterOffset = 0;
+      let relOffset = 0;
+      let duration = 2500;
+      let inner = offset;
+      while (inner < cpEnd) {
+        const idByte = cuesBuf[inner];
+        inner++;
+        const elSize = readVint(cuesBuf, inner);
+        if (!elSize) break;
+        inner += elSize.len;
+        const dataEnd = Math.min(cpEnd, inner + elSize.val);
+        if (idByte === 0xb3) {
+          let t = 0;
+          for (let i = inner; i < dataEnd; i++) t = t * 256 + cuesBuf[i];
+          cueTime = t;
+        } else if (idByte === 0xb2) {
+          let d = 0;
+          for (let i = inner; i < dataEnd; i++) d = d * 256 + cuesBuf[i];
+          duration = d;
+        } else if (idByte === 0xb7) {
+          let tp = inner;
+          while (tp < dataEnd) {
+            const tpId = cuesBuf[tp];
+            tp++;
+            const tpSize = readVint(cuesBuf, tp);
+            if (!tpSize) break;
+            tp += tpSize.len;
+            const tpDataEnd = Math.min(dataEnd, tp + tpSize.val);
+            if (tpId === 0xf7) {
+              let tr = 0;
+              for (let i = tp; i < tpDataEnd; i++) tr = tr * 256 + cuesBuf[i];
+              cueTrack = tr;
+            } else if (tpId === 0xf1) {
+              let cp = 0;
+              for (let i = tp; i < tpDataEnd; i++) cp = cp * 256 + cuesBuf[i];
+              clusterOffset = cp;
+            } else if (tpId === 0xf0) {
+              let rp = 0;
+              for (let i = tp; i < tpDataEnd; i++) rp = rp * 256 + cuesBuf[i];
+              relOffset = rp;
+            }
+            tp = tpDataEnd;
+          }
+        }
+        inner = dataEnd;
+      }
+      if (cueTrack === targetTrackNumber) {
+        cues.push({
+          time: cueTime / 1000,
+          duration: duration / 1000,
+          pos: segPayloadOffset + clusterOffset + relOffset,
+        });
+      }
+      offset = cpEnd;
+    }
+
+    if (cues.length === 0) return [];
+
+    // Fetch subtitle text blocks in parallel batches of 25
+    const results: Array<{ start: number; end: number; text: string }> = [];
+    const concurrency = 25;
+    for (let i = 0; i < cues.length; i += concurrency) {
+      const chunk = cues.slice(i, i + concurrency);
+      const chunkRes = await Promise.all(
+        chunk.map(async (c) => {
+          try {
+            const r = await fetch(directUrl, {
+              headers: { Range: `bytes=${c.pos}-${c.pos + 160}` },
+              signal: AbortSignal.timeout(4000),
+            });
+            const b = Buffer.from(await r.arrayBuffer());
+            const a1 = b.indexOf(0xa1);
+            if (a1 !== -1) {
+              const v = readVint(b, a1 + 1);
+              if (v) {
+                const blkDataStart = a1 + 1 + v.len;
+                const tV = readVint(b, blkDataStart);
+                if (tV && tV.val === targetTrackNumber) {
+                  const textStart = blkDataStart + tV.len + 3;
+                  const textLen = v.val - (tV.len + 3);
+                  if (textLen > 0 && textStart + textLen <= b.length) {
+                    const text = b
+                      .subarray(textStart, textStart + textLen)
+                      .toString("utf8")
+                      .replace(/\r/g, "")
+                      .trim();
+                    if (text) {
+                      return {
+                        start: c.time,
+                        end: c.time + (c.duration || 2.5),
+                        text,
+                      };
+                    }
+                  }
+                }
+              }
+            }
+          } catch {}
+          return null;
+        })
+      );
+      results.push(...chunkRes.filter(Boolean));
+    }
+
+    results.sort((a, b) => a.start - b.start);
+    return results;
+  } catch (err) {
+    console.warn("[extractMkvSubtitles error]:", err);
+    return [];
+  }
 }
 
 export interface NativeStreamData {
@@ -399,7 +681,7 @@ export interface NativeStreamData {
   needsTranscode?: boolean;
   isHls?: boolean;
   audioTracks?: Array<{ id: number; language: string; codec: string; title: string }>;
-  subtitleTracks?: Array<{ id: number; language: string; title: string }>;
+  subtitleTracks?: Array<{ id: number; language: string; title: string; trackNumber?: number }>;
 }
 
 export interface MediaProbeInfo {
@@ -410,7 +692,7 @@ export interface MediaProbeInfo {
   height: number;
   isMkv: boolean;
   audioTracks: Array<{ id: number; language: string; codec: string; title: string }>;
-  subtitleTracks: Array<{ id: number; language: string; title: string }>;
+  subtitleTracks: Array<{ id: number; language: string; title: string; trackNumber?: number }>;
   needsTranscode: boolean;
   playable?: boolean;
   hasFFmpeg?: boolean;
@@ -1441,14 +1723,48 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
     const querySeason = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
     const queryEpisode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
 
-    // If FFmpeg is NOT available (e.g. Vercel serverless environment), extract via high-speed online subtitles API
+    // 1. If FFmpeg is NOT available (e.g. Vercel serverless environment), extract via pure-JS MKV demuxer
     if (!hasFFmpeg) {
+      const isMkvFile =
+        targetUrl.toLowerCase().includes(".mkv") ||
+        targetUrl.toLowerCase().includes("matroska") ||
+        targetUrl.includes("pixeldrain");
+
+      if (isMkvFile) {
+        const mkvCues = await extractMkvSubtitles(targetUrl, subIdx);
+        if (mkvCues.length > 0) {
+          subtitleCuesCache.set(cacheKey, { cues: mkvCues, timestamp: Date.now() });
+          return res.json({ ok: true, cues: mkvCues, source: "embedded_mkv" });
+        }
+      }
+
+      let cleanTitle = queryTitle;
+      let cleanSeason = querySeason;
+      let cleanEpisode = queryEpisode;
+
+      if (targetUrl.includes("pixeldrain")) {
+        const pdMatch = targetUrl.match(/pixeldrain\.(?:dev|com|net)\/(?:u|api\/file)\/([a-zA-Z0-9_-]+)/i);
+        if (pdMatch && pdMatch[1]) {
+          try {
+            const pdInfoRes = await fetch(`https://pixeldrain.dev/api/file/${pdMatch[1]}/info`, {
+              signal: AbortSignal.timeout(2000),
+            });
+            if (pdInfoRes.ok) {
+              const pdData: any = await pdInfoRes.json();
+              if (pdData.name) {
+                cleanTitle = pdData.name;
+              }
+            }
+          } catch {}
+        }
+      }
+
       const onlineCues = await fetchOnlineSubtitles(
-        queryTitle || targetUrl,
+        cleanTitle || targetUrl,
         queryImdbId,
         queryLang,
-        querySeason,
-        queryEpisode
+        cleanSeason,
+        cleanEpisode
       );
       if (onlineCues.length > 0) {
         subtitleCuesCache.set(cacheKey, { cues: onlineCues, timestamp: Date.now() });
@@ -1502,6 +1818,10 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
             stdio: ["ignore", "pipe", "ignore"],
           });
         } catch {
+          const mkvFallback = await extractMkvSubtitles(targetUrl, subIdx);
+          if (mkvFallback.length > 0) {
+            return resolve({ ok: true, cues: mkvFallback });
+          }
           const fallback = await fetchOnlineSubtitles(
             queryTitle || targetUrl,
             queryImdbId,
@@ -1531,6 +1851,13 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
             subtitleCuesCache.set(cacheKey, { cues, timestamp: Date.now() });
             resolve({ ok: true, cues });
           } else {
+            // Check pure-JS MKV embedded extractor first
+            const mkvCues = await extractMkvSubtitles(targetUrl, subIdx);
+            if (mkvCues.length > 0) {
+              subtitleCuesCache.set(cacheKey, { cues: mkvCues, timestamp: Date.now() });
+              return resolve({ ok: true, cues: mkvCues });
+            }
+
             // Seamlessly fall back to online subtitles if embedded demuxing yielded no cues
             const fallback = await fetchOnlineSubtitles(
               queryTitle || targetUrl,
