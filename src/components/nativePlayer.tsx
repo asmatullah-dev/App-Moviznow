@@ -83,6 +83,7 @@ export interface NativePlayerProps {
   isOpen: boolean;
   onClose: () => void;
   title?: string;
+  imdbId?: string;
   watchUrl?: string;
   streamUrl?: string;
   contentId?: string;
@@ -681,6 +682,7 @@ export function NativePlayer({
   isOpen,
   onClose,
   title = "Movie",
+  imdbId,
   watchUrl = "",
   streamUrl: propStreamUrl,
   contentId = "default_content",
@@ -1207,8 +1209,8 @@ export function NativePlayer({
       const vid = videoRef.current;
       const isCurrentlyPlaying = vid && (!vid.paused || vid.currentTime > 0 || vid.readyState >= 2);
       if (!hasStartedPlaybackRef.current && !isCurrentlyPlaying) {
-        console.warn("[NativePlayer] FSL Server failed to play within 20 seconds. Switching to Pixeldrain Server...");
-        showToast(t("FSL server took too long. Switching to Pixeldrain..."));
+        console.warn("[NativePlayer] FSL Server failed to play within 6 seconds. Switching to Pixeldrain Server...");
+        showToast(t("FSL server slow. Switched to Pixeldrain..."));
         setActiveServer("pixeldrain");
         const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
         setStreamMode(needsTc ? "transcode" : "proxy");
@@ -1216,7 +1218,7 @@ export function NativePlayer({
         setStreamAttempt((prev) => prev + 1);
         setIsBuffering(true);
       }
-    }, 20000);
+    }, 6000);
 
     return () => {
       clearTimeout(timerId);
@@ -1229,7 +1231,11 @@ export function NativePlayer({
 
     let isMounted = true;
     const apiBase = getStreamingApiBase();
-    fetch(`${apiBase}/api/native-player/info?url=${encodeURIComponent(directStreamUrl)}`)
+    const epSuffix = (seasonInfo && episodeInfo)
+      ? ` S${seasonInfo.number ?? (seasonInfo as any).seasonNumber ?? 1}E${episodeInfo.number ?? (episodeInfo as any).episodeNumber ?? 1}`
+      : "";
+    const probeTitle = (displayTitle || title || "") + epSuffix;
+    fetch(`${apiBase}/api/native-player/info?url=${encodeURIComponent(directStreamUrl)}&title=${encodeURIComponent(probeTitle)}&imdbId=${encodeURIComponent(imdbId || "")}`)
       .then((res) => res.json())
       .then((data: MediaProbeInfo) => {
         if (!isMounted) return;
@@ -1245,7 +1251,7 @@ export function NativePlayer({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, directStreamUrl]);
+  }, [isOpen, directStreamUrl, displayTitle, title, imdbId, seasonInfo, episodeInfo]);
 
   // Construct stream URL with seek offset and audio track
   const currentStreamSrc = useMemo(() => {
@@ -1258,8 +1264,9 @@ export function NativePlayer({
 
     // Pixeldrain natively provides Access-Control-Allow-Origin: * (CORS).
     // Stream directly from Pixeldrain to bypass server proxy latency and Vercel execution limits
-    // whenever transcoding is not required and default audio track is selected.
+    // whenever transcoding is not required, default audio track is selected, and direct attempt hasn't failed.
     if (
+      streamAttempt === 0 &&
       !requiresTranscode &&
       (activeServer === "pixeldrain" || directStreamUrl.toLowerCase().includes("pixeldrain")) &&
       directStreamUrl.startsWith("http") &&
@@ -1920,17 +1927,20 @@ export function NativePlayer({
       ? "spa"
       : "eng";
 
+    const sNumber = seasonInfo?.number ?? (seasonInfo as any)?.seasonNumber ?? "";
+    const eNumber = episodeInfo?.number ?? (episodeInfo as any)?.episodeNumber ?? "";
     fetch(
       `${apiBase}/api/native-player/subtitles?url=${encodeURIComponent(
         directStreamUrl
-      )}&sub=${subId}&title=${encodeURIComponent(movieTitle)}&lang=${encodeURIComponent(langCode)}`
+      )}&sub=${subId}&title=${encodeURIComponent(movieTitle)}&lang=${encodeURIComponent(langCode)}&imdbId=${encodeURIComponent(imdbId || "")}&season=${sNumber}&episode=${eNumber}`
     )
       .then((r) => r.json())
       .then((res) => {
         if (res.cues && Array.isArray(res.cues) && res.cues.length > 0) {
           setSubtitleCues(res.cues);
+          const curTime = videoRef.current ? videoRef.current.currentTime : currentPosition;
           const activeCue = res.cues.find(
-            (cue: any) => currentPosition >= (cue.start - 0.25) && currentPosition <= (cue.end + 0.25)
+            (cue: any) => curTime >= (cue.start - 0.25) && curTime <= (cue.end + 0.25)
           );
           setActiveSubtitleText(activeCue ? activeCue.text : "");
           showToast(`Subtitles: ${subLang}`);

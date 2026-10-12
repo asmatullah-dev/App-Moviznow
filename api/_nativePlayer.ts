@@ -8,6 +8,10 @@ export const nativePlayerRouter = express.Router();
 
 let cachedFfmpegAvailable: boolean | null = null;
 export async function checkFFmpegAvailable(): Promise<boolean> {
+  if (process.env.VERCEL || process.env.NOW_REGION) {
+    cachedFfmpegAvailable = false;
+    return false;
+  }
   if (cachedFfmpegAvailable !== null) return cachedFfmpegAvailable;
   return new Promise((resolve) => {
     try {
@@ -29,6 +33,10 @@ export async function checkFFmpegAvailable(): Promise<boolean> {
 
 let cachedFfprobeAvailable: boolean | null = null;
 export async function checkFFprobeAvailable(): Promise<boolean> {
+  if (process.env.VERCEL || process.env.NOW_REGION) {
+    cachedFfprobeAvailable = false;
+    return false;
+  }
   if (cachedFfprobeAvailable !== null) return cachedFfprobeAvailable;
   return new Promise((resolve) => {
     try {
@@ -46,6 +54,279 @@ export async function checkFFprobeAvailable(): Promise<boolean> {
       resolve(false);
     }
   });
+}
+
+/**
+ * ISO 639 language code to user-friendly capitalized label
+ */
+export function isoLangToName(code?: string): string {
+  if (!code) return "Stereo";
+  const c = code.toLowerCase().trim();
+  const map: Record<string, string> = {
+    hin: "Hindi", hi: "Hindi",
+    eng: "English", en: "English",
+    tel: "Telugu", te: "Telugu",
+    tam: "Tamil", ta: "Tamil",
+    mal: "Malayalam", ml: "Malayalam",
+    kan: "Kannada", kn: "Kannada",
+    pan: "Punjabi", pa: "Punjabi",
+    ben: "Bengali", bn: "Bengali",
+    mar: "Marathi", mr: "Marathi",
+    spa: "Spanish", es: "Spanish",
+    kor: "Korean", ko: "Korean",
+    jpn: "Japanese", ja: "Japanese",
+    fre: "French", fra: "French", fr: "French",
+    ger: "German", deu: "German", de: "German",
+    rus: "Russian", ru: "Russian",
+    ita: "Italian", it: "Italian",
+    chi: "Chinese", zho: "Chinese", zh: "Chinese",
+    ara: "Arabic", ar: "Arabic",
+    por: "Portuguese", pt: "Portuguese",
+    tur: "Turkish", tr: "Turkish",
+    tha: "Thai", th: "Thai",
+    vie: "Vietnamese", vi: "Vietnamese",
+    ind: "Indonesian", id: "Indonesian",
+    und: "Stereo",
+  };
+  return map[c] || (c.charAt(0).toUpperCase() + c.slice(1));
+}
+
+/**
+ * Parse audio and subtitle languages from filenames or movie titles
+ */
+export function parseLanguagesFromText(text?: string): Array<{ name: string; code: string }> {
+  if (!text) return [];
+  const lower = text.toLowerCase().replace(/[\._\-+\[\]\(\)]/g, " ");
+  const langs: Array<{ name: string; code: string }> = [];
+  const seen = new Set<string>();
+  const add = (name: string, code: string) => {
+    if (!seen.has(code)) {
+      seen.add(code);
+      langs.push({ name, code });
+    }
+  };
+
+  const langPatterns = [
+    { pattern: /\b(hindi|hin)\b/i, name: "Hindi", code: "hin" },
+    { pattern: /\b(english|eng)\b/i, name: "English", code: "eng" },
+    { pattern: /\b(telugu|tel)\b/i, name: "Telugu", code: "tel" },
+    { pattern: /\b(tamil|tam)\b/i, name: "Tamil", code: "tam" },
+    { pattern: /\b(malayalam|mal)\b/i, name: "Malayalam", code: "mal" },
+    { pattern: /\b(kannada|kan)\b/i, name: "Kannada", code: "kan" },
+    { pattern: /\b(punjabi|pan)\b/i, name: "Punjabi", code: "pan" },
+    { pattern: /\b(bengali|ben)\b/i, name: "Bengali", code: "ben" },
+    { pattern: /\b(marathi|mar)\b/i, name: "Marathi", code: "mar" },
+    { pattern: /\b(spanish|spa|espanol)\b/i, name: "Spanish", code: "spa" },
+    { pattern: /\b(korean|kor)\b/i, name: "Korean", code: "kor" },
+    { pattern: /\b(japanese|jpn|jap)\b/i, name: "Japanese", code: "jpn" },
+    { pattern: /\b(french|fre|fra)\b/i, name: "French", code: "fre" },
+    { pattern: /\b(german|ger|deu)\b/i, name: "German", code: "ger" },
+    { pattern: /\b(russian|rus)\b/i, name: "Russian", code: "rus" },
+    { pattern: /\b(italian|ita)\b/i, name: "Italian", code: "ita" },
+    { pattern: /\b(chinese|chi|zho|mandarin)\b/i, name: "Chinese", code: "chi" },
+    { pattern: /\b(arabic|ara)\b/i, name: "Arabic", code: "ara" },
+  ];
+
+  for (const { pattern, name, code } of langPatterns) {
+    if (pattern.test(lower)) {
+      add(name, code);
+    }
+  }
+
+  if (langs.length === 0) {
+    if (/\bdual\b/i.test(lower)) {
+      add("Hindi", "hin");
+      add("English", "eng");
+    } else if (/\bmulti\b/i.test(lower)) {
+      add("Hindi", "hin");
+      add("English", "eng");
+      add("Original Audio", "orig");
+    }
+  }
+
+  return langs;
+}
+
+/**
+ * Pure TypeScript EBML track parser for MKV files
+ * Extracts audio and subtitle tracks from the first 128KB of an MKV file without ffprobe!
+ */
+export function parseMkvEbml(buf: Buffer): {
+  audioTracks: Array<{ id: number; language: string; codec: string; title: string }>;
+  subtitleTracks: Array<{ id: number; language: string; title: string }>;
+  videoCodec?: string;
+  width?: number;
+  height?: number;
+} | null {
+  if (!buf || buf.length < 16) return null;
+
+  let offset = 0;
+
+  function readVint(): { len: number; val: number } | null {
+    if (offset >= buf.length) return null;
+    const first = buf[offset];
+    let len = 1;
+    let mask = 0x80;
+    while (len <= 8 && !(first & mask)) {
+      len++;
+      mask >>= 1;
+    }
+    if (len > 8 || offset + len > buf.length) return null;
+    let val = first & (mask - 1);
+    for (let i = 1; i < len; i++) {
+      val = val * 256 + buf[offset + i];
+    }
+    offset += len;
+    return { len, val };
+  }
+
+  function readId(): number | null {
+    if (offset >= buf.length) return null;
+    const first = buf[offset];
+    let len = 1;
+    let mask = 0x80;
+    while (len <= 4 && !(first & mask)) {
+      len++;
+      mask >>= 1;
+    }
+    if (len > 4 || offset + len > buf.length) return null;
+    let id = 0;
+    for (let i = 0; i < len; i++) {
+      id = id * 256 + buf[offset + i];
+    }
+    offset += len;
+    return id;
+  }
+
+  // Scan for Tracks element 0x1654AE6B
+  let tracksPos = -1;
+  for (let i = 0; i < buf.length - 4; i++) {
+    if (buf[i] === 0x16 && buf[i + 1] === 0x54 && buf[i + 2] === 0xae && buf[i + 3] === 0x6b) {
+      tracksPos = i;
+      break;
+    }
+  }
+
+  if (tracksPos === -1) return null;
+  offset = tracksPos + 4;
+  const tracksSize = readVint();
+  if (!tracksSize) return null;
+  const tracksEnd = Math.min(buf.length, offset + tracksSize.val);
+
+  const audioTracks: Array<{ id: number; language: string; codec: string; title: string }> = [];
+  const subtitleTracks: Array<{ id: number; language: string; title: string }> = [];
+  let videoCodec = "h264";
+  let width = 1920;
+  let height = 1080;
+
+  let audioIdx = 0;
+  let subIdx = 0;
+
+  while (offset < tracksEnd) {
+    const elId = readId();
+    if (!elId) break;
+    const elSize = readVint();
+    if (!elSize) break;
+    const elEnd = Math.min(tracksEnd, offset + elSize.val);
+
+    if (elId === 0xae) {
+      // TrackEntry
+      let trackType = 0;
+      let codecId = "";
+      let lang = "";
+      let name = "";
+
+      while (offset < elEnd) {
+        const subId = readId();
+        if (!subId) break;
+        const subSize = readVint();
+        if (!subSize) break;
+        const subDataEnd = Math.min(elEnd, offset + subSize.val);
+
+        if (subId === 0x83) {
+          // TrackType: 1=Video, 2=Audio, 17=Subtitle
+          trackType = buf[offset];
+        } else if (subId === 0x86) {
+          // CodecID
+          codecId = buf.toString("utf8", offset, subDataEnd).replace(/\0/g, "").trim();
+        } else if (subId === 0x22b59c) {
+          // Language
+          lang = buf.toString("utf8", offset, subDataEnd).replace(/\0/g, "").trim();
+        } else if (subId === 0x536e) {
+          // Name / Title
+          name = buf.toString("utf8", offset, subDataEnd).replace(/\0/g, "").trim();
+        } else if (subId === 0xe0) {
+          // Video settings
+          let vOffset = offset;
+          while (vOffset < subDataEnd) {
+            if (buf[vOffset] === 0xb0) {
+              vOffset++;
+              const wLen = buf[vOffset] & 0x7f;
+              vOffset++;
+              let w = 0;
+              for (let k = 0; k < wLen && vOffset + k < subDataEnd; k++) w = w * 256 + buf[vOffset + k];
+              if (w > 0) width = w;
+              vOffset += wLen;
+            } else if (buf[vOffset] === 0xba) {
+              vOffset++;
+              const hLen = buf[vOffset] & 0x7f;
+              vOffset++;
+              let h = 0;
+              for (let k = 0; k < hLen && vOffset + k < subDataEnd; h++) h = h * 256 + buf[vOffset + k];
+              if (h > 0) height = h;
+              vOffset += hLen;
+            } else {
+              vOffset++;
+            }
+          }
+        }
+        offset = subDataEnd;
+      }
+
+      if (trackType === 1) {
+        // Video
+        if (codecId.includes("HEVC") || codecId.includes("H265")) {
+          videoCodec = "hevc";
+        } else {
+          videoCodec = "h264";
+        }
+      } else if (trackType === 2) {
+        // Audio track
+        const langName = isoLangToName(lang);
+        let audioCodec = "aac";
+        if (codecId.includes("AC3") || codecId.includes("EAC3")) {
+          audioCodec = "eac3";
+        } else if (codecId.includes("DTS")) {
+          audioCodec = "dts";
+        } else if (codecId.includes("OPUS")) {
+          audioCodec = "opus";
+        }
+
+        const titleStr = name ? name : audioIdx === 0 ? `${langName} (Default)` : langName;
+        audioTracks.push({
+          id: audioIdx,
+          language: langName,
+          codec: audioCodec,
+          title: titleStr,
+        });
+        audioIdx++;
+      } else if (trackType === 17) {
+        // Subtitle track
+        const langName = isoLangToName(lang);
+        const titleStr = name ? name : langName;
+        subtitleTracks.push({
+          id: subIdx,
+          language: langName,
+          title: titleStr,
+        });
+        subIdx++;
+      }
+    } else {
+      offset = elEnd;
+    }
+  }
+
+  return { audioTracks, subtitleTracks, videoCodec, width, height };
 }
 
 export interface NativeStreamData {
@@ -497,8 +778,11 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       return res.status(400).json({ error: "Invalid or missing url" });
     }
     const targetUrl = normalizePixeldrainUrl(rawTarget) || rawTarget;
+    const titleQuery = ((req.query.title || req.body?.title || "") as string).trim();
+    const imdbIdQuery = ((req.query.imdbId || req.body?.imdbId || "") as string).trim();
 
-    const cached = infoCache.get(targetUrl);
+    const cacheKey = `${targetUrl}_${titleQuery}`;
+    const cached = infoCache.get(cacheKey) || infoCache.get(targetUrl);
     if (cached && Date.now() - cached.timestamp < INFO_CACHE_TTL) {
       return res.json(cached.data);
     }
@@ -511,24 +795,29 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       pixeldrainId = pdMatch[1];
     }
 
+    let pdFileName = "";
     let isMkv = isPixeldrain || targetUrl.toLowerCase().includes(".mkv") || targetUrl.toLowerCase().includes("matroska");
     let needsTranscode = isMkv;
+    let detectedWidth = 1920;
+    let detectedHeight = 1080;
+    let detectedVCodec = isMkv ? "hevc" : "h264";
 
     if (isPixeldrain && pixeldrainId) {
       try {
         const primaryHost = targetUrl.includes("pixeldrain.dev") ? "pixeldrain.dev" : "pixeldrain.com";
         const secondaryHost = primaryHost === "pixeldrain.dev" ? "pixeldrain.com" : "pixeldrain.dev";
         const pdInfoRes = await fetch(`https://${primaryHost}/api/file/${pixeldrainId}/info`, {
-          signal: AbortSignal.timeout(2000),
+          signal: AbortSignal.timeout(1500),
         }).catch(() =>
           fetch(`https://${secondaryHost}/api/file/${pixeldrainId}/info`, {
-            signal: AbortSignal.timeout(2000),
+            signal: AbortSignal.timeout(1500),
           })
         );
         if (pdInfoRes && pdInfoRes.ok) {
           const pdInfo: any = await pdInfoRes.json();
+          pdFileName = pdInfo.name || "";
           const mime = (pdInfo.mime_type || "").toLowerCase();
-          const fname = (pdInfo.name || "").toLowerCase();
+          const fname = pdFileName.toLowerCase();
           if (
             mime.includes("matroska") ||
             fname.endsWith(".mkv") ||
@@ -539,36 +828,117 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
           ) {
             isMkv = true;
             needsTranscode = true;
+            detectedVCodec = "hevc";
           }
         }
       } catch {}
     }
 
     const hasFFmpeg = await checkFFmpegAvailable();
+    const hasFfprobe = await checkFFprobeAvailable();
 
-    const defaultData: MediaProbeInfo = {
+    // 1. Try pure-JS MKV EBML header inspection (fast 128KB range request in <150ms)
+    let ebmlParsed: ReturnType<typeof parseMkvEbml> = null;
+    if (isMkv) {
+      try {
+        const headerRes = await fetch(targetUrl, {
+          headers: {
+            Range: "bytes=0-131071",
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          },
+          signal: AbortSignal.timeout(1800),
+        }).catch(() => null);
+
+        if (headerRes && (headerRes.ok || headerRes.status === 206)) {
+          const arrayBuf = await headerRes.arrayBuffer();
+          ebmlParsed = parseMkvEbml(Buffer.from(arrayBuf));
+        }
+      } catch {}
+    }
+
+    // 2. Extract audio and subtitle languages from filename / title
+    const combinedText = `${pdFileName} ${titleQuery} ${targetUrl}`;
+    const detectedLangs = parseLanguagesFromText(combinedText);
+
+    let audioTracks: Array<{ id: number; language: string; codec: string; title: string }> = [];
+    let subtitleTracks: Array<{ id: number; language: string; title: string }> = [];
+
+    if (ebmlParsed && ebmlParsed.audioTracks.length > 0) {
+      audioTracks = ebmlParsed.audioTracks;
+      if (ebmlParsed.subtitleTracks.length > 0) {
+        subtitleTracks = ebmlParsed.subtitleTracks;
+      }
+      if (ebmlParsed.videoCodec) detectedVCodec = ebmlParsed.videoCodec;
+      if (ebmlParsed.width) detectedWidth = ebmlParsed.width;
+      if (ebmlParsed.height) detectedHeight = ebmlParsed.height;
+    }
+
+    // If EBML had audio tracks but no language tags (all Stereo or und), merge detected languages
+    if (audioTracks.length > 0 && detectedLangs.length > 0) {
+      const allUnd = audioTracks.every(
+        (a) => a.language === "Stereo" || a.language.toLowerCase() === "und"
+      );
+      if (allUnd) {
+        audioTracks = detectedLangs.map((l, idx) => ({
+          id: idx,
+          language: l.name,
+          codec: audioTracks[idx]?.codec || "aac",
+          title: idx === 0 ? `${l.name} (Default)` : l.name,
+        }));
+      }
+    }
+
+    // If audio tracks still not found from EBML, generate from detected title languages
+    if (audioTracks.length === 0) {
+      if (detectedLangs.length > 0) {
+        audioTracks = detectedLangs.map((l, idx) => ({
+          id: idx,
+          language: l.name,
+          codec: "aac",
+          title: idx === 0 ? `${l.name} (Default)` : l.name,
+        }));
+      } else {
+        audioTracks = [{ id: 0, language: "Stereo", codec: "aac", title: "Audio Track" }];
+      }
+    }
+
+    // If subtitle tracks still not found from EBML, add detected languages + English & Hindi online subtitles
+    if (subtitleTracks.length === 0) {
+      const subLangs = [...detectedLangs];
+      if (!subLangs.some((l) => l.code === "eng")) {
+        subLangs.unshift({ name: "English", code: "eng" });
+      }
+      if (!subLangs.some((l) => l.code === "hin")) {
+        subLangs.push({ name: "Hindi", code: "hin" });
+      }
+      subtitleTracks = subLangs.map((l, idx) => ({
+        id: 100 + idx,
+        language: l.name,
+        title: l.name,
+      }));
+    }
+
+    const compiledInfo: MediaProbeInfo = {
       duration: 0,
       format: isMkv ? "matroska,webm" : "mp4",
-      videoCodec: isMkv ? "hevc" : "h264",
-      width: 1920,
-      height: 1080,
+      videoCodec: detectedVCodec,
+      width: detectedWidth,
+      height: detectedHeight,
       isMkv,
-      audioTracks: [{ id: 0, language: "Stereo", codec: "aac", title: "Audio Track" }],
-      subtitleTracks: [
-        { id: 0, language: "English", title: "English" },
-        { id: 1, language: "Hindi", title: "Hindi" },
-      ],
+      audioTracks,
+      subtitleTracks,
       needsTranscode: hasFFmpeg ? needsTranscode : false,
       playable: true,
       hasFFmpeg,
     };
 
-    const hasFfprobe = await checkFFprobeAvailable();
     if (!hasFfprobe) {
       // Vercel serverless environment: ffprobe is not installed
-      // Return instant metadata without spawning ffprobe to avoid ENOENT errors
-      infoCache.set(targetUrl, { data: defaultData, timestamp: Date.now() });
-      return res.json(defaultData);
+      // Instant return with fully parsed audio tracks, languages, and subtitle tracks!
+      infoCache.set(cacheKey, { data: compiledInfo, timestamp: Date.now() });
+      infoCache.set(targetUrl, { data: compiledInfo, timestamp: Date.now() });
+      return res.json(compiledInfo);
     }
 
     let referer = "";
@@ -585,8 +955,8 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       "-print_format", "json",
       "-show_format",
       "-show_streams",
-      "-analyzeduration", "15M",
-      "-probesize", "15M",
+      "-analyzeduration", "5M",
+      "-probesize", "5M",
       "-headers", headerStr,
       targetUrl,
     ];
@@ -598,8 +968,9 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
     try {
       child = spawn("ffprobe", args);
     } catch {
-      infoCache.set(targetUrl, { data: defaultData, timestamp: Date.now() });
-      return res.json(defaultData);
+      infoCache.set(cacheKey, { data: compiledInfo, timestamp: Date.now() });
+      infoCache.set(targetUrl, { data: compiledInfo, timestamp: Date.now() });
+      return res.json(compiledInfo);
     }
 
     let output = "";
@@ -612,19 +983,19 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       try {
         child.kill("SIGKILL");
       } catch {}
+      infoCache.set(cacheKey, { data, timestamp: Date.now() });
       infoCache.set(targetUrl, { data, timestamp: Date.now() });
       return res.json(data);
     };
 
-    // Attach child error handler to PREVENT uncaught exceptions on spawn error!
     child.on("error", (err: any) => {
       console.warn("[ffprobe spawn error]:", err);
-      finishProbe(defaultData);
+      finishProbe(compiledInfo);
     });
 
     probeTimeout = setTimeout(() => {
-      finishProbe(defaultData);
-    }, 12000);
+      finishProbe(compiledInfo);
+    }, 4000);
 
     child.stdout.on("data", (d: any) => {
       output += d.toString();
@@ -637,7 +1008,7 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
     child.on("close", (code: number) => {
       if (code !== 0 || !output) {
         console.warn("[ffprobe exit code]:", code, errorOutput.slice(0, 200));
-        return finishProbe(defaultData);
+        return finishProbe(compiledInfo);
       }
 
       try {
@@ -647,47 +1018,49 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
         const subtitleStreams = meta.streams?.filter((s: any) => s.codec_type === "subtitle") || [];
 
         const formatName = meta.format?.format_name || "";
-        const isMkv =
+        const isMkvStream =
           formatName.includes("matroska") ||
           formatName.includes("webm") ||
           targetUrl.includes(".mkv") ||
           targetUrl.includes("cloudflarestorage");
-        const vCodec = (videoStream?.codec_name || "").toLowerCase();
+        const vCodec = (videoStream?.codec_name || "").toLowerCase() || detectedVCodec;
         const duration = parseFloat(meta.format?.duration || "0") || 0;
 
-        const audioTracks = audioStreams.map((s: any, idx: number) => {
+        let parsedAudio = audioStreams.map((s: any, idx: number) => {
           const lang = s.tags?.language || s.tags?.LANGUAGE || "";
           const title = s.tags?.title || s.tags?.TITLE || "";
-          let label = title || lang || `Track ${idx + 1}`;
-          if (lang.toLowerCase() === "hin") label = "Hindi";
-          else if (lang.toLowerCase() === "tel") label = "Telugu";
-          else if (lang.toLowerCase() === "tam") label = "Tamil";
-          else if (lang.toLowerCase() === "eng") label = "English";
-          else if (lang.toLowerCase() === "kan") label = "Kannada";
-          else if (lang.toLowerCase() === "mal") label = "Malayalam";
+          const langName = isoLangToName(lang);
+          const label = title || (lang ? langName : `Audio Track ${idx + 1}`);
           return {
             id: idx,
-            language: label,
+            language: langName,
             codec: s.codec_name || "aac",
-            title: title || label,
+            title: label,
           };
         });
 
-        const subtitleTracks = subtitleStreams.map((s: any, idx: number) => {
+        if (parsedAudio.length === 0) {
+          parsedAudio = compiledInfo.audioTracks;
+        }
+
+        let parsedSubs = subtitleStreams.map((s: any, idx: number) => {
           const lang = s.tags?.language || s.tags?.LANGUAGE || "";
           const title = s.tags?.title || s.tags?.TITLE || "";
-          let label = title || lang || `Sub ${idx + 1}`;
-          if (lang.toLowerCase() === "eng") label = "English";
+          const langName = isoLangToName(lang);
+          const label = title || (lang ? langName : `Sub ${idx + 1}`);
           return {
             id: idx,
-            language: label,
-            title: title || label,
+            language: langName,
+            title: label,
           };
         });
 
-        // Browser standard <video> cannot decode MKV containers, HEVC (H.265) or AC3 natively
-        const needsTranscode =
-          isMkv ||
+        if (parsedSubs.length === 0) {
+          parsedSubs = compiledInfo.subtitleTracks;
+        }
+
+        const transcodeRequired =
+          isMkvStream ||
           vCodec.includes("hevc") ||
           vCodec.includes("h265") ||
           audioStreams.some((a: any) =>
@@ -696,17 +1069,14 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
 
         const resultInfo: MediaProbeInfo = {
           duration,
-          format: formatName,
+          format: formatName || (isMkvStream ? "matroska,webm" : "mp4"),
           videoCodec: vCodec || "h264",
-          width: videoStream?.width || 1280,
-          height: videoStream?.height || 720,
-          isMkv,
-          audioTracks: audioTracks.length > 0 ? audioTracks : [{ id: 0, language: "Stereo", codec: "aac", title: "Audio" }],
-          subtitleTracks: subtitleTracks.length > 0 ? subtitleTracks : [
-            { id: 0, language: "English", title: "English" },
-            { id: 1, language: "Hindi", title: "Hindi" },
-          ],
-          needsTranscode: hasFFmpeg ? needsTranscode : false,
+          width: videoStream?.width || detectedWidth,
+          height: videoStream?.height || detectedHeight,
+          isMkv: isMkvStream,
+          audioTracks: parsedAudio,
+          subtitleTracks: parsedSubs,
+          needsTranscode: hasFFmpeg ? transcodeRequired : false,
           playable: true,
           hasFFmpeg,
         };
@@ -714,39 +1084,8 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
         return finishProbe(resultInfo);
       } catch (parseErr: any) {
         console.error("[ffprobe parse error]:", parseErr);
-        const isMkv = targetUrl.includes(".mkv") || targetUrl.includes("cloudflarestorage");
-        return finishProbe({
-          duration: 0,
-          format: isMkv ? "matroska,webm" : "mp4",
-          videoCodec: "h264",
-          width: 1280,
-          height: 720,
-          isMkv,
-          audioTracks: [{ id: 0, language: "Stereo", codec: "aac", title: "Audio" }],
-          subtitleTracks: [],
-          needsTranscode: false,
-          playable: true,
-          hasFFmpeg,
-        });
+        return finishProbe(compiledInfo);
       }
-    });
-
-    child.on("error", (err) => {
-      console.warn("[ffprobe error]:", err);
-      const isMkv = targetUrl.includes(".mkv") || targetUrl.includes("cloudflarestorage");
-      return finishProbe({
-        duration: 0,
-        format: isMkv ? "matroska,webm" : "mp4",
-        videoCodec: "h264",
-        width: 1280,
-        height: 720,
-        isMkv,
-        audioTracks: [{ id: 0, language: "Stereo", codec: "aac", title: "Audio" }],
-        subtitleTracks: [],
-        needsTranscode: false,
-        playable: true,
-        hasFFmpeg,
-      });
     });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -754,9 +1093,25 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
 });
 
 /**
+ * Decode HTML entities in subtitle strings
+ */
+export function decodeHtmlEntities(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)));
+}
+
+/**
  * Parse raw WebVTT or SRT content into structured time-coded cues
  */
-function parseWebVTT(vttText: string): Array<{ start: number; end: number; text: string }> {
+export function parseWebVTT(vttText: string): Array<{ start: number; end: number; text: string }> {
   const cues: Array<{ start: number; end: number; text: string }> = [];
   if (!vttText || typeof vttText !== "string") return cues;
 
@@ -786,13 +1141,27 @@ function parseWebVTT(vttText: string): Array<{ start: number; end: number; text:
 
         i++;
         const textLines: string[] = [];
-        while (i < lines.length && lines[i].trim() !== "") {
+        while (i < lines.length) {
           const rawL = lines[i].trim();
-          // Clean ASS/SSA tags like {\an8} and formatting tags
-          const cleanL = rawL.replace(/\{[^}]*\}/g, "").replace(/<[^>]+>/g, "").trim();
+          if (rawL === "") {
+            i++;
+            break;
+          }
+          if (rawL.includes("-->")) {
+            break;
+          }
+          if (/^\d+$/.test(rawL) && i + 1 < lines.length && lines[i + 1].includes("-->")) {
+            break;
+          }
+
+          // Strip formatting tags and decode HTML entities
+          const cleanL = decodeHtmlEntities(
+            rawL.replace(/\{[^}]*\}/g, "").replace(/<[^>]+>/g, "").trim()
+          );
           if (cleanL) textLines.push(cleanL);
           i++;
         }
+
         if (textLines.length > 0 && end > start) {
           cues.push({ start, end, text: textLines.join("\n") });
         }
@@ -806,70 +1175,103 @@ function parseWebVTT(vttText: string): Array<{ start: number; end: number; text:
   return cues;
 }
 
-async function fetchOnlineSubtitles(rawTitle: string, lang = "eng"): Promise<Array<{ start: number; end: number; text: string }>> {
-  if (!rawTitle) return [];
+/**
+ * Fetch online subtitles with high-reliability Cinemeta and OpenSubtitles fallback
+ */
+export async function fetchOnlineSubtitles(
+  rawTitle: string,
+  lang = "eng",
+  imdbIdParam?: string,
+  seasonParam?: number,
+  episodeParam?: number
+): Promise<Array<{ start: number; end: number; text: string }>> {
+  if (!rawTitle && !imdbIdParam) return [];
   try {
-    let titleStr = rawTitle.trim();
-    // 1. Detect season and episode if present (e.g. S01E02, Season 1 Episode 2)
-    let season: number | undefined;
-    let episode: number | undefined;
-    const seMatch = titleStr.match(/\bS(\d{1,2})\s*E(\d{1,2})\b/i) || titleStr.match(/\bSeason\s*(\d{1,2})\s*Episode\s*(\d{1,2})\b/i);
-    if (seMatch) {
-      season = parseInt(seMatch[1], 10);
-      episode = parseInt(seMatch[2], 10);
-      titleStr = titleStr.slice(0, seMatch.index);
-    }
+    let imdbId = imdbIdParam ? imdbIdParam.trim() : "";
+    let isSeries = seasonParam !== undefined && episodeParam !== undefined;
+    let season = seasonParam;
+    let episode = episodeParam;
 
-    // 2. Strip brackets, release groups, codecs, resolutions
-    let clean = titleStr
-      .replace(/\[[^\]]*\]/g, " ")
-      .replace(/\([^)]*\)/g, " ")
-      .replace(/\{[^}]*\}/g, " ")
-      .replace(/\b(480p|720p|1080p|2160p|4k|uhd|fhd|hevc|x264|x265|h264|h265|aac|dts|bluray|web-dl|webrip|hdrip|dvdrip|remux|moviznow|yts|yify|proper|repack|hindi|tamil|telugu|multi|dual\s*audio)\b/gi, " ")
-      .replace(/[\._\-+]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    if (!clean) clean = rawTitle.slice(0, 30).trim();
-
-    // 3. Search Cinemeta movies first, then series
-    let imdbId = "";
-    let isSeries = season !== undefined && episode !== undefined;
-
-    const movieSearch = await fetch(`https://v3-cinemeta.strem.io/catalog/movie/top/search=${encodeURIComponent(clean)}.json`, {
-      signal: AbortSignal.timeout(4000)
-    }).catch(() => null);
-
-    if (movieSearch && movieSearch.ok) {
-      const data: any = await movieSearch.json();
-      if (data?.metas?.[0]) {
-        imdbId = data.metas[0].imdb_id || data.metas[0].id;
+    if (!isSeries && rawTitle) {
+      const seMatch =
+        rawTitle.match(/\bS(\d{1,2})\s*E(\d{1,2})\b/i) ||
+        rawTitle.match(/\bSeason\s*(\d{1,2})\s*Episode\s*(\d{1,2})\b/i);
+      if (seMatch) {
+        season = parseInt(seMatch[1], 10);
+        episode = parseInt(seMatch[2], 10);
+        isSeries = true;
       }
     }
 
-    if (!imdbId) {
-      const seriesSearch = await fetch(`https://v3-cinemeta.strem.io/catalog/series/top/search=${encodeURIComponent(clean)}.json`, {
-        signal: AbortSignal.timeout(4000)
-      }).catch(() => null);
+    if (!imdbId && rawTitle) {
+      let titleStr = rawTitle.trim();
+      let clean = titleStr
+        .replace(/\[[^\]]*\]/g, " ")
+        .replace(/\([^)]*\)/g, " ")
+        .replace(/\{[^}]*\}/g, " ")
+        .replace(
+          /\b(480p|720p|1080p|2160p|4k|uhd|fhd|hevc|x264|x265|h264|h265|aac|dts|bluray|web-dl|webrip|hdrip|dvdrip|remux|moviznow|yts|yify|proper|repack|hindi|tamil|telugu|multi|dual\s*audio)\b/gi,
+          " "
+        )
+        .replace(/[\._\-+]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 
-      if (seriesSearch && seriesSearch.ok) {
-        const data: any = await seriesSearch.json();
-        if (data?.metas?.[0]) {
-          imdbId = data.metas[0].imdb_id || data.metas[0].id;
-          isSeries = true;
+      if (!clean) clean = rawTitle.slice(0, 30).trim();
+
+      if (isSeries) {
+        const seriesSearch = await fetch(
+          `https://v3-cinemeta.strem.io/catalog/series/top/search=${encodeURIComponent(clean)}.json`,
+          { signal: AbortSignal.timeout(3500) }
+        ).catch(() => null);
+
+        if (seriesSearch && seriesSearch.ok) {
+          const data: any = await seriesSearch.json();
+          if (data?.metas?.[0]) {
+            imdbId = data.metas[0].imdb_id || data.metas[0].id;
+          }
+        }
+      }
+
+      if (!imdbId) {
+        const movieSearch = await fetch(
+          `https://v3-cinemeta.strem.io/catalog/movie/top/search=${encodeURIComponent(clean)}.json`,
+          { signal: AbortSignal.timeout(3500) }
+        ).catch(() => null);
+
+        if (movieSearch && movieSearch.ok) {
+          const data: any = await movieSearch.json();
+          if (data?.metas?.[0]) {
+            imdbId = data.metas[0].imdb_id || data.metas[0].id;
+          }
+        }
+      }
+
+      if (!imdbId && !isSeries) {
+        const seriesSearch = await fetch(
+          `https://v3-cinemeta.strem.io/catalog/series/top/search=${encodeURIComponent(clean)}.json`,
+          { signal: AbortSignal.timeout(3500) }
+        ).catch(() => null);
+
+        if (seriesSearch && seriesSearch.ok) {
+          const data: any = await seriesSearch.json();
+          if (data?.metas?.[0]) {
+            imdbId = data.metas[0].imdb_id || data.metas[0].id;
+            isSeries = true;
+          }
         }
       }
     }
 
     if (!imdbId) return [];
 
-    // 4. Query OpenSubtitles Stremio add-on
-    const subQueryUrl = isSeries && season !== undefined && episode !== undefined
-      ? `https://opensubtitles-v3.strem.io/subtitles/series/${imdbId}:${season}:${episode}.json`
-      : `https://opensubtitles-v3.strem.io/subtitles/movie/${imdbId}.json`;
+    const subQueryUrl =
+      isSeries && season !== undefined && episode !== undefined
+        ? `https://opensubtitles-v3.strem.io/subtitles/series/${imdbId}:${season}:${episode}.json`
+        : `https://opensubtitles-v3.strem.io/subtitles/movie/${imdbId}.json`;
 
     const subRes = await fetch(subQueryUrl, {
-      signal: AbortSignal.timeout(4000)
+      signal: AbortSignal.timeout(4000),
     }).catch(() => null);
 
     if (!subRes || !subRes.ok) return [];
@@ -877,15 +1279,29 @@ async function fetchOnlineSubtitles(rawTitle: string, lang = "eng"): Promise<Arr
     const subs = subData?.subtitles || [];
     if (!Array.isArray(subs) || subs.length === 0) return [];
 
-    const targetLang = lang.toLowerCase();
-    const match = subs.find((s: any) => {
-      const l = (s.lang || "").toLowerCase();
-      if (targetLang.includes("hin") || targetLang === "hi") return l === "hin" || l === "hi";
-      if (targetLang.includes("tam") || targetLang === "ta") return l === "tam" || l === "ta";
-      if (targetLang.includes("tel") || targetLang === "te") return l === "tel" || l === "te";
-      if (targetLang.includes("spa") || targetLang === "es") return l === "spa" || l === "es";
-      return l === "eng" || l === "en";
-    }) || subs.find((s: any) => (s.lang || "").toLowerCase().includes("eng")) || subs[0];
+    const targetLang = (lang || "eng").toLowerCase();
+    const match =
+      subs.find((s: any) => {
+        const l = (s.lang || "").toLowerCase();
+        if (targetLang.includes("hin") || targetLang === "hi") return l === "hin" || l === "hi";
+        if (targetLang.includes("tam") || targetLang === "ta") return l === "tam" || l === "ta";
+        if (targetLang.includes("tel") || targetLang === "te") return l === "tel" || l === "te";
+        if (targetLang.includes("mal") || targetLang === "ml") return l === "mal" || l === "ml";
+        if (targetLang.includes("kan") || targetLang === "kn") return l === "kan" || l === "kn";
+        if (targetLang.includes("spa") || targetLang === "es") return l === "spa" || l === "es";
+        if (targetLang.includes("fre") || targetLang.includes("fra") || targetLang === "fr")
+          return l === "fre" || l === "fra" || l === "fr";
+        if (targetLang.includes("ger") || targetLang.includes("deu") || targetLang === "de")
+          return l === "ger" || l === "deu" || l === "de";
+        if (targetLang.includes("kor") || targetLang === "ko") return l === "kor" || l === "ko";
+        if (targetLang.includes("jpn") || targetLang === "ja") return l === "jpn" || l === "ja";
+        if (targetLang.includes("ara") || targetLang === "ar") return l === "ara" || l === "ar";
+        if (targetLang.includes("ben") || targetLang === "bn") return l === "ben" || l === "bn";
+        if (targetLang.includes("pan") || targetLang === "pa") return l === "pan" || l === "pa";
+        return l === "eng" || l === "en";
+      }) ||
+      subs.find((s: any) => (s.lang || "").toLowerCase().includes("eng")) ||
+      subs[0];
 
     if (match && match.url) {
       const vttRes = await fetch(match.url, { signal: AbortSignal.timeout(5000) }).catch(() => null);
@@ -907,7 +1323,7 @@ const subtitleCuesCache = new Map<string, { cues: Array<{ start: number; end: nu
  */
 nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitles"], async (req, res) => {
   try {
-    const rawTarget = (req.query.url as string || "").trim();
+    const rawTarget = ((req.query.url as string) || "").trim();
     if (!rawTarget || !rawTarget.startsWith("http")) {
       return res.status(400).json({ error: "Invalid stream URL", cues: [] });
     }
@@ -915,38 +1331,29 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
 
     const titleQuery = ((req.query.title as string) || "").trim();
     const langQuery = ((req.query.lang as string) || "eng").trim();
+    const imdbIdQuery = ((req.query.imdbId as string) || "").trim();
+    const seasonQuery = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
+    const episodeQuery = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
     const subIdx = parseInt((req.query.sub as string) || "0", 10) || 0;
-    const cacheKey = `${targetUrl}_sub_${subIdx}_${langQuery}_${titleQuery}`;
+
+    const cacheKey = `${targetUrl}_sub_${subIdx}_${langQuery}_${imdbIdQuery || titleQuery}_s${seasonQuery || ""}_e${episodeQuery || ""}`;
     const cached = subtitleCuesCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < 30 * 60 * 1000) {
       return res.json({ ok: true, cues: cached.cues });
     }
 
-    // Check cached probe info to see if this stream actually contains embedded subtitle streams
-    const cachedProbe = infoCache.get(targetUrl)?.data;
-    const hasEmbeddedSubtitles = Boolean(
-      cachedProbe &&
-      Array.isArray(cachedProbe.subtitleTracks) &&
-      cachedProbe.subtitleTracks.length > subIdx &&
-      // If probe was default placeholder, don't treat as embedded stream
-      !cachedProbe.subtitleTracks[0]?.title?.includes("Online")
-    );
+    const hasFFmpeg = await checkFFmpegAvailable();
 
-    // If no embedded subtitles exist in the stream, fetch online subtitles immediately (sub-second response!)
-    if (!hasEmbeddedSubtitles) {
-      const onlineCues = titleQuery ? await fetchOnlineSubtitles(titleQuery, langQuery) : [];
+    // If subIdx >= 100 (explicit online sub track) or FFmpeg is not available (e.g. Vercel), query online subtitles immediately
+    if (subIdx >= 100 || !hasFFmpeg) {
+      const onlineCues = await fetchOnlineSubtitles(titleQuery, langQuery, imdbIdQuery, seasonQuery, episodeQuery);
       if (onlineCues.length > 0) {
         subtitleCuesCache.set(cacheKey, { cues: onlineCues, timestamp: Date.now() });
       }
       return res.json({ ok: onlineCues.length > 0, cues: onlineCues });
     }
 
-    const hasFFmpeg = await checkFFmpegAvailable();
-    if (!hasFFmpeg) {
-      const cues = titleQuery ? await fetchOnlineSubtitles(titleQuery, langQuery) : [];
-      return res.json({ ok: cues.length > 0, cues });
-    }
-
+    // Try FFmpeg extraction for embedded subtitles with fast timeout and online fallback
     let referer = "";
     if (targetUrl.includes("hbplay.pages.dev")) {
       referer = "https://hbplay.pages.dev/";
@@ -959,17 +1366,17 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
     const ffmpegArgs: string[] = [
       "-headers",
       subHeaders,
-      "-analyzeduration", "10M",
-      "-probesize", "10M",
+      "-analyzeduration", "3M",
+      "-probesize", "3M",
       "-reconnect", "1",
       "-reconnect_streamed", "1",
-      "-reconnect_delay_max", "5",
+      "-reconnect_delay_max", "3",
       "-i", targetUrl,
       "-vn", "-an",
       "-map", `0:s:${subIdx}?`,
       "-c:s", "webvtt",
       "-f", "webvtt",
-      "pipe:1"
+      "pipe:1",
     ];
 
     let child: any;
@@ -978,7 +1385,7 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
         stdio: ["ignore", "pipe", "ignore"],
       });
     } catch {
-      const cues = titleQuery ? await fetchOnlineSubtitles(titleQuery, langQuery) : [];
+      const cues = await fetchOnlineSubtitles(titleQuery, langQuery, imdbIdQuery, seasonQuery, episodeQuery);
       return res.json({ ok: cues.length > 0, cues });
     }
 
@@ -997,8 +1404,8 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
       } catch {}
 
       let cues = parseWebVTT(vttText);
-      if (cues.length === 0 && titleQuery) {
-        cues = await fetchOnlineSubtitles(titleQuery, langQuery);
+      if (cues.length === 0) {
+        cues = await fetchOnlineSubtitles(titleQuery, langQuery, imdbIdQuery, seasonQuery, episodeQuery);
       }
       subtitleCuesCache.set(cacheKey, { cues, timestamp: Date.now() });
       return res.json({ ok: cues.length > 0, cues });
@@ -1007,10 +1414,9 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
     child.on("close", sendResponse);
     child.on("error", sendResponse);
 
-    // Fast 5-second timeout for embedded subtitle probe
     setTimeout(() => {
       sendResponse();
-    }, 5000);
+    }, 3500);
   } catch (err: any) {
     return res.status(500).json({ error: err.message, cues: [] });
   }

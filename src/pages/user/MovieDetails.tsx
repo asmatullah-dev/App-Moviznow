@@ -353,6 +353,7 @@ export default function MovieDetails() {
     watchUrl?: string;
     streamUrl?: string;
     title?: string;
+    imdbId?: string;
     quality?: string;
     contentId?: string;
     poster?: string;
@@ -967,6 +968,7 @@ export default function MovieDetails() {
         watchUrl: pdOnlyLink.url,
         streamUrl: streamUrl,
         title: mergedContent.title,
+        imdbId: (mergedContent as any)?.imdbId || currentImdbId,
         quality: pdOnlyLink.name || "HD",
         contentId: mergedContent.id,
         poster: mergedContent.posterUrl || mergedContent.backdropUrl,
@@ -1058,6 +1060,7 @@ export default function MovieDetails() {
           watchUrl: extractedResult.watchUrl || chosenLink.url,
           streamUrl: streamUrl,
           title: mergedContent.title,
+          imdbId: (mergedContent as any)?.imdbId || currentImdbId,
           quality: chosenLink.name || extractedResult.quality || "720p",
           contentId: mergedContent.id,
           poster: mergedContent.posterUrl || mergedContent.backdropUrl,
@@ -5024,6 +5027,7 @@ export default function MovieDetails() {
                                 watchUrl: chosenHref,
                                 streamUrl: streamUrl,
                                 title: linkPopup.formattedTitle || linkPopup.name || mergedContent?.title,
+                                imdbId: (mergedContent as any)?.imdbId || currentImdbId,
                                 quality: linkPopup.name || "HD",
                                 contentId: mergedContent?.id || "default",
                                 poster: mergedContent?.posterUrl || mergedContent?.backdropUrl,
@@ -5452,6 +5456,7 @@ export default function MovieDetails() {
           setActiveNativePlayerConfig(null);
         }}
         title={activeNativePlayerConfig?.title || mergedContent?.title}
+        imdbId={activeNativePlayerConfig?.imdbId || currentImdbId || (mergedContent as any)?.imdbId}
         watchUrl={activeNativePlayerConfig?.watchUrl}
         streamUrl={activeNativePlayerConfig?.streamUrl}
         contentId={activeNativePlayerConfig?.contentId || mergedContent?.id}
