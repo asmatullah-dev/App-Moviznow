@@ -940,8 +940,16 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
     const hasFfprobe = await checkFFprobeAvailable();
 
     // 1. Try pure-JS MKV EBML header inspection (fast 512KB range request)
+    // Probes embedded audio tracks and subtitle tracks for Pixeldrain, FSL server, and MKV streams
     let ebmlParsed: ReturnType<typeof parseMkvEbml> = null;
-    if (isMkv) {
+    const isMkvCandidate =
+      isMkv ||
+      isPixeldrain ||
+      targetUrl.toLowerCase().includes("fsl") ||
+      targetUrl.toLowerCase().includes("cloudflarestorage") ||
+      targetUrl.toLowerCase().includes(".r2.");
+
+    if (isMkvCandidate) {
       try {
         const headerRes = await fetch(targetUrl, {
           headers: {
@@ -954,7 +962,15 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
 
         if (headerRes && (headerRes.ok || headerRes.status === 206)) {
           const arrayBuf = await headerRes.arrayBuffer();
-          ebmlParsed = parseMkvEbml(Buffer.from(arrayBuf));
+          const buf = Buffer.from(arrayBuf);
+          // Check for EBML magic bytes (0x1A 0x45 0xDF 0xA3)
+          if (buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) {
+            isMkv = true;
+          }
+          ebmlParsed = parseMkvEbml(buf);
+          if (ebmlParsed) {
+            isMkv = true;
+          }
         }
       } catch {}
     }
@@ -1462,18 +1478,24 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
           : `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`;
 
         const ffmpegArgs: string[] = [
+          "-v",
+          "warning",
           "-headers",
           subHeaders,
-          "-analyzeduration", "3M",
-          "-probesize", "3M",
-          "-reconnect", "1",
-          "-reconnect_streamed", "1",
-          "-reconnect_delay_max", "3",
-          "-i", targetUrl,
-          "-vn", "-an",
-          "-map", `0:s:${subIdx}?`,
-          "-c:s", "webvtt",
-          "-f", "webvtt",
+          "-analyzeduration",
+          "2M",
+          "-probesize",
+          "2M",
+          "-i",
+          targetUrl,
+          "-vn",
+          "-an",
+          "-map",
+          `0:s:${subIdx}?`,
+          "-c:s",
+          "webvtt",
+          "-f",
+          "webvtt",
           "pipe:1",
         ];
 
@@ -1530,8 +1552,8 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
         child.on("close", finish);
         child.on("error", finish);
 
-        // Allow up to 35 seconds for full remote stream subtitle demuxing
-        setTimeout(finish, 35000);
+        // Responsive 15-second timeout for remote stream subtitle demuxing
+        setTimeout(finish, 15000);
       }
     );
 

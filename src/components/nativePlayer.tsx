@@ -873,12 +873,25 @@ export function NativePlayer({
 
   const directStreamUrl = normalizePixeldrainUrl(rawStreamUrl);
 
-  // Computes the official /u/:id download URL for Pixeldrain or standard direct URL
+  // Computes the download URL: Pixeldrain /u/:id for Pixeldrain, FSL direct URL for FSL server
   const downloadUrl = useMemo(() => {
-    const pdCandidateUrl = pixeldrainCandidate?.href || pixeldrainCandidate?.streamUrl;
-    const target = pdCandidateUrl || rawStreamUrl || directStreamUrl || activeWatchUrl || "";
-    return getPixeldrainDownloadUrl(target);
-  }, [pixeldrainCandidate, rawStreamUrl, directStreamUrl, activeWatchUrl]);
+    if (activeServer === "fsl") {
+      return fslCandidate?.href || directStreamUrl || rawStreamUrl || "";
+    }
+    if (activeServer === "pixeldrain") {
+      const pdCandidateUrl = pixeldrainCandidate?.href || pixeldrainCandidate?.streamUrl;
+      const target = pdCandidateUrl || directStreamUrl || rawStreamUrl || activeWatchUrl || "";
+      return getPixeldrainDownloadUrl(target) || target;
+    }
+    // Default server:
+    if (directStreamUrl.toLowerCase().includes("pixeldrain") || (pixeldrainCandidate && !fslCandidate)) {
+      return getPixeldrainDownloadUrl(pixeldrainCandidate?.href || directStreamUrl);
+    }
+    if (fslCandidate) {
+      return fslCandidate.href;
+    }
+    return directStreamUrl || rawStreamUrl || activeWatchUrl || "";
+  }, [activeServer, pixeldrainCandidate, fslCandidate, directStreamUrl, rawStreamUrl, activeWatchUrl]);
 
   // Initial duration in seconds from content metadata/runtime
   const propDurationSeconds = useMemo(() => {
