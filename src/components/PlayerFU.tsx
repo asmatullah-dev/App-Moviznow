@@ -311,17 +311,47 @@ export function PlayerFU({
       setTimeout(() => {
         if (document.activeElement instanceof HTMLIFrameElement) {
           resetControlsTimeout();
+          try {
+            (document.activeElement as HTMLElement)?.blur();
+            window.focus();
+          } catch {
+            // Focus cleanup fallback
+          }
         }
       }, 50);
     };
 
+    const handleGlobalActivity = () => {
+      resetControlsTimeout();
+    };
+
     window.addEventListener("blur", handleWindowBlur);
+    window.addEventListener("pointerdown", handleGlobalActivity);
+    window.addEventListener("mousemove", handleGlobalActivity);
+    window.addEventListener("touchstart", handleGlobalActivity);
+
+    // Periodic check to capture iframe clicks reliably across mobile and desktop
+    const focusInterval = setInterval(() => {
+      if (document.activeElement instanceof HTMLIFrameElement) {
+        resetControlsTimeout();
+        try {
+          (document.activeElement as HTMLElement)?.blur();
+          window.focus();
+        } catch {
+          // Focus cleanup fallback
+        }
+      }
+    }, 250);
 
     return () => {
+      clearInterval(focusInterval);
       if (controlsTimeoutRef.current) {
         clearTimeout(controlsTimeoutRef.current);
       }
       window.removeEventListener("blur", handleWindowBlur);
+      window.removeEventListener("pointerdown", handleGlobalActivity);
+      window.removeEventListener("mousemove", handleGlobalActivity);
+      window.removeEventListener("touchstart", handleGlobalActivity);
     };
   }, [isOpen, resetControlsTimeout]);
 
@@ -385,6 +415,7 @@ export function PlayerFU({
 
     const handleMessage = (event: MessageEvent) => {
       if (!event.data) return;
+      resetControlsTimeout();
 
       if (event.data.type === "MOVIZNOW_PLAYBACK_PROGRESS") {
         const { currentTime } = event.data;
@@ -570,28 +601,13 @@ export function PlayerFU({
             onTouchStart={resetControlsTimeout}
             onPointerDown={resetControlsTimeout}
           >
-            {/* Click Anywhere Detector: Active ONLY when controls are hidden to reveal buttons */}
-            {!showControls && (
-              <div
-                className="absolute inset-0 z-40 cursor-pointer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  resetControlsTimeout();
-                }}
-                onTouchStart={(e) => {
-                  e.stopPropagation();
-                  resetControlsTimeout();
-                }}
-              />
-            )}
-
             {/* Top Control Bar with Auto-Hide (No custom title; only essential controls) */}
             <div
               className={`absolute top-0 left-0 right-0 z-50 p-2.5 sm:p-4 flex items-center justify-end bg-gradient-to-b from-black/80 via-black/40 to-transparent transition-opacity duration-300 pointer-events-none ${
                 showControls ? "opacity-100" : "opacity-0"
               }`}
             >
-              <div className="flex items-center gap-2 pointer-events-auto">
+              <div className={`flex items-center gap-2 ${showControls ? "pointer-events-auto" : "pointer-events-none"}`}>
                 {/* Dedicated Fullscreen Toggle Button */}
                 <button
                   type="button"

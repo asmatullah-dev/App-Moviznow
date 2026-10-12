@@ -47,6 +47,11 @@ import {
   fullScreenModalAnimation,
   modalGpuStyle,
 } from "../utils/modalAnimations";
+import {
+  fetchDirectSubtitleTracks,
+  fetchDirectSubtitleCues,
+  DirectSubtitleTrack,
+} from "../utils/subtitleParser";
 
 export interface NativeStreamData {
   hasWatchOnline?: boolean;
@@ -958,7 +963,8 @@ export function NativePlayer({
     }
   }, [propDurationSeconds, totalDuration]);
   const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(0);
-  const [selectedSubtitleTrack, setSelectedSubtitleTrack] = useState<number | null>(null);
+  const [selectedSubtitleTrack, setSelectedSubtitleTrack] = useState<string | number | null>(null);
+  const [directSubtitlesList, setDirectSubtitlesList] = useState<DirectSubtitleTrack[]>([]);
   const [subtitleCues, setSubtitleCues] = useState<Array<{ start: number; end: number; text: string }>>([]);
   const [activeSubtitleText, setActiveSubtitleText] = useState<string>("");
   const [subtitleSize, setSubtitleSize] = useState<"small" | "normal" | "large">(() => {
@@ -1608,6 +1614,28 @@ export function NativePlayer({
     };
   }, [isOpen, directStreamUrl, displayTitle, title, imdbId, seasonInfo, episodeInfo]);
 
+  // Fetch direct subtitles from open CDN endpoint with 0 Vercel transfer
+  useEffect(() => {
+    if (!isOpen || !imdbId) return;
+    let isMounted = true;
+    const epNum = episodeInfo?.number ?? (episodeInfo as any)?.episodeNumber;
+    const sNum = seasonInfo?.number ?? (seasonInfo as any)?.seasonNumber;
+
+    fetchDirectSubtitleTracks(imdbId, sNum, epNum).then((tracks) => {
+      if (isMounted && tracks.length > 0) {
+        setDirectSubtitlesList(tracks);
+        const prefSub = safeStorage.getItem("moviznow_subtitles_enabled");
+        if (prefSub === "true") {
+          handleSubtitleSelect(tracks[0].id);
+        }
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen, imdbId, seasonInfo, episodeInfo]);
+
   // Construct stream URL with seek offset and audio track
   const currentStreamSrc = useMemo(() => {
     if (!directStreamUrl) return "";
@@ -1623,18 +1651,19 @@ export function NativePlayer({
       (displayTitle && displayTitle.toLowerCase().includes(".mkv"));
 
     const requiresTranscode =
-      (streamMode === "transcode" || isTargetMkv || selectedAudioTrack > 0) &&
+      (streamMode === "transcode" || isTargetMkv) &&
       mediaInfo?.hasFFmpeg !== false;
 
-    // Pixeldrain natively provides Access-Control-Allow-Origin: * (CORS).
-    // Stream directly from Pixeldrain ONLY IF it's a native MP4/WebM that does not need transcoding!
+    // Pixeldrain and direct CDN links: Stream directly from CDN edge (0 Vercel Fast Origin Transfer)
+    // Audio switching is performed directly by the browser without breaking direct video streaming!
     if (
       streamAttempt === 0 &&
       !requiresTranscode &&
       !isTargetMkv &&
-      (activeServer === "pixeldrain" || directStreamUrl.toLowerCase().includes("pixeldrain")) &&
       directStreamUrl.startsWith("http") &&
-      selectedAudioTrack === 0
+      (activeServer === "pixeldrain" ||
+        directStreamUrl.toLowerCase().includes("pixeldrain") ||
+        activeServer === "fsl")
     ) {
       return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
     }
@@ -2300,11 +2329,28 @@ export function NativePlayer({
   };
 
   const computedSubtitleTracks = useMemo(() => {
-    if (mediaInfo?.subtitleTracks && Array.isArray(mediaInfo.subtitleTracks)) {
-      return mediaInfo.subtitleTracks.filter((s) => s && typeof s.id === "number");
+    const list: Array<DirectSubtitleTrack | { id: number | string; language: string; title: string; isDirect?: boolean }> = [];
+
+    // Prioritize direct open CDN subtitles (0 Vercel Fast Origin Transfer)
+    if (directSubtitlesList.length > 0) {
+      list.push(...directSubtitlesList);
     }
-    return [];
-  }, [mediaInfo]);
+
+    if (mediaInfo?.subtitleTracks && Array.isArray(mediaInfo.subtitleTracks)) {
+      mediaInfo.subtitleTracks.forEach((s) => {
+        if (s && typeof s.id === "number") {
+          list.push({
+            id: s.id,
+            language: s.language || "und",
+            title: s.title || formatAudioLanguageLabel(s.language) || `Subtitle ${s.id + 1}`,
+            isDirect: false,
+          });
+        }
+      });
+    }
+
+    return list;
+  }, [mediaInfo, directSubtitlesList]);
 
   const handleAudioSelect = (trackId: number) => {
     const track = mediaInfo?.audioTracks.find((a) => a.id === trackId);
@@ -2313,37 +2359,60 @@ export function NativePlayer({
       return;
     }
 
-    // Server-side audio track switch: seamlessly preserve playback position without full-screen "Loading Stream"
-    setIsSwitchingAudio(true);
-    isSwitchingAudioRef.current = true;
-    setTimeout(() => {
-      setIsSwitchingAudio(false);
-      isSwitchingAudioRef.current = false;
-    }, 6000);
-
-    const targetPos = videoRef.current
-      ? Math.floor(
-          (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) +
-            (videoRef.current.currentTime || 0)
-        )
-      : Math.floor(currentPosition);
-
-    audioSwitchResumePosRef.current = targetPos;
-    pendingQualitySwitchPosRef.current = targetPos;
-    latestPositionRef.current = targetPos;
-    setCurrentPosition(targetPos);
-    savePlaybackPosition(targetPos);
-
-    // Audio switching requires transcode/remux mode so backend FFmpeg maps 0:a:${trackId}
-    setStreamMode("transcode");
-    setSeekOffset(targetPos);
     setSelectedAudioTrack(trackId);
-    setStreamAttempt((p) => p + 1);
     setActiveMenu(null);
     showToast(`Audio: ${formatAudioLanguageLabel(track?.language) || "Track " + (trackId + 1)}`);
+
+    // 1. Direct browser audio track switching via HTMLMediaElement.audioTracks
+    if (videoRef.current) {
+      const el = videoRef.current as any;
+      if (el.audioTracks && el.audioTracks.length > 0) {
+        for (let i = 0; i < el.audioTracks.length; i++) {
+          el.audioTracks[i].enabled = (i === trackId);
+        }
+        return;
+      }
+    }
+
+    // 2. Direct streams (Pixeldrain / FSL / Direct MP4): Keep video streaming directly without forcing transcode
+    const isDirectServer =
+      activeServer === "pixeldrain" ||
+      directStreamUrl.toLowerCase().includes("pixeldrain") ||
+      activeServer === "fsl";
+
+    if (isDirectServer || mediaInfo?.hasFFmpeg === false) {
+      return;
+    }
+
+    // 3. Fallback server-side audio track switch for streams where backend FFmpeg is available
+    if (streamMode === "transcode") {
+      setIsSwitchingAudio(true);
+      isSwitchingAudioRef.current = true;
+      setTimeout(() => {
+        setIsSwitchingAudio(false);
+        isSwitchingAudioRef.current = false;
+      }, 4000);
+
+      const targetPos = videoRef.current
+        ? Math.floor(
+            (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) +
+              (videoRef.current.currentTime || 0)
+          )
+        : Math.floor(currentPosition);
+
+      audioSwitchResumePosRef.current = targetPos;
+      pendingQualitySwitchPosRef.current = targetPos;
+      latestPositionRef.current = targetPos;
+      setCurrentPosition(targetPos);
+      savePlaybackPosition(targetPos);
+
+      setStreamMode("transcode");
+      setSeekOffset(targetPos);
+      setStreamAttempt((p) => p + 1);
+    }
   };
 
-  const handleSubtitleSelect = (subId: number | null) => {
+  const handleSubtitleSelect = async (subId: string | number | null) => {
     setSelectedSubtitleTrack(subId);
     setActiveMenu(null);
     if (subId === null) {
@@ -2354,17 +2423,39 @@ export function NativePlayer({
       return;
     }
     safeStorage.setItem("moviznow_subtitles_enabled", "true");
-    const sub = computedSubtitleTracks.find((s) => s.id === subId);
-    const subLabel = formatAudioLanguageLabel(sub?.language) || sub?.title || `Subtitle ${subId + 1}`;
+    const sub = computedSubtitleTracks.find((s) => String(s.id) === String(subId));
+    const subLabel = formatAudioLanguageLabel(sub?.language) || sub?.title || `Subtitle ${subId}`;
     showToast(`Loading ${subLabel}...`);
 
+    // 1. Direct Subtitle Fetch: Fetch directly in browser from open CDN (0 Vercel transfer!)
+    if (sub?.isDirect && (sub as DirectSubtitleTrack).url) {
+      try {
+        const cues = await fetchDirectSubtitleCues((sub as DirectSubtitleTrack).url!);
+        if (cues && cues.length > 0) {
+          setSubtitleCues(cues);
+          const curTime = videoRef.current
+            ? (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) + (videoRef.current.currentTime || 0)
+            : currentPosition;
+          const activeCue = cues.find(
+            (cue) => curTime >= (cue.start - 0.25) && curTime <= (cue.end + 0.25)
+          );
+          setActiveSubtitleText(activeCue ? activeCue.text : "");
+          showToast(`Subtitles: ${subLabel}`);
+          return;
+        }
+      } catch (err) {
+        console.warn("[Direct subtitle fetch error, falling back to server]:", err);
+      }
+    }
+
+    // 2. Server-side fallback for embedded MKV subtitle tracks
     const apiBase = getStreamingApiBase();
     const epNum = episodeInfo?.number ?? (episodeInfo as any)?.episodeNumber;
     const sNum = seasonInfo?.number ?? (seasonInfo as any)?.seasonNumber;
     const cleanTitle = displayTitle || title || "";
     const params = new URLSearchParams();
     params.set("url", directStreamUrl);
-    params.set("sub", String(subId));
+    params.set("sub", String(subId).replace("direct_", ""));
     if (cleanTitle) params.set("title", cleanTitle);
     if (imdbId) params.set("imdbId", imdbId);
     if (sub?.language) params.set("lang", sub.language);
@@ -3232,7 +3323,7 @@ export function NativePlayer({
                       <span className="max-w-[65px] truncate">
                         {selectedSubtitleTrack === null
                           ? "Off"
-                          : mediaInfo?.subtitleTracks?.find((s) => s.id === selectedSubtitleTrack)?.language || "Subtitles"}
+                          : computedSubtitleTracks.find((s) => String(s.id) === String(selectedSubtitleTrack))?.title || "Subtitles"}
                       </span>
                     </button>
                   )}
@@ -3410,19 +3501,16 @@ export function NativePlayer({
                         </button>
                         {computedSubtitleTracks.length === 0 ? (
                           <div className="px-2.5 py-1.5 text-[11px] text-zinc-400 italic">
-                            {t("No embedded subtitles")}
+                            {t("No subtitles available")}
                           </div>
                         ) : (
                           computedSubtitleTracks.map((sub) => {
                             const cleanSubLabel =
+                              sub.title ||
                               formatAudioLanguageLabel(sub.language) ||
-                              (sub.title &&
-                              !/(?:\.com|\.net|\.org|\.tv|\.in|\.to|\.site|\.app|\.dev|\.me|www\.|https?:|moviesdrive|hdhub)/i.test(
-                                sub.title
-                              )
-                                ? sub.title
-                                : sub.language) ||
-                              `Subtitle ${sub.id + 1}`;
+                              `Subtitle ${sub.id}`;
+
+                            const isSelected = String(selectedSubtitleTrack) === String(sub.id);
 
                             return (
                               <button
@@ -3430,13 +3518,13 @@ export function NativePlayer({
                                 type="button"
                                 onClick={() => handleSubtitleSelect(sub.id)}
                                 className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between cursor-pointer ${
-                                  selectedSubtitleTrack === sub.id
+                                  isSelected
                                     ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
                                     : "text-zinc-300 hover:bg-white/10 hover:text-white"
                                 }`}
                               >
                                 <span className="truncate">{cleanSubLabel}</span>
-                                {selectedSubtitleTrack === sub.id && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
+                                {isSelected && <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />}
                               </button>
                             );
                           })
