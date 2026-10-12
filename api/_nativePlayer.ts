@@ -1436,11 +1436,22 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
 
     const hasFFmpeg = await checkFFmpegAvailable();
     if (!hasFFmpeg) {
-      return res.json({ ok: false, cues: [], error: "FFmpeg not available for embedded subtitles" });
+      const rawTitle = ((req.query.title as string) || "").trim();
+      const lang = ((req.query.lang as string) || "eng").trim();
+      const imdbId = ((req.query.imdbId as string) || "").trim();
+      const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
+      const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
+
+      const onlineCues = await fetchOnlineSubtitles(rawTitle, lang, imdbId, season, episode);
+      if (onlineCues.length > 0) {
+        subtitleCuesCache.set(cacheKey, { cues: onlineCues, timestamp: Date.now() });
+        return res.json({ ok: true, cues: onlineCues });
+      }
+      return res.json({ ok: false, cues: [], error: "No subtitles found" });
     }
 
     const extractPromise = new Promise<{ ok: boolean; cues: Array<{ start: number; end: number; text: string }> }>(
-      (resolve) => {
+      async (resolve) => {
         let referer = "";
         if (targetUrl.includes("hbplay.pages.dev")) {
           referer = "https://hbplay.pages.dev/";
@@ -1472,7 +1483,13 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
             stdio: ["ignore", "pipe", "ignore"],
           });
         } catch {
-          return resolve({ ok: false, cues: [] });
+          const rawTitle = ((req.query.title as string) || "").trim();
+          const lang = ((req.query.lang as string) || "eng").trim();
+          const imdbId = ((req.query.imdbId as string) || "").trim();
+          const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
+          const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
+          const fallbackCues = await fetchOnlineSubtitles(rawTitle, lang, imdbId, season, episode);
+          return resolve({ ok: fallbackCues.length > 0, cues: fallbackCues });
         }
 
         let vttText = "";
@@ -1482,7 +1499,7 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
           vttText += chunk.toString();
         });
 
-        const finish = () => {
+        const finish = async () => {
           if (settled) return;
           settled = true;
           try {
@@ -1494,7 +1511,19 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
             subtitleCuesCache.set(cacheKey, { cues, timestamp: Date.now() });
             resolve({ ok: true, cues });
           } else {
-            resolve({ ok: false, cues: [] });
+            // Fallback to online subtitles
+            const rawTitle = ((req.query.title as string) || "").trim();
+            const lang = ((req.query.lang as string) || "eng").trim();
+            const imdbId = ((req.query.imdbId as string) || "").trim();
+            const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
+            const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
+            const online = await fetchOnlineSubtitles(rawTitle, lang, imdbId, season, episode);
+            if (online.length > 0) {
+              subtitleCuesCache.set(cacheKey, { cues: online, timestamp: Date.now() });
+              resolve({ ok: true, cues: online });
+            } else {
+              resolve({ ok: false, cues: [] });
+            }
           }
         };
 
@@ -1792,9 +1821,16 @@ nativePlayerRouter.all(
       // Check whether FFmpeg is available on the hosting environment (Vercel has no ffmpeg)
       const hasFFmpeg = await checkFFmpegAvailable();
 
-      // If FFmpeg is NOT available (e.g. Vercel runtime), ALWAYS stream cleanly via proxy
-      if (!hasFFmpeg) {
-        return streamViaProxy(targetUrl, req, res);
+      // If FFmpeg is NOT available (e.g. Vercel serverless functions), avoid proxying video bytes.
+      // Redirect directly to origin via HTTP 307 (or 302) to eliminate Vercel compute/bandwidth usage!
+      if (!hasFFmpeg || mode === "redirect") {
+        if (req.query.proxy === "true") {
+          return streamViaProxy(targetUrl, req, res);
+        }
+        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Headers", "*");
+        res.setHeader("Access-Control-Expose-Headers", "Location");
+        return res.redirect(307, targetUrl);
       }
 
       // If mode is explicitly raw, stream directly via byte-range proxy

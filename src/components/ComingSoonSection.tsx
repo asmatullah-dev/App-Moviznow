@@ -1258,7 +1258,7 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
                     </div>
                   ) : trailerUrl ? (
                     <iframe
-                      src={getYouTubeEmbedUrl(trailerUrl) || ''}
+                      src={getYouTubeEmbedUrl(trailerUrl) || undefined}
                       title={`${selectedItem.title} Official Trailer`}
                       className="w-full h-full border-0"
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"

@@ -1,115 +1,62 @@
-# NativePlayer Title & Audio Language Display Enhancement
+# Implementation Plan: Zero-Bandwidth Direct Video Streaming, Pixeldrain Compatibility & User Status Handling
 
-Enhance `nativePlayer` by removing quality labels from the top title, rendering the `S1E1` season/episode tag in emerald green directly inside the title (formatted as `Series Title - S1E1: Episode Title`), eliminating redundant season/episode info under the title, and displaying clean full language names (truncated with ellipsis if over 8 characters) on the audio button.
+## 1. Executive Summary & Root Cause Analysis
 
-## User Review & Critical Decisions
+### A. Why Vercel Bandwidth Spiked to 7.77 GB / 10 GB
+- **Fast Origin Transfer**: Vercel charges "Fast Origin Transfer" on outgoing traffic emitted from serverless function invocations.
+- **The Culprit**: In `/api/_nativePlayer.ts`, `/api/native-player/stream` was proxying raw video bytes by piping upstream fetch streams directly into the response (`nodeStream.pipe(res)`).
+- **The Result**: Watching just 1–2 HD movies downloaded and re-uploaded 4–8 GB of data directly through Vercel compute, rapidly depleting your 10 GB monthly allowance.
 
-> [!IMPORTANT]
-> The following user preferences were confirmed in Phase 1 and are locked into this plan:
-
-- **Confirmed Decision 1 (S1E1 Accent Color)**: Render the `S1E1` indicator in vibrant **Emerald green** (`text-emerald-400 font-bold`) inside the title header, distinguishing it from white text.
-- **Confirmed Decision 2 (Title Formatting)**: Format series episode titles as `Series Title - S1E1: Episode Title`, stripping any trailing quality suffixes (e.g., `- 720p`, `- 480p HEVC`).
-- **Confirmed Decision 3 (Under-Title Metadata)**: Remove the redundant `• S1E1` pill/text from the metadata line below the title, keeping only year, duration, and audio track languages.
-- **Confirmed Decision 4 (Audio Button Language)**: Display full language names (e.g., "Hindi", "English", "Spanish") instead of short 3-letter codes ("Hin", "Eng"). Names exceeding 8 characters will truncate with an ellipsis (e.g., "Portugue...").
-- **Confirmed Decision 5 (Scope Isolation)**: All changes are isolated exclusively to `src/components/nativePlayer.tsx`.
-
----
-
-## 1. Overview & Core Concept
-
-### What It Does
-1. **Title Sanitation & S1E1 Highlighting**:
-   - Parses the active title and removes quality tags (`- 720p`, `- 1080p`, `- 480p HEVC`, `4K`, etc.).
-   - Detects series episode patterns and constructs a split-styled title:
-     `{Series Title} - ` (white) + `S{s}E{e}` (emerald green) + `: {Episode Title}` (white).
-   - If it is a full season pack (e.g., `Ishqa Ishqa Season 1 - 480p HEVC`), formats as `{Series Title} - ` + `Season {s}` (emerald green) with quality stripped.
-2. **Metadata Cleanup Under Title**:
-   - Omits the duplicate `• S1E1` element under the title header so the top bar remains clean and uncluttered.
-3. **Full Language Name on Audio Button**:
-   - Replaces `getLanguageShortCode` with `formatAudioLanguageLabel` which returns proper capitalized language names (e.g., `Hindi`, `Tamil`, `Telugu`, `English`, `French`).
-   - Normalizes raw short codes (`hin`, `eng`, `tam`) from media info into full names.
-   - If length > 8 characters, gracefully truncates with `...` to prevent control bar overflow on mobile.
+### B. Why Pixeldrain Works on MX Player & VLC but Behaved Differently in Browsers
+- **Address Bar vs Video Element**: When you type `https://pixeldrain.com/api/file/:id` directly into a browser address bar, Pixeldrain sends `Content-Disposition: attachment`, prompting a file download rather than playing in-tab. In contrast, an HTML5 `<video src="...">` element ignores `attachment` and streams media chunks over HTTP byte ranges (`Range: bytes=0-`).
+- **Container & Codec Differences**: Many movies on Pixeldrain are formatted in Matroska containers (`.mkv`) with `HEVC / H.265` video and `AC-3 / E-AC-3` audio:
+  - **MX Player & VLC** include internal decoders for MKV, HEVC, and AC-3/DTS audio, so they play network streams effortlessly.
+  - **Web Browsers** (Chrome, Firefox, Safari) natively decode MP4 (H.264/AAC) and WebM, but can fail or stall on raw MKV/AC-3 without specialized decoding.
+  - When proxying through Vercel, because Vercel serverless lacks FFmpeg/FFprobe, it was passing raw bytes without transcoding while burning all of your Vercel bandwidth quota.
 
 ---
 
-## 2. User Experience & Visual Design
+## 2. Technical Architecture & Implementation Steps
 
-### Top Bar Comparison
+### Step 1: Zero-Compute HTTP 302/307 Redirects on Vercel
+- **Update `/api/_nativePlayer.ts` (`/api/native-player/stream`)**:
+  - Replace the byte-streaming proxy pipeline (`nodeStream.pipe(res)`) with an immediate `HTTP 307 Temporary Redirect` (or 302) pointing directly to the target stream URL:
+    ```ts
+    res.setHeader("Location", targetUrl);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.status(307).end();
+    ```
+  - Standard HTML5 `<video>` elements follow HTTP 307/302 redirects automatically and negotiate byte ranges (`Range: bytes=...`) directly with the target CDN / media host.
+  - **Result**: Bandwidth consumed by Vercel compute drops from **~4 GB per movie to ~200 bytes per stream request** (a 99.999% reduction).
 
-#### Before:
-```
-Below S1E1: Come Home Year - 720p                     [⬇] [✕]
-2026 • 47:35 • S1E1 • Hindi, English
-```
+### Step 2: Stream Resolution & Pixeldrain Normalization
+- **Direct in-App Streaming**:
+  - Maintain primary prioritization of FSL / Cloudflare CDN streams (which load instantly and support web streaming).
+  - Normalize Pixeldrain URLs (`https://pixeldrain.com/u/:id` → `https://pixeldrain.com/api/file/:id`).
+  - Pixeldrain natively sends `Access-Control-Allow-Origin: *` headers, enabling direct browser streaming.
+  - For browser-supported media (MP4, H.264, WebM), video plays directly in-app with 0 compute overhead.
 
-#### After:
-```
-Below - S1E1: Come Home Year                          [⬇] [✕]
-2026 • 47:35 • Hindi, English
-```
-*(where `S1E1` is highlighted in emerald green `#34d399` / `text-emerald-400`)*
+### Step 3: Audio Language & Subtitle Metadata Accuracy
+- **Keep Lightweight JSON Probes on Vercel**:
+  - Maintain `/api/native-player/info` for fast container inspection (~1 KB of JSON payload).
+  - Ensure detected audio languages (Hindi, Tamil, Telugu, English, etc.) are accurately mapped and presented in the player track selector.
+  - Keep `/api/native-player/subtitles` so WebVTT subtitle cues from Cinemeta / OpenSubtitles are fetched sub-second and rendered via the player overlay without delays or missing cues.
 
-#### Full Season MKV Before:
-```
-Ishqa Ishqa Season 1 - 480p HEVC                      [⬇] [✕]
-2026 • 3:53:26 • Hindi
-```
+### Step 4: UI Discipline ("No keep untouch")
+- Keep the native player UI controls clean and untouched:
+  - No new cluttered buttons on the bottom control bar.
+  - Maintain the existing clean layout, top title overlay, audio/subtitle menus, and minimal error fallback card.
 
-#### Full Season MKV After:
-```
-Ishqa Ishqa - Season 1                                [⬇] [✕]
-2026 • 3:53:26 • Hindi
-```
-*(where `Season 1` is highlighted in emerald green)*
-
-### Audio Control Button Comparison
-
-- **Before**: `[🎙 Hin]`
-- **After**: `[🎙 Hindi]`
-- **Long Language**: `[🎙 Portugue...]`
-
----
-
-## 3. Key Product Decisions & Trade-Offs
-
-- **Decision 1: Title Parsing Inside `nativePlayer.tsx`**:
-  - *Chosen Approach*: Implement robust regex sanitization inside `nativePlayer.tsx` for `displayTitle`. It strips qualities and splits into `{prefix}`, `{badge}`, and `{suffix}` components.
-  - *Why*: The user explicitly stated: *"Don't revise any other previous start as a new task and make changes only in nativeplayer"*. Making `nativePlayer` self-sufficient ensures all titles passed from any page (movies, seasons, episodes, link popups) are automatically cleaned and styled without touching external files.
-- **Decision 2: Language Name Normalizer**:
-  - *Chosen Approach*: Map common abbreviations (`hi`, `hin`, `en`, `eng`, `ta`, `tam`, `te`, `tel`, etc.) to full names (`Hindi`, `English`, `Tamil`, `Telugu`), while passing through already full names. Apply length capping at 8 characters + `...`.
+### Step 5: New User Status Default to "Pending"
+- Ensure that when a new user signs up or logs in for the first time:
+  - If the user is neither Owner (`asmatn628@gmail.com`) nor an Admin, their initial profile is created with `role: "user"` and `status: "pending"` (rather than `"active"`).
+  - Maintain strict admin verification before full access is granted.
 
 ---
 
-## 4. Technical Architecture & Component Mapping
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     nativePlayer.tsx Header                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  parsePlayerTitle(displayTitle, seasonInfo, episodeInfo)        │
-│  │                                                              │
-│  ├─► Strip quality: /[\s\-_]*(480p|720p|1080p|2160p|4k|hevc).*/i│
-│  ├─► Extract Series Name                                        │
-│  ├─► Extract S1E1 or Season N Tag ──► <span text-emerald-400>   │
-│  └─► Extract Episode Title (if any)                             │
-│                                                                 │
-│  Header Info Sub-bar:                                           │
-│  └─► {year} • {totalDuration} • {audioLanguages}                │
-│      (Removes redundant seasonInfo/episodeInfo pill)            │
-│                                                                 │
-├─────────────────────────────────────────────────────────────────┤
-│                     nativePlayer.tsx Controls                   │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  formatAudioLanguageLabel(rawLang)                              │
-│  │                                                              │
-│  ├─► ISO/Short Code Map (hin->Hindi, eng->English, etc.)        │
-│  ├─► Strip brackets & codecs (e.g. "Hindi [Original]"->Hindi)   │
-│  └─► Truncate: len > 8 ? lang.slice(0, 8) + "..." : lang        │
-│                                                                 │
-│  Audio Button:                                                  │
-│  └─► <Mic /> <span>{formatAudioLanguageLabel(currentAudio)}</span>│
-│                                                                 │
-└─────────────────────────────────────────────────────────────────┘
-```
+## 3. Verification & Testing Checklist
+1. **Bandwidth Test**: Verify that calling `/api/native-player/stream` issues an HTTP 307 redirect directly to upstream instead of buffering and piping bytes through Vercel.
+2. **Playback Test**: Verify that the in-app player plays streams directly, seeks accurately, and displays buffer progress.
+3. **Audio & Subtitle Test**: Verify that audio language tracks and subtitle overlays load quickly without errors.
+4. **Auth Status Test**: Verify that new user sign-ins receive `role: "user"` and `status: "pending"`.
+5. **Build Verification**: Run `compile_applet` and `lint_applet` to verify clean compilation with zero regressions.

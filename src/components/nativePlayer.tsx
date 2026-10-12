@@ -2643,8 +2643,8 @@ export function NativePlayer({
               <>
                 <video
                   ref={video0Ref}
-                  src={slot0Src || (activeSlot === 0 ? currentStreamSrc : "")}
-                  poster={poster}
+                  src={(slot0Src || (activeSlot === 0 ? currentStreamSrc : undefined)) || undefined}
+                  poster={poster || undefined}
                   playsInline
                   preload="auto"
                   onClick={(e) => {
@@ -2681,8 +2681,8 @@ export function NativePlayer({
                 />
                 <video
                   ref={video1Ref}
-                  src={slot1Src || (activeSlot === 1 ? currentStreamSrc : "")}
-                  poster={poster}
+                  src={(slot1Src || (activeSlot === 1 ? currentStreamSrc : undefined)) || undefined}
+                  poster={poster || undefined}
                   playsInline
                   preload="auto"
                   onClick={(e) => {
@@ -2720,7 +2720,7 @@ export function NativePlayer({
               </>
             ) : (
               <iframe
-                src={watchUrl}
+                src={watchUrl || undefined}
                 allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
                 className="w-full h-full border-none"
                 title={displayTitle}
