@@ -1,57 +1,44 @@
-# Implementation Plan - PlayerFU Optimization & Vercel Bandwidth Protection
+# Implementation Plan - Optimize PlayerFU Controls & Fullscreen Experience
 
-## Overview
-**PlayerFU** is MovizNow's instant web player powered by Play4U streams (`api/_playerFU.ts` and `src/components/PlayerFU.tsx`). It provides instant playback for movies with synchronized progress tracking, quality resolution, and custom controls.
-
-Currently, media range requests and video segments (`/range/*`, `/api/stream/range/*`) are proxied directly through Vercel Serverless Functions via Node streaming pipes (`nodeStream.pipe(res)`). On Vercel, this consumes substantial **Fast Origin Transfer** bandwidth and risks hitting serverless execution timeouts.
-
-This plan details how to keep PlayerFU running reliably while completely eliminating Vercel video data transfer, preventing infinite reload loops, and maintaining seamless coordination with the Native Player.
+Eliminate redundant overlay title from PlayerFU, maximize horizontal room on mobile screens to restore Play4U's native fullscreen button, and provide a backup dedicated fullscreen control.
 
 ---
 
-## Key Objectives
+## 1. User Alignment & Problem Analysis
 
-1. **Eliminate Vercel Fast Origin Transfer in PlayerFU**:
-   - Update `api/_playerFU.ts` so video chunk range requests do not proxy binary data through the serverless function.
-   - Implement HTTP 302 redirects directly to upstream media CDNs (`https://uprising.best/...`) with client-side CORS headers, or direct client fetch where appropriate.
-   - Ensure Vercel functions only deliver small HTML shells (~15KB) and metadata (~1KB), cutting serverless bandwidth consumption by >99%.
-
-2. **Preserve Player Features & UX**:
-   - Keep quality selection (1080p, 720p, 480p), audio track preferences (Hindi/English), playback speed memory, and resume progress intact.
-   - Retain cross-origin postMessage communication between PlayerFU iframe and the MovizNow app shell for watch history tracking.
-
-3. **Prevent Buffering & Reload Loops**:
-   - Protect PlayerFU's iframe source from remounting when stream status updates occur.
-   - Add graceful error detection: if an upstream CDN stream fails or is geo-blocked, provide a direct fallback prompt to switch to the Native Player or alternative mirrors instead of stalling.
+1. **Title Redundancy**: Play4U already renders the media title and metadata natively inside its player iframe. Our custom text overlay in `PlayerFU.tsx` duplicates this and clutters the interface.
+2. **Missing/Clipped Fullscreen Button**: On mobile devices, container padding (`p-2`) and rounded corner clipping (`rounded-2xl overflow-hidden`) squeeze the iframe width below ~350px. When horizontal space is restricted, Play4U's responsive control bar collapses or hides the fullscreen button.
+3. **User Preference**:
+   - Remove the custom movie title completely from `PlayerFU.tsx`.
+   - Maximize space so Play4U's native fullscreen button can render without clipping.
+   - Add a fallback dedicated fullscreen toggle button in the player header next to the close button so full screen is guaranteed on all screen sizes.
 
 ---
 
-## Proposed Changes
+## 2. Proposed Changes
 
-### 1. Backend Range Proxying (`api/_playerFU.ts`)
-- Replace the raw media chunk streaming pipe in `play4uRouter.all(["/range/*", ...])` with:
-  - If request is a manifest (`.m3u8` or small text playlist), continue parsing and rewriting relative URLs.
-  - If request is a media segment (`.ts`, `.mp4`, or video range byte requests), return an immediate `302 Found` redirect directly to the upstream CDN URL, offloading all video byte transfer away from Vercel.
-  - Preserve CORS headers (`Access-Control-Allow-Origin: *`, `Access-Control-Expose-Headers`) so cross-origin HTML5 video/HLS players can follow the redirect smoothly.
+### Component: `src/components/PlayerFU.tsx`
 
-### 2. Frontend Player Integration (`src/components/PlayerFU.tsx`)
-- Verify that `activeIframeSrc` remains frozen during active playback.
-- Add an error state handler: if Play4U stream is unavailable or encounters playback error, display a clean button to open the title in the **Native Player**.
+1. **Remove Title Overlay**:
+   - Remove the title element and container (`<span className="text-white font-bold ...">{content.title}</span>`) from the header bar.
+   - Clean up any unused title wrapper divs.
 
-### 3. Coexistence with Native Player (`src/pages/user/MovieDetails.tsx`)
-- Ensure both the **Instant Play (PlayerFU)** and **Native Player** buttons are cleanly presented with clear indicators of their stream source.
+2. **Mobile Viewport Optimization (Zero Margin/Radius on Mobile)**:
+   - Change backdrop padding from `p-2 sm:p-4` to `p-0 sm:p-4` to give the iframe full viewport width on mobile phones.
+   - Change card rounded corners from `rounded-2xl` to `rounded-none sm:rounded-2xl` so corner radii do not mask or clip bottom-right controls in portrait mode.
+   - Ensure the iframe has explicit `allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"` and `allowFullScreen`.
+
+3. **Dedicated Fullscreen Button in Header**:
+   - Add a fullscreen toggle button (`Maximize` / `Minimize` from `lucide-react`) alongside the close (`X`) button in the top-right control cluster.
+   - Connect it to standard Fullscreen API with vendor prefix support (`requestFullscreen`, `webkitRequestFullscreen`, `exitFullscreen`).
+   - Listen for `fullscreenchange` events to keep icon state in sync.
 
 ---
 
-## Verification Plan
+## 3. Verification & Testing
 
-### Automated Tests & Compilation
-- Run `npm run build` / `compile_applet` to verify TypeScript contracts and imports.
-- Run `lint_applet` to ensure no lint regressions.
-
-### Manual Verification
-1. Open a movie with available streams in MovizNow.
-2. Launch PlayerFU ("Instant Play") and verify video loads promptly.
-3. Check network tab to confirm media segment requests redirect directly to upstream CDN rather than consuming backend function bandwidth.
-4. Verify playback progress saves to local storage and syncs properly.
-5. Verify Native Player continues to work independently without interference.
+1. **Compilation Check**: Run `compile_applet` and `lint_applet` to verify clean build and no TypeScript or lint issues.
+2. **Visual & Responsive Testing**:
+   - Verify top bar only contains the control buttons (Fullscreen & Close).
+   - Verify on mobile viewports (<640px) that the player spans edge-to-edge without corner clipping.
+   - Test fullscreen button toggles full screen cleanly.

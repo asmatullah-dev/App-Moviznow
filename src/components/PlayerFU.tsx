@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Play, X, Film, Zap, Shield, RotateCw } from "lucide-react";
+import { Play, X, Maximize, Minimize } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 import { safeStorage } from "../utils/safeStorage";
 import { useModalBehavior } from "../hooks/useModalBehavior";
@@ -288,6 +288,42 @@ export function PlayerFU({
 
   // Snapshot the iframe URL once when opened so it NEVER changes during active playback
   const [activeIframeSrc, setActiveIframeSrc] = useState<string>("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [showControls, setShowControls] = useState<boolean>(true);
+  const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const resetControlsTimeout = useCallback(() => {
+    setShowControls(true);
+    if (controlsTimeoutRef.current) {
+      clearTimeout(controlsTimeoutRef.current);
+    }
+    controlsTimeoutRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 3000);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    resetControlsTimeout();
+
+    const handleWindowBlur = () => {
+      setTimeout(() => {
+        if (document.activeElement instanceof HTMLIFrameElement) {
+          resetControlsTimeout();
+        }
+      }, 50);
+    };
+
+    window.addEventListener("blur", handleWindowBlur);
+
+    return () => {
+      if (controlsTimeoutRef.current) {
+        clearTimeout(controlsTimeoutRef.current);
+      }
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [isOpen, resetControlsTimeout]);
 
   useEffect(() => {
     if (!isOpen || !content?.id || !imdbId) {
@@ -417,6 +453,7 @@ export function PlayerFU({
         (document as any).msFullscreenElement
       );
 
+      setIsFullscreen(isFs);
       notifyOrientation();
 
       if (isFs) {
@@ -463,6 +500,43 @@ export function PlayerFU({
     };
   }, [isOpen, onClose]);
 
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      const isFs = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+
+      if (!isFs) {
+        const target = containerRef.current;
+        if (!target) return;
+        if (target.requestFullscreen) {
+          await target.requestFullscreen();
+        } else if ((target as any).webkitRequestFullscreen) {
+          await (target as any).webkitRequestFullscreen();
+        } else if ((target as any).mozRequestFullScreen) {
+          await (target as any).mozRequestFullScreen();
+        } else if ((target as any).msRequestFullscreen) {
+          await (target as any).msRequestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          await (document as any).webkitExitFullscreen();
+        } else if ((document as any).mozCancelFullScreen) {
+          await (document as any).mozCancelFullScreen();
+        } else if ((document as any).msExitFullscreen) {
+          await (document as any).msExitFullscreen();
+        }
+      }
+    } catch (err) {
+      console.warn("Fullscreen toggle error:", err);
+    }
+  }, []);
+
   useModalBehavior(isOpen, onClose);
 
   return (
@@ -472,59 +546,65 @@ export function PlayerFU({
           key="playerfu-backdrop"
           {...modalBackdropAnimation}
           className="fixed inset-0 z-[10000] flex items-center justify-center p-2 sm:p-4 overflow-hidden bg-black/95 backdrop-blur-md transform-gpu will-change-[opacity]"
-          onClick={onClose}
+          onClick={() => {
+            if (!showControls) {
+              resetControlsTimeout();
+            } else {
+              onClose();
+            }
+          }}
         >
           <motion.div
+            ref={containerRef}
             key="playerfu-card"
             {...modalContainerAnimation}
             style={modalGpuStyle}
-            className="relative w-full max-w-6xl aspect-video bg-black rounded-2xl overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.8)] ring-1 ring-white/10 z-10 transform-gpu flex flex-col"
-            onClick={(e) => e.stopPropagation()}
+            className={`relative w-full max-w-6xl aspect-video bg-black ${
+              isFullscreen ? "h-full max-w-none rounded-none aspect-auto" : "rounded-2xl"
+            } overflow-hidden shadow-[0_0_60px_rgba(0,0,0,0.8)] ring-1 ring-white/10 z-10 transform-gpu flex flex-col`}
+            onClick={(e) => {
+              e.stopPropagation();
+              resetControlsTimeout();
+            }}
+            onMouseMove={resetControlsTimeout}
+            onTouchStart={resetControlsTimeout}
+            onPointerDown={resetControlsTimeout}
           >
-            {/* Unified Top Control Bar */}
-            <div className="absolute top-0 left-0 right-0 z-50 p-3 sm:p-4 flex items-center justify-between bg-gradient-to-b from-black/80 via-black/40 to-transparent pointer-events-none">
-              <div className="flex items-center gap-2.5 pointer-events-auto">
-                <div className="flex flex-col">
-                  <span className="text-white font-bold text-xs sm:text-sm drop-shadow line-clamp-1 max-w-[200px] sm:max-w-md">
-                    {content.title}
-                  </span>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                      <Zap className="w-2.5 h-2.5" />
-                      {streamEngine === "direct" ? t("Direct CDN") : t("Proxy")}
-                    </span>
-                    {streamEngine === "direct" && (
-                      <span className="hidden sm:inline-flex text-[10px] text-zinc-400">
-                        {t("0 Vercel Bandwidth")}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
+            {/* Click Anywhere Detector: Active ONLY when controls are hidden to reveal buttons */}
+            {!showControls && (
+              <div
+                className="absolute inset-0 z-40 cursor-pointer"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  resetControlsTimeout();
+                }}
+                onTouchStart={(e) => {
+                  e.stopPropagation();
+                  resetControlsTimeout();
+                }}
+              />
+            )}
 
+            {/* Top Control Bar with Auto-Hide (No custom title; only essential controls) */}
+            <div
+              className={`absolute top-0 left-0 right-0 z-50 p-2.5 sm:p-4 flex items-center justify-end bg-gradient-to-b from-black/80 via-black/40 to-transparent transition-opacity duration-300 pointer-events-none ${
+                showControls ? "opacity-100" : "opacity-0"
+              }`}
+            >
               <div className="flex items-center gap-2 pointer-events-auto">
-                {/* Switch to Native Player Button */}
-                {onSwitchToNative && (
-                  <button
-                    type="button"
-                    onClick={onSwitchToNative}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-white border border-emerald-500/40 text-xs font-semibold backdrop-blur-md transition-all shadow-lg active:scale-95 cursor-pointer"
-                    title={t("Switch to Native Player")}
-                  >
-                    <Film className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="hidden xs:inline">{t("Native Player")}</span>
-                  </button>
-                )}
-
-                {/* Engine Mode Toggle */}
+                {/* Dedicated Fullscreen Toggle Button */}
                 <button
                   type="button"
-                  onClick={() => setStreamEngine((prev) => (prev === "direct" ? "proxy" : "direct"))}
-                  className="hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-black/60 hover:bg-black/80 text-white/70 hover:text-white border border-white/10 text-xs font-medium backdrop-blur-md transition-all cursor-pointer"
-                  title={streamEngine === "direct" ? t("Switch to Masked Proxy") : t("Switch to Direct CDN")}
+                  onClick={toggleFullscreen}
+                  className="p-1.5 sm:p-2 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white transition-all backdrop-blur-md border border-white/20 shadow-xl group cursor-pointer"
+                  title={isFullscreen ? t("Exit Fullscreen") : t("Fullscreen")}
+                  aria-label={isFullscreen ? t("Exit Fullscreen") : t("Fullscreen")}
                 >
-                  <RotateCw className="w-3 h-3" />
-                  <span>{streamEngine === "direct" ? t("Direct") : t("Proxy")}</span>
+                  {isFullscreen ? (
+                    <Minimize className="w-4 h-4 sm:w-5 sm:h-5 transition-transform group-hover:scale-110" />
+                  ) : (
+                    <Maximize className="w-4 h-4 sm:w-5 sm:h-5 transition-transform group-hover:scale-110" />
+                  )}
                 </button>
 
                 {/* Minimalist Close Button */}

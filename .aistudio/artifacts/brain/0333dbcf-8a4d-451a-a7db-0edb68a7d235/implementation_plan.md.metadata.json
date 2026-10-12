@@ -1,6 +1,6 @@
 {
-  "summary":  "Architectural plan for PlayerFU: optimizing bandwidth consumption to eliminate Vercel Fast Origin Transfer, maintaining player stability and fallback, and ensuring seamless coexistence with Native Player.",
-  "updatedAt":  "2026-10-12T10:45:20.744246298Z",
+  "summary":  "Implementation plan to remove custom title overlay in PlayerFU, expand mobile viewport space to show Play4U's native fullscreen button, and provide a fallback dedicated fullscreen control in the header.",
+  "updatedAt":  "2026-10-12T11:29:27.870784543Z",
   "requestFeedback":  true,
   "userFacing":  true
 }
