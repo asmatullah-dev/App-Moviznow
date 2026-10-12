@@ -199,12 +199,24 @@ export function parseMkvEbml(buf: Buffer): {
     return id;
   }
 
-  // Scan for Tracks element 0x1654AE6B
+  // Scan for Tracks element 0x1654AE6B that is followed by TrackEntry (0xae)
   let tracksPos = -1;
-  for (let i = 0; i < buf.length - 4; i++) {
+  for (let i = 0; i < buf.length - 8; i++) {
     if (buf[i] === 0x16 && buf[i + 1] === 0x54 && buf[i + 2] === 0xae && buf[i + 3] === 0x6b) {
-      tracksPos = i;
-      break;
+      let testOffset = i + 4;
+      const first = buf[testOffset];
+      let len = 1;
+      let mask = 0x80;
+      while (len <= 8 && !(first & mask)) {
+        len++;
+        mask >>= 1;
+      }
+      testOffset += len;
+      // If next element is TrackEntry (0xae), this is the real Tracks master element (not SeekID in SeekHead)!
+      if (testOffset < buf.length && buf[testOffset] === 0xae) {
+        tracksPos = i;
+        break;
+      }
     }
   }
 
@@ -251,8 +263,13 @@ export function parseMkvEbml(buf: Buffer): {
           // CodecID
           codecId = buf.toString("utf8", offset, subDataEnd).replace(/\0/g, "").trim();
         } else if (subId === 0x22b59c) {
-          // Language
-          lang = buf.toString("utf8", offset, subDataEnd).replace(/\0/g, "").trim();
+          // Language (ISO-639-2)
+          const l = buf.toString("utf8", offset, subDataEnd).replace(/\0/g, "").trim();
+          if (l && l.toLowerCase() !== "und" && !lang) lang = l;
+        } else if (subId === 0x22b59d) {
+          // LanguageBCP47 / LanguageIETF (e.g. "en", "hi")
+          const l = buf.toString("utf8", offset, subDataEnd).replace(/\0/g, "").trim();
+          if (l && l.toLowerCase() !== "und") lang = l;
         } else if (subId === 0x536e) {
           // Name / Title
           name = buf.toString("utf8", offset, subDataEnd).replace(/\0/g, "").trim();
@@ -273,7 +290,7 @@ export function parseMkvEbml(buf: Buffer): {
               const hLen = buf[vOffset] & 0x7f;
               vOffset++;
               let h = 0;
-              for (let k = 0; k < hLen && vOffset + k < subDataEnd; h++) h = h * 256 + buf[vOffset + k];
+              for (let k = 0; k < hLen && vOffset + k < subDataEnd; k++) h = h * 256 + buf[vOffset + k];
               if (h > 0) height = h;
               vOffset += hLen;
             } else {
@@ -293,7 +310,16 @@ export function parseMkvEbml(buf: Buffer): {
         }
       } else if (trackType === 2) {
         // Audio track
-        const langName = isoLangToName(lang);
+        let audioLang = lang;
+        if (!audioLang || audioLang.toLowerCase() === "und") {
+          const lowerName = name.toLowerCase();
+          if (lowerName.includes("hin")) audioLang = "hin";
+          else if (lowerName.includes("eng")) audioLang = "eng";
+          else if (lowerName.includes("tam")) audioLang = "tam";
+          else if (lowerName.includes("tel")) audioLang = "tel";
+          else audioLang = audioIdx === 0 ? "hin" : "und";
+        }
+        const langName = isoLangToName(audioLang);
         let audioCodec = "aac";
         if (codecId.includes("AC3") || codecId.includes("EAC3")) {
           audioCodec = "eac3";
@@ -313,7 +339,14 @@ export function parseMkvEbml(buf: Buffer): {
         audioIdx++;
       } else if (trackType === 17) {
         // Subtitle track
-        const langName = isoLangToName(lang);
+        let subLang = lang;
+        if (!subLang || subLang.toLowerCase() === "und") {
+          const lowerName = name.toLowerCase();
+          if (lowerName.includes("eng") || lowerName.includes("en")) subLang = "eng";
+          else if (lowerName.includes("hin") || lowerName.includes("hi")) subLang = "hin";
+          else subLang = "eng";
+        }
+        const langName = isoLangToName(subLang);
         const titleStr = name ? name : langName;
         subtitleTracks.push({
           id: subIdx,
