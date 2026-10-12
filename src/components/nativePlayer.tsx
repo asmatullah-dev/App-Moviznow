@@ -772,6 +772,8 @@ export function NativePlayer({
   const [isSwitchingQuality, setIsSwitchingQuality] = useState<boolean>(false);
   const [switchingQualityLabel, setSwitchingQualityLabel] = useState<string | null>(null);
   const pendingQualitySwitchPosRef = useRef<number | null>(null);
+  const isSwitchingQualityRef = useRef<boolean>(false);
+  const wasPlayingBeforeQualitySwitchRef = useRef<boolean>(true);
 
   // Parse direct stream URL (prioritizing Pixeldrain candidate first, FSL candidate if Pixeldrain missing, decoded meta, activeStreamUrl, or direct watchUrl)
   const fslCandidate = useMemo(() => findFslCandidate(activeCandidates), [activeCandidates]);
@@ -1159,6 +1161,8 @@ export function NativePlayer({
 
       // DO NOT pause the stream! The current stream continues playing smoothly with ZERO interruption!
       setIsSwitchingQuality(true);
+      isSwitchingQualityRef.current = true;
+      wasPlayingBeforeQualitySwitchRef.current = isPlaying || Boolean(videoRef.current && !videoRef.current.paused);
       setSwitchingQualityLabel(opt.label);
       showToast(`${t("Buffering")} ${opt.label}...`);
 
@@ -1223,6 +1227,7 @@ export function NativePlayer({
             // Extraction failed: fallback to previous quality with zero interruption
             console.warn(`[NativePlayer] Failed to extract link for ${opt.label}, keeping ${prevQualityLabel}`);
             showToast(`${t("Failed to load")} ${opt.label}, ${t("keeping")} ${prevQualityLabel}`);
+            isSwitchingQualityRef.current = false;
             setIsSwitchingQuality(false);
             setSwitchingQualityLabel(null);
             return;
@@ -1247,6 +1252,7 @@ export function NativePlayer({
         const normalizedStream = normalizePixeldrainUrl(candidateRawStream);
         if (!normalizedStream) {
           showToast(`${t("Unable to play")} ${opt.label}, ${t("keeping")} ${prevQualityLabel}`);
+          isSwitchingQualityRef.current = false;
           setIsSwitchingQuality(false);
           setSwitchingQualityLabel(null);
           return;
@@ -1360,6 +1366,7 @@ export function NativePlayer({
           // Buffering failed or timed out: safely keep previous quality without interrupting stream!
           console.warn(`[NativePlayer] New quality ${opt.label} could not buffer; safely keeping ${prevQualityLabel}`);
           showToast(`${t("Unable to buffer")} ${opt.label}, ${t("keeping")} ${prevQualityLabel}`);
+          isSwitchingQualityRef.current = false;
           setIsSwitchingQuality(false);
           setSwitchingQualityLabel(null);
           return;
@@ -1394,12 +1401,51 @@ export function NativePlayer({
         setHasPlaybackError(false);
         setStreamAttempt((p) => p + 1);
 
-        setIsSwitchingQuality(false);
-        setSwitchingQualityLabel(null);
+        // Seamlessly transfer the verified stream to the main video element!
+        if (videoRef.current) {
+          try {
+            videoRef.current.src = testStreamSrc;
+            if (newStreamMode !== "transcode" || curExactTime === 0) {
+              try {
+                videoRef.current.currentTime = curExactTime;
+              } catch {}
+            }
+            videoRef.current.load();
+            if (wasPlayingBeforeQualitySwitchRef.current) {
+              const playPromise = videoRef.current.play();
+              if (playPromise !== undefined) {
+                playPromise
+                  .then(() => {
+                    setIsPlaying(true);
+                    setIsBuffering(false);
+                    isSwitchingQualityRef.current = false;
+                    setIsSwitchingQuality(false);
+                    setSwitchingQualityLabel(null);
+                  })
+                  .catch(() => {});
+              }
+            } else {
+              isSwitchingQualityRef.current = false;
+              setIsSwitchingQuality(false);
+              setSwitchingQualityLabel(null);
+            }
+          } catch (e) {
+            console.warn("[Quality video switch error]:", e);
+            isSwitchingQualityRef.current = false;
+            setIsSwitchingQuality(false);
+            setSwitchingQualityLabel(null);
+          }
+        } else {
+          isSwitchingQualityRef.current = false;
+          setIsSwitchingQuality(false);
+          setSwitchingQualityLabel(null);
+        }
+
         showToast(`${t("Playing in")} ${opt.label}`);
       } catch (err) {
         console.warn("Quality switch error:", err);
         showToast(`${t("Error switching quality")}, ${t("keeping")} ${prevQualityLabel}`);
+        isSwitchingQualityRef.current = false;
         setIsSwitchingQuality(false);
         setSwitchingQualityLabel(null);
       }
@@ -1461,7 +1507,10 @@ export function NativePlayer({
       Boolean(mediaInfo?.isMkv) ||
       Boolean(mediaInfo?.needsTranscode) ||
       directStreamUrl.toLowerCase().includes(".mkv") ||
-      directStreamUrl.toLowerCase().includes("matroska");
+      directStreamUrl.toLowerCase().includes("matroska") ||
+      (activeWatchUrl && activeWatchUrl.toLowerCase().includes(".mkv")) ||
+      (activeWatchUrl && activeWatchUrl.toLowerCase().includes("matroska")) ||
+      (displayTitle && displayTitle.toLowerCase().includes(".mkv"));
 
     const requiresTranscode =
       (streamMode === "transcode" || isTargetMkv || selectedAudioTrack > 0) &&
@@ -1854,9 +1903,34 @@ export function NativePlayer({
       return;
     }
 
-    // If on Pixeldrain server and FSL candidate is available, switch to FSL if Pixeldrain truly failed before starting
-    if (activeServer === "pixeldrain" && fslCandidate && !hasStartedPlaybackRef.current) {
-      console.warn("[NativePlayer] Pixeldrain server error before playback. Falling back to FSL Server...");
+    // Do not switch servers during seamless quality switching!
+    if (isSwitchingQualityRef.current) {
+      console.warn("[NativePlayer] Suppressing server switch during active quality change.");
+      return;
+    }
+
+    // If on Pixeldrain server and direct stream failed on attempt 0, FIRST retry with native proxy/transcoder!
+    if (activeServer === "pixeldrain" && streamAttempt === 0) {
+      console.warn("[NativePlayer] Direct Pixeldrain stream encountered error; escalating to native proxy/transcode...");
+      const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
+      setStreamMode(needsTc ? "transcode" : "proxy");
+      setStreamAttempt(1);
+      setIsBuffering(true);
+      return;
+    }
+
+    // If proxy failed on Pixeldrain on attempt 1, try transcode engine if ffmpeg is available
+    if (activeServer === "pixeldrain" && streamAttempt === 1 && mediaInfo?.hasFFmpeg !== false) {
+      console.warn("[NativePlayer] Pixeldrain proxy failed; escalating to transcode engine...");
+      setStreamMode("transcode");
+      setStreamAttempt(2);
+      setIsBuffering(true);
+      return;
+    }
+
+    // ONLY if Pixeldrain has exhausted retries (attempt >= 2) and FSL candidate is available, fall back to FSL
+    if (activeServer === "pixeldrain" && fslCandidate && streamAttempt >= 2 && !hasStartedPlaybackRef.current) {
+      console.warn("[NativePlayer] Pixeldrain retries exhausted before playback. Falling back to FSL Server...");
       showToast(t("Pixeldrain error. Falling back to FSL..."));
       setActiveServer("fsl");
       const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
@@ -1875,14 +1949,6 @@ export function NativePlayer({
       const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
       setStreamMode(needsTc ? "transcode" : "proxy");
       setHasPlaybackError(false);
-      setStreamAttempt((prev) => prev + 1);
-      setIsBuffering(true);
-      return;
-    }
-
-    // If direct pixeldrain playback had an error, escalate to proxy mode before failing!
-    if (activeServer === "pixeldrain" && streamMode === "proxy") {
-      console.warn("[NativePlayer] Direct Pixeldrain stream failed; retrying with proxy...");
       setStreamAttempt((prev) => prev + 1);
       setIsBuffering(true);
       return;
@@ -2171,11 +2237,19 @@ export function NativePlayer({
     showToast(`Loading ${subLabel}...`);
 
     const apiBase = getStreamingApiBase();
-    fetch(
-      `${apiBase}/api/native-player/subtitles?url=${encodeURIComponent(
-        directStreamUrl
-      )}&sub=${subId}`
-    )
+    const epNum = episodeInfo?.number ?? (episodeInfo as any)?.episodeNumber;
+    const sNum = seasonInfo?.number ?? (seasonInfo as any)?.seasonNumber;
+    const cleanTitle = displayTitle || title || "";
+    const params = new URLSearchParams();
+    params.set("url", directStreamUrl);
+    params.set("sub", String(subId));
+    if (cleanTitle) params.set("title", cleanTitle);
+    if (imdbId) params.set("imdbId", imdbId);
+    if (sub?.language) params.set("lang", sub.language);
+    if (sNum !== undefined && sNum !== null) params.set("season", String(sNum));
+    if (epNum !== undefined && epNum !== null) params.set("episode", String(epNum));
+
+    fetch(`${apiBase}/api/native-player/subtitles?${params.toString()}`)
       .then((r) => r.json())
       .then((res) => {
         if (res.cues && Array.isArray(res.cues) && res.cues.length > 0) {
@@ -2189,12 +2263,12 @@ export function NativePlayer({
           setActiveSubtitleText(activeCue ? activeCue.text : "");
           showToast(`Subtitles: ${subLabel}`);
         } else {
-          showToast(`No embedded subtitles found`);
+          showToast(`No subtitles found`);
         }
       })
       .catch((err) => {
         console.warn("Subtitle fetch error:", err);
-        showToast("Embedded subtitles unavailable");
+        showToast("Subtitles unavailable");
       });
   };
 
@@ -2306,12 +2380,17 @@ export function NativePlayer({
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleLoadedMetadata}
                 onLoadedData={() => {
-                  if (!isSwitchingAudioRef.current) {
+                  if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
                     setIsBuffering(false);
                   }
                   setHasPlaybackError(false);
                 }}
                 onCanPlay={() => {
+                  if (isSwitchingQualityRef.current) {
+                    isSwitchingQualityRef.current = false;
+                    setIsSwitchingQuality(false);
+                    setSwitchingQualityLabel(null);
+                  }
                   if (!isSwitchingAudioRef.current) {
                     setIsBuffering(false);
                   }
@@ -2331,6 +2410,7 @@ export function NativePlayer({
                       videoRef.current.currentTime = savedTarget;
                     } catch {}
                   }
+                  pendingQualitySwitchPosRef.current = null;
                   if (audioSwitchResumePosRef.current > 0 && videoRef.current) {
                     if (streamMode !== "transcode") {
                       try {
@@ -2339,14 +2419,17 @@ export function NativePlayer({
                     }
                     audioSwitchResumePosRef.current = 0;
                   }
+                  if (wasPlayingBeforeQualitySwitchRef.current || isPlaying) {
+                    videoRef.current?.play().then(() => setIsPlaying(true)).catch(() => {});
+                  }
                 }}
                 onCanPlayThrough={() => {
-                  if (!isSwitchingAudioRef.current) {
+                  if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
                     setIsBuffering(false);
                   }
                 }}
                 onWaiting={() => {
-                  if (!isSwitchingAudioRef.current) {
+                  if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
                     // Only show buffering indicator if video is paused, seeking, or genuinely stalled
                     if (!videoRef.current || videoRef.current.paused || videoRef.current.currentTime === 0) {
                       setIsBuffering(true);
@@ -2355,17 +2438,17 @@ export function NativePlayer({
                 }}
                 onStalled={() => {
                   // Only mark buffering if video is paused or genuinely blocked at beginning (not playing)
-                  if (!isSwitchingAudioRef.current && videoRef.current && (videoRef.current.paused || videoRef.current.currentTime === 0)) {
+                  if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current && videoRef.current && (videoRef.current.paused || videoRef.current.currentTime === 0)) {
                     setIsBuffering(true);
                   }
                 }}
                 onLoadStart={() => {
-                  if (!isSwitchingAudioRef.current && (!videoRef.current || videoRef.current.currentTime === 0)) {
+                  if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current && (!videoRef.current || videoRef.current.currentTime === 0)) {
                     setIsBuffering(true);
                   }
                 }}
                 onSeeking={() => {
-                  if (!isSwitchingAudioRef.current && videoRef.current) {
+                  if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current && videoRef.current) {
                     const alreadyBuffered =
                       streamMode !== "transcode" &&
                       isTimeBuffered(videoRef.current, videoRef.current.currentTime);
@@ -2375,7 +2458,7 @@ export function NativePlayer({
                   }
                 }}
                 onSeeked={() => {
-                  if (!isSwitchingAudioRef.current) {
+                  if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
                     setIsBuffering(false);
                   }
                 }}
@@ -2384,10 +2467,17 @@ export function NativePlayer({
                   setIsPlaying(true);
                   setIsSwitchingAudio(false);
                   isSwitchingAudioRef.current = false;
+                  setIsSwitchingQuality(false);
+                  isSwitchingQualityRef.current = false;
+                  setSwitchingQualityLabel(null);
                   setHasPlaybackError(false);
                   hasStartedPlaybackRef.current = true;
                 }}
                 onPause={() => {
+                  // Ignore transient pause during quality or audio switch reloading
+                  if (isSwitchingQualityRef.current || isSwitchingAudioRef.current) {
+                    return;
+                  }
                   setIsPlaying(false);
                   if (videoRef.current) {
                     const pos = Math.floor(
@@ -2483,7 +2573,7 @@ export function NativePlayer({
             </AnimatePresence>
 
             {/* Buffering Indicator - Show each time stream is buffering / loading */}
-            {isBuffering && !isSwitchingAudio && engine === "native" && !hasPlaybackError && (
+            {isBuffering && !isSwitchingAudio && !isSwitchingQuality && engine === "native" && !hasPlaybackError && (
               <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center bg-black/40 backdrop-blur-xs z-20">
                 <Loader2 className="w-14 h-14 text-emerald-500 animate-spin mb-3" />
                 <span className="text-xs font-bold uppercase tracking-widest text-zinc-300">
@@ -2498,6 +2588,16 @@ export function NativePlayer({
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400 shrink-0" />
                 <span>
                   {t("Switching Audio Track...")}
+                </span>
+              </div>
+            )}
+
+            {/* Seamless Quality Switch Badge (no full-screen Loading Stream when switching quality) */}
+            {isSwitchingQuality && engine === "native" && (
+              <div className="absolute top-16 left-1/2 -translate-x-1/2 pointer-events-none flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-black/80 backdrop-blur-md border border-emerald-500/30 text-emerald-400 text-xs font-semibold shadow-xl z-20 animate-in fade-in duration-150">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400 shrink-0" />
+                <span>
+                  {t("Switching Quality to")} {switchingQualityLabel || currentQualityLabel}...
                 </span>
               </div>
             )}

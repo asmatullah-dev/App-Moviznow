@@ -1270,8 +1270,8 @@ export function parseWebVTT(vttText: string): Array<{ start: number; end: number
  */
 export async function fetchOnlineSubtitles(
   rawTitle: string,
-  lang = "eng",
   imdbIdParam?: string,
+  lang = "eng",
   seasonParam?: number,
   episodeParam?: number
 ): Promise<Array<{ start: number; end: number; text: string }>> {
@@ -1435,12 +1435,30 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
     }
 
     const hasFFmpeg = await checkFFmpegAvailable();
+    const queryTitle = (req.query.title as string || "").trim();
+    const queryImdbId = (req.query.imdbId as string || "").trim();
+    const queryLang = (req.query.lang as string || "eng").trim();
+    const querySeason = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
+    const queryEpisode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
+
+    // If FFmpeg is NOT available (e.g. Vercel serverless environment), extract via high-speed online subtitles API
     if (!hasFFmpeg) {
-      return res.json({ ok: false, cues: [], error: "FFmpeg not available for embedded subtitles" });
+      const onlineCues = await fetchOnlineSubtitles(
+        queryTitle || targetUrl,
+        queryImdbId,
+        queryLang,
+        querySeason,
+        queryEpisode
+      );
+      if (onlineCues.length > 0) {
+        subtitleCuesCache.set(cacheKey, { cues: onlineCues, timestamp: Date.now() });
+        return res.json({ ok: true, cues: onlineCues, source: "online" });
+      }
+      return res.json({ ok: false, cues: [], error: "No subtitles found for this video" });
     }
 
     const extractPromise = new Promise<{ ok: boolean; cues: Array<{ start: number; end: number; text: string }> }>(
-      (resolve) => {
+      async (resolve) => {
         let referer = "";
         if (targetUrl.includes("hbplay.pages.dev")) {
           referer = "https://hbplay.pages.dev/";
@@ -1453,16 +1471,28 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
         const ffmpegArgs: string[] = [
           "-headers",
           subHeaders,
-          "-analyzeduration", "3M",
-          "-probesize", "3M",
-          "-reconnect", "1",
-          "-reconnect_streamed", "1",
-          "-reconnect_delay_max", "3",
-          "-i", targetUrl,
-          "-vn", "-an",
-          "-map", `0:s:${subIdx}?`,
-          "-c:s", "webvtt",
-          "-f", "webvtt",
+          "-fflags",
+          "+fastseek+nobuffer",
+          "-analyzeduration",
+          "1M",
+          "-probesize",
+          "1M",
+          "-reconnect",
+          "1",
+          "-reconnect_streamed",
+          "1",
+          "-reconnect_delay_max",
+          "3",
+          "-i",
+          targetUrl,
+          "-vn",
+          "-an",
+          "-map",
+          `0:s:${subIdx}?`,
+          "-c:s",
+          "webvtt",
+          "-f",
+          "webvtt",
           "pipe:1",
         ];
 
@@ -1472,7 +1502,14 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
             stdio: ["ignore", "pipe", "ignore"],
           });
         } catch {
-          return resolve({ ok: false, cues: [] });
+          const fallback = await fetchOnlineSubtitles(
+            queryTitle || targetUrl,
+            queryImdbId,
+            queryLang,
+            querySeason,
+            queryEpisode
+          );
+          return resolve({ ok: fallback.length > 0, cues: fallback });
         }
 
         let vttText = "";
@@ -1482,7 +1519,7 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
           vttText += chunk.toString();
         });
 
-        const finish = () => {
+        const finish = async () => {
           if (settled) return;
           settled = true;
           try {
@@ -1494,15 +1531,44 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
             subtitleCuesCache.set(cacheKey, { cues, timestamp: Date.now() });
             resolve({ ok: true, cues });
           } else {
-            resolve({ ok: false, cues: [] });
+            // Seamlessly fall back to online subtitles if embedded demuxing yielded no cues
+            const fallback = await fetchOnlineSubtitles(
+              queryTitle || targetUrl,
+              queryImdbId,
+              queryLang,
+              querySeason,
+              queryEpisode
+            );
+            if (fallback.length > 0) {
+              subtitleCuesCache.set(cacheKey, { cues: fallback, timestamp: Date.now() });
+              resolve({ ok: true, cues: fallback });
+            } else {
+              resolve({ ok: false, cues: [] });
+            }
           }
         };
 
         child.on("close", finish);
         child.on("error", finish);
 
-        // Allow up to 35 seconds for full remote stream subtitle demuxing
-        setTimeout(finish, 35000);
+        // Check if sufficient cues have already arrived after 7 seconds to respond quickly
+        const earlyCheck = setInterval(() => {
+          if (settled) {
+            clearInterval(earlyCheck);
+            return;
+          }
+          const currentCues = parseWebVTT(vttText);
+          if (currentCues.length >= 25) {
+            clearInterval(earlyCheck);
+            finish();
+          }
+        }, 1500);
+
+        // Allow up to 10 seconds for initial demuxing before finishing
+        setTimeout(() => {
+          clearInterval(earlyCheck);
+          finish();
+        }, 10000);
       }
     );
 
