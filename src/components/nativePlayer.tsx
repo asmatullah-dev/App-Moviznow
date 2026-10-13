@@ -2992,35 +2992,43 @@ export function NativePlayer({
             {/* Custom High-Definition Subtitle Cue Overlay in Background Overlay Layer */}
             {selectedSubtitleTrack !== null && activeSubtitleText && (
               <div
-                className={`absolute pointer-events-none inset-x-0 flex items-center justify-center px-4 transition-all duration-300 z-20 ${
+                className={`absolute pointer-events-none inset-x-0 flex flex-col items-center justify-center px-4 transition-all duration-300 z-20 ${
                   isControlsVisible ? "bottom-24 sm:bottom-28" : "bottom-8 sm:bottom-12"
                 }`}
               >
-                <div
-                  className={`pointer-events-none font-semibold text-center rounded-xl px-4 py-2 max-w-[90%] sm:max-w-[80%] leading-relaxed select-none animate-in fade-in duration-150 transition-all ${
-                    subtitleBg === "transparent"
-                      ? "bg-transparent border-none text-white"
-                      : subtitleBg === "semi"
-                      ? "bg-black/60 backdrop-blur-xs border border-white/10 text-white shadow-xl"
-                      : "bg-black/90 border border-white/20 text-white shadow-2xl"
-                  }`}
-                  style={{
-                    pointerEvents: "none",
-                    fontSize:
-                      subtitleSize === "small"
-                        ? "14px"
-                        : subtitleSize === "large"
-                        ? "22px"
-                        : "17px",
-                    textShadow:
-                      subtitleBg === "transparent"
-                        ? "0 2px 4px rgba(0,0,0,1), 0 0 4px rgba(0,0,0,1), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000"
-                        : "0 2px 4px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,1)",
-                  }}
-                  dangerouslySetInnerHTML={{
-                    __html: activeSubtitleText.replace(/\n/g, "<br/>"),
-                  }}
-                />
+                <div className="pointer-events-none flex flex-col items-center gap-1 max-w-[92%] sm:max-w-[85%] text-center select-none">
+                  {activeSubtitleText
+                    .split("\n")
+                    .map((line) => line.trim())
+                    .filter(Boolean)
+                    .map((line, idx) => (
+                      <span
+                        key={idx}
+                        className={`pointer-events-none inline-block font-semibold text-center select-none tracking-normal leading-normal transition-all ${
+                          subtitleBg === "transparent"
+                            ? "bg-transparent text-white"
+                            : subtitleBg === "semi"
+                            ? "bg-black/60 text-white px-2 py-0.5 rounded-sm backdrop-blur-2xs"
+                            : "bg-black/85 text-white px-2 py-0.5 rounded-sm"
+                        }`}
+                        style={{
+                          pointerEvents: "none",
+                          fontSize:
+                            subtitleSize === "small"
+                              ? "13px"
+                              : subtitleSize === "large"
+                              ? "20px"
+                              : "16px",
+                          textShadow:
+                            subtitleBg === "transparent"
+                              ? "0 2px 4px rgba(0,0,0,1), 0 0 4px rgba(0,0,0,1), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000"
+                              : "0 1px 2px rgba(0,0,0,0.9)",
+                        }}
+                      >
+                        {line}
+                      </span>
+                    ))}
+                </div>
               </div>
             )}
 
