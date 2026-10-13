@@ -354,7 +354,7 @@ export function parseMkvEbml(buf: Buffer): {
           title: titleStr,
         });
         audioIdx++;
-      } else if (trackType === 17) {
+      } else if (trackType === 17 || trackType === 0x11 || trackType === 16) {
         // Subtitle track
         let subLang = lang;
         if (!subLang || subLang.toLowerCase() === "und") {
@@ -478,6 +478,9 @@ export function findFslCandidate(
     const h = (c.href || "").toLowerCase();
     return (
       t.includes("fsl") ||
+      h.includes("fsl") ||
+      t.includes("fastserver") ||
+      h.includes("fastserver") ||
       h.includes("cloudflarestorage") ||
       h.includes(".r2.")
     );
@@ -503,7 +506,10 @@ export function findPixeldrainCandidate(
       t.includes("pixel") ||
       h.includes("pixeldrain") ||
       h.includes("pixelserver") ||
-      t.includes("pdrain")
+      h.includes("pixel.drain") ||
+      h.includes("pixeldra.in") ||
+      t.includes("pdrain") ||
+      h.includes("pdrain")
     );
   });
   if (match && match.href) {
@@ -1649,6 +1655,13 @@ async function streamViaProxy(rawTargetUrl: string, req: express.Request, res: e
   try {
     let targetUrl = normalizePixeldrainUrl(rawTargetUrl) || rawTargetUrl;
 
+    if (process.env.VERCEL || process.env.NOW_REGION) {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Headers", "*");
+      res.setHeader("Access-Control-Expose-Headers", "Location");
+      return res.redirect(307, targetUrl);
+    }
+
     let referer = "";
     if (targetUrl.includes("hbplay.pages.dev")) {
       referer = "https://hbplay.pages.dev/";
@@ -1843,10 +1856,10 @@ nativePlayerRouter.all(
       // Check whether FFmpeg is available on the hosting environment (Vercel has no ffmpeg)
       const hasFFmpeg = await checkFFmpegAvailable();
 
-      // If FFmpeg is NOT available (e.g. Vercel serverless functions), avoid proxying video bytes.
-      // Redirect directly to origin via HTTP 307 (or 302) to eliminate Vercel compute/bandwidth usage!
-      if (!hasFFmpeg || mode === "redirect") {
-        if (req.query.proxy === "true") {
+      // If FFmpeg is NOT available (e.g. Vercel serverless functions) or stream is direct/pixeldrain/fsl,
+      // avoid proxying video bytes. Redirect directly to origin via HTTP 307 to eliminate Vercel Fast Origin & Fast Data Transfer!
+      if (!hasFFmpeg || mode === "redirect" || isPixeldrain || targetUrl.includes("fsl") || targetUrl.includes("cloudflarestorage")) {
+        if (req.query.proxy === "true" && hasFFmpeg && !isPixeldrain) {
           return streamViaProxy(targetUrl, req, res);
         }
         res.setHeader("Access-Control-Allow-Origin", "*");

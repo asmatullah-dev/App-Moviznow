@@ -1,0 +1,6 @@
+{
+  "summary": "Updated implementation plan with explicit Pixeldrain playback via /api/file/{id}:\n1. Direct stream playback for Pixeldrain strictly uses the direct endpoint `https://pixeldrain.com/api/file/{id}` (or `https://pixeldrain.dev/api/file/{id}`).\n2. FSL server streams directly from the FSL edge URL.\n3. Subtitles and audio tracks are bound to the active server (extracted directly from the /api/file/ stream for Pixeldrain, and FSL stream for FSL server).\n4. Download opens the extracted drive/file link in a new tab (/u/:id for Pixeldrain, FSL drive link for FSL server).\n5. Referrals and standard request headers preserved without forced no-referrer.\n6. Server selector in the player control bar is strictly icon-only with no text on the button.\n7. Guarantees zero Vercel Fast Origin and Fast Data Transfer.",
+  "updatedAt": "2026-10-13T03:37:51.950158725Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
