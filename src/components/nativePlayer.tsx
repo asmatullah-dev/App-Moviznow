@@ -943,19 +943,45 @@ export function NativePlayer({
   const [mediaInfo, setMediaInfo] = useState<MediaProbeInfo | null>(null);
 
   const isDirectMkv = useMemo(() => {
+    if (
+      decodedMeta.mime?.includes("matroska") ||
+      decodedMeta.title?.toLowerCase().includes(".mkv") ||
+      decodedMeta.title?.toLowerCase().includes("hevc")
+    ) {
+      return true;
+    }
+    if (title && (title.toLowerCase().includes(".mkv") || title.toLowerCase().includes("hevc"))) {
+      return true;
+    }
+    if (quality && quality.toLowerCase().includes("hevc")) {
+      return true;
+    }
+    if (Boolean(mediaInfo?.isMkv) || Boolean(mediaInfo?.needsTranscode)) {
+      return true;
+    }
     if (!directStreamUrl) return false;
     const lower = directStreamUrl.toLowerCase();
-    // Do not force Pixeldrain links to be treated as MKVs; Pixeldrain streams cleanly via direct CORS or standard MP4 proxy
     return (
       lower.includes(".mkv") ||
       lower.includes("matroska") ||
-      Boolean(mediaInfo?.isMkv) ||
-      Boolean(mediaInfo?.needsTranscode)
+      lower.includes("hevc") ||
+      lower.includes("h265")
     );
-  }, [directStreamUrl, mediaInfo]);
+  }, [directStreamUrl, decodedMeta, title, quality, mediaInfo]);
 
   const [streamAttempt, setStreamAttempt] = useState<number>(0);
-  const [streamMode, setStreamMode] = useState<"proxy" | "transcode">("proxy");
+  const [streamMode, setStreamMode] = useState<"proxy" | "transcode">(() => {
+    if (
+      decodedMeta.mime?.includes("matroska") ||
+      decodedMeta.title?.toLowerCase().includes(".mkv") ||
+      decodedMeta.title?.toLowerCase().includes("hevc") ||
+      (title && (title.toLowerCase().includes(".mkv") || title.toLowerCase().includes("hevc"))) ||
+      (quality && quality.toLowerCase().includes("hevc"))
+    ) {
+      return "transcode";
+    }
+    return "proxy";
+  });
 
   useEffect(() => {
     // If running on Vercel or environment where FFmpeg is not installed, always use proxy mode
@@ -1496,11 +1522,7 @@ export function NativePlayer({
   const currentStreamSrc = useMemo(() => {
     if (!directStreamUrl) return "";
 
-    // Direct playback in nativePlayer from origin CDN edge (0 Vercel Fast Origin / Data Transfer) on attempt 0
-    if (streamAttempt === 0 && directStreamUrl.startsWith("http")) {
-      return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
-    }
-
+    // If stream is in transcode mode (MKV/HEVC container or non-native codec), stream via optimized engine immediately
     if (streamMode === "transcode" && mediaInfo?.hasFFmpeg !== false) {
       const params = new URLSearchParams();
       params.set("url", directStreamUrl);
@@ -1508,6 +1530,11 @@ export function NativePlayer({
       if (seekOffset > 0) params.set("ss", String(seekOffset));
       if (selectedAudioTrack > 0) params.set("audio", String(selectedAudioTrack));
       return `${getStreamingApiBase()}/api/native-player/stream?${params.toString()}`;
+    }
+
+    // Direct playback in nativePlayer from origin CDN edge (0 Vercel Fast Origin / Data Transfer) on attempt 0
+    if (streamAttempt === 0 && directStreamUrl.startsWith("http")) {
+      return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
     }
 
     return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
@@ -1782,19 +1809,32 @@ export function NativePlayer({
       setActiveSubtitleText("");
     }
 
-    // Dynamically capture duration if video reports legitimate duration > 60s and totalDuration is unset
-    if (videoRef.current && videoRef.current.duration > 60 && isFinite(videoRef.current.duration) && totalDuration <= 60) {
-      setTotalDuration(Math.round(videoRef.current.duration));
+    const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current || videoRef.current;
+    // Authoritative media duration: probed media file duration > content runtime > video element (rejecting Chrome's 3600s synthetic 1-hour dummy)
+    if (mediaInfo?.duration && mediaInfo.duration > 60) {
+      if (totalDuration !== Math.round(mediaInfo.duration)) {
+        setTotalDuration(Math.round(mediaInfo.duration));
+      }
+    } else if (propDurationSeconds > 60 && totalDuration <= 60) {
+      setTotalDuration(propDurationSeconds);
+    } else if (activeVid && isFinite(activeVid.duration) && activeVid.duration > 60 && Math.round(activeVid.duration) !== 3600 && totalDuration <= 60) {
+      setTotalDuration(Math.round(activeVid.duration));
     }
 
     updateBufferMetrics();
   };
 
   const handleLoadedMetadata = () => {
-    if (!videoRef.current) return;
-    const vidDur = videoRef.current.duration;
-    // Piped / fragmented mp4 streams report duration = 1 (or 0.04 or Infinity). Never accept <= 60s as real media duration.
-    if (vidDur && isFinite(vidDur) && vidDur > 60) {
+    const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current || videoRef.current;
+    if (!activeVid) return;
+    const vidDur = activeVid.duration;
+
+    // Authoritative media duration: probed media container duration > content runtime > video element
+    if (mediaInfo?.duration && mediaInfo.duration > 60) {
+      setTotalDuration(Math.round(mediaInfo.duration));
+    } else if (propDurationSeconds > 60) {
+      setTotalDuration(propDurationSeconds);
+    } else if (vidDur && isFinite(vidDur) && vidDur > 60 && Math.round(vidDur) !== 3600) {
       if (!totalDuration || Math.abs(totalDuration - vidDur) > 30) {
         setTotalDuration(Math.round(vidDur));
       }
@@ -1809,12 +1849,12 @@ export function NativePlayer({
         : (latestPositionRef.current || currentPosition);
     if (savedTarget > 2 && (streamMode !== "transcode" || seekOffset === 0)) {
       try {
-        videoRef.current.currentTime = savedTarget;
+        activeVid.currentTime = savedTarget;
       } catch {}
     }
 
-    videoRef.current.playbackRate = playbackSpeed;
-    videoRef.current.play().then(() => {
+    activeVid.playbackRate = playbackSpeed;
+    activeVid.play().then(() => {
       setIsPlaying(true);
       hasStartedPlaybackRef.current = true;
     }).catch(() => {
@@ -3551,18 +3591,7 @@ export function NativePlayer({
                                 : "text-zinc-300 hover:bg-white/10 hover:text-white"
                             }`}
                           >
-                            <div className="flex items-center gap-2 truncate">
-                              <span className="font-bold">Pixeldrain Server</span>
-                              <span
-                                className={`text-[10px] uppercase font-mono px-1.5 py-0.5 rounded ${
-                                  activeServer === "pixeldrain"
-                                    ? "bg-emerald-500/30 text-emerald-300"
-                                    : "bg-white/10 text-zinc-400"
-                                }`}
-                              >
-                                Direct Stream
-                              </span>
-                            </div>
+                            <span className="font-bold truncate">Pixeldrain Server</span>
                             {activeServer === "pixeldrain" && (
                               <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />
                             )}
@@ -3578,18 +3607,7 @@ export function NativePlayer({
                                 : "text-zinc-300 hover:bg-white/10 hover:text-white"
                             }`}
                           >
-                            <div className="flex items-center gap-2 truncate">
-                              <span className="font-bold">FSL Server</span>
-                              <span
-                                className={`text-[10px] uppercase font-mono px-1.5 py-0.5 rounded ${
-                                  activeServer === "fsl"
-                                    ? "bg-emerald-500/30 text-emerald-300"
-                                    : "bg-white/10 text-zinc-400"
-                                }`}
-                              >
-                                Fast CDN
-                              </span>
-                            </div>
+                            <span className="font-bold truncate">FSL Server</span>
                             {activeServer === "fsl" && (
                               <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />
                             )}

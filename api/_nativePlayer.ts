@@ -174,6 +174,7 @@ export function parseMkvEbml(buf: Buffer): {
   videoCodec?: string;
   width?: number;
   height?: number;
+  duration?: number;
 } | null {
   if (!buf || buf.length < 16) return null;
 
@@ -213,6 +214,42 @@ export function parseMkvEbml(buf: Buffer): {
     }
     offset += len;
     return id;
+  }
+
+  // Parse Segment Info: TimecodeScale (0x2AD7B1) and Duration (0x4489)
+  let duration: number | undefined = undefined;
+  let timecodeScale = 1000000; // default 1ms (1,000,000 ns)
+
+  const scanLimit = Math.min(buf.length - 8, 49152);
+  for (let i = 0; i < scanLimit; i++) {
+    // Scan for TimecodeScale (0x2AD7B1)
+    if (buf[i] === 0x2a && buf[i + 1] === 0xd7 && buf[i + 2] === 0xb1 && i + 4 <= buf.length) {
+      const vLen = buf[i + 3];
+      if (vLen === 0x81 && i + 5 <= buf.length) {
+        timecodeScale = buf[i + 4] * 1000000;
+      } else if (vLen === 0x82 && i + 6 <= buf.length) {
+        timecodeScale = buf.readUInt16BE(i + 4);
+      } else if (vLen === 0x83 && i + 7 <= buf.length) {
+        timecodeScale = (buf[i + 4] << 16) | buf.readUInt16BE(i + 5);
+      } else if (vLen === 0x84 && i + 8 <= buf.length) {
+        timecodeScale = buf.readUInt32BE(i + 4);
+      }
+    }
+    // Scan for Duration (0x4489)
+    if (buf[i] === 0x44 && buf[i + 1] === 0x89 && i + 7 <= buf.length) {
+      const lenByte = buf[i + 2];
+      if (lenByte === 0x84 && i + 7 <= buf.length) {
+        const rawDur = buf.readFloatBE(i + 3);
+        if (rawDur > 0 && isFinite(rawDur)) {
+          duration = Math.round((rawDur * timecodeScale) / 1000000000);
+        }
+      } else if (lenByte === 0x88 && i + 11 <= buf.length) {
+        const rawDur = buf.readDoubleBE(i + 3);
+        if (rawDur > 0 && isFinite(rawDur)) {
+          duration = Math.round((rawDur * timecodeScale) / 1000000000);
+        }
+      }
+    }
   }
 
   // Scan for Tracks element 0x1654AE6B that is followed by TrackEntry (0xae)
@@ -377,7 +414,7 @@ export function parseMkvEbml(buf: Buffer): {
     }
   }
 
-  return { audioTracks, subtitleTracks, videoCodec, width, height };
+  return { audioTracks, subtitleTracks, videoCodec, width, height, duration };
 }
 
 export interface NativeStreamData {
@@ -1030,7 +1067,7 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
     // Only get subtitles from embedded media tracks in the file link (no fake online tracks)
 
     const compiledInfo: MediaProbeInfo = {
-      duration: 0,
+      duration: (ebmlParsed && ebmlParsed.duration) || 0,
       format: isMkv ? "matroska,webm" : "mp4",
       videoCodec: detectedVCodec,
       width: detectedWidth,
@@ -1930,27 +1967,34 @@ nativePlayerRouter.all(
         } else {
           ffmpegArgs.push(
             "-c:v", "libx264",
-            "-preset", "ultrafast",
+            "-preset", "veryfast",
             "-tune", "zerolatency",
+            "-profile:v", "high",
+            "-level", "4.1",
             "-threads", "0",
             "-g", "48",
             "-keyint_min", "24",
-            "-crf", "23",
+            "-crf", "20",
             "-pix_fmt", "yuv420p"
           );
         }
 
-        // Always encode audio to high-quality stereo AAC 192k for flawless browser playback
+        // Avoid negative timestamps and guarantee flawless audio & video sync
+        ffmpegArgs.push("-avoid_negative_ts", "make_zero");
+
+        // Always encode audio to crystal-clear stereo AAC 256k 48kHz with resample sync
         ffmpegArgs.push(
           "-c:a", "aac",
-          "-b:a", "192k",
-          "-ac", "2"
+          "-b:a", "256k",
+          "-ar", "48000",
+          "-ac", "2",
+          "-af", "aresample=async=1000"
         );
 
         ffmpegArgs.push(
           "-movflags", "frag_keyframe+empty_moov+default_base_moof",
-          "-frag_duration", "1000000",
-          "-max_muxing_queue_size", "1024",
+          "-frag_duration", "500000",
+          "-max_muxing_queue_size", "2048",
           "-flush_packets", "1",
           "-f", "mp4",
           "pipe:1"
