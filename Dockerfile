@@ -1,31 +1,36 @@
-# Production container for Google Cloud Run
+# Production container for Oracle Cloud, Cloud Run, VPS, or Docker
 FROM node:22-slim
 
-# Install ffmpeg and ffprobe for native media player probe and transcoding
+# Install ffmpeg, ffprobe, and curl for video streaming, transcoding, and health checks
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends ffmpeg curl python3 build-essential && \
     rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
 
 # Copy dependency specifications
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json* ./
 
-# Install all dependencies needed for build and runtime
-RUN npm ci
+# Install dependencies needed for build and runtime
+RUN npm install
 
-# Copy project files
+# Copy all project files
 COPY . .
 
 # Build the frontend assets
 RUN npm run build
 
-# Default environment variables for Cloud Run
+# Default environment variables
 ENV NODE_ENV=production
-ENV PORT=8080
+ENV PORT=3000
 
-EXPOSE 8080
+# Expose server port
+EXPOSE 3000
 
-# Start server using the full-stack entry point
+# Health check to ensure the streaming API is responsive
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD curl -f http://localhost:${PORT}/api/health || curl -f http://localhost:${PORT}/ || exit 1
+
+# Start the full-stack server
 CMD ["npm", "start"]

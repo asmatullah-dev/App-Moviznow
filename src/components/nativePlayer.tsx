@@ -1496,15 +1496,8 @@ export function NativePlayer({
   const currentStreamSrc = useMemo(() => {
     if (!directStreamUrl) return "";
 
-    // Direct playback in nativePlayer from origin CDN edge (0 Vercel Fast Origin / Data Transfer)
-    if (
-      directStreamUrl.startsWith("http") &&
-      (activeServer === "pixeldrain" ||
-        activeServer === "fsl" ||
-        directStreamUrl.toLowerCase().includes("pixeldrain") ||
-        directStreamUrl.toLowerCase().includes("fsl") ||
-        streamAttempt === 0)
-    ) {
+    // Direct playback in nativePlayer from origin CDN edge (0 Vercel Fast Origin / Data Transfer) on attempt 0
+    if (streamAttempt === 0 && directStreamUrl.startsWith("http")) {
       return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
     }
 
@@ -1518,7 +1511,7 @@ export function NativePlayer({
     }
 
     return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
-  }, [directStreamUrl, activeServer, streamMode, seekOffset, selectedAudioTrack, streamAttempt, mediaInfo]);
+  }, [directStreamUrl, streamMode, seekOffset, selectedAudioTrack, streamAttempt, mediaInfo]);
 
   // Synchronize stream source to active slot when not performing a background quality switch
   useEffect(() => {
@@ -1949,7 +1942,17 @@ export function NativePlayer({
       return;
     }
 
-    // 6. All viable server candidates and stream modes have been attempted without looping
+    // 6. If direct streams cannot be decoded natively on this browser and watchUrl is available, seamlessly use HubCloud Web Engine
+    if (watchUrl && engine === "native") {
+      console.warn("[NativePlayer] Direct stream could not be decoded natively on this device. Switching to HubCloud Web Engine...");
+      showToast(t("Playing via Web Player..."));
+      setEngine("web");
+      setIsBuffering(false);
+      setHasPlaybackError(false);
+      return;
+    }
+
+    // 7. All viable stream options exhausted. Showing playback notice.
     console.warn("[NativePlayer] All available stream servers exhausted. Showing playback notice.");
     setIsBuffering(false);
     setHasPlaybackError(true);
@@ -1995,6 +1998,10 @@ export function NativePlayer({
       setSelectedSubtitleTrack(null);
       setSubtitleCues([]);
       setActiveSubtitleText("");
+      setStreamAttempt(0);
+      setHasPlaybackError(false);
+      setIsBuffering(true);
+      setEngine("native");
 
       showToast(
         newServerKey === "pixeldrain"
@@ -2635,7 +2642,6 @@ export function NativePlayer({
                   poster={poster || undefined}
                   playsInline
                   preload="auto"
-                  crossOrigin="anonymous"
                   onClick={(e) => {
                     e.stopPropagation();
                     if (activeMenu) setActiveMenu(null);
@@ -2674,7 +2680,6 @@ export function NativePlayer({
                   poster={poster || undefined}
                   playsInline
                   preload="auto"
-                  crossOrigin="anonymous"
                   onClick={(e) => {
                     e.stopPropagation();
                     if (activeMenu) setActiveMenu(null);

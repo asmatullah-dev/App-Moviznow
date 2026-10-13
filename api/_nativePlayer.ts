@@ -1855,10 +1855,11 @@ nativePlayerRouter.all(
 
       // Check whether FFmpeg is available on the hosting environment (Vercel has no ffmpeg)
       const hasFFmpeg = await checkFFmpegAvailable();
+      const isVercel = Boolean(process.env.VERCEL || process.env.NOW_REGION || process.env.VERCEL_ENV);
 
-      // If FFmpeg is NOT available (e.g. Vercel serverless functions) or stream is direct/pixeldrain/fsl,
+      // On Vercel or when mode is explicitly redirect, or when FFmpeg is unavailable:
       // avoid proxying video bytes. Redirect directly to origin via HTTP 307 to eliminate Vercel Fast Origin & Fast Data Transfer!
-      if (!hasFFmpeg || mode === "redirect" || isPixeldrain || targetUrl.includes("fsl") || targetUrl.includes("cloudflarestorage")) {
+      if (isVercel || !hasFFmpeg || mode === "redirect") {
         if (req.query.proxy === "true" && hasFFmpeg && !isPixeldrain) {
           return streamViaProxy(targetUrl, req, res);
         }

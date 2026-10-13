@@ -1,0 +1,6 @@
+{
+  "summary": "Implementation plan to fix Pixeldrain and FSL server playback in nativePlayer without consuming Vercel Fast Origin and Fast Data Transfer, removing blocking crossOrigin attributes, supporting direct edge playback, and providing seamless fallback for MKV streams.",
+  "updatedAt": "2026-10-13T04:43:08.843007458Z",
+  "requestFeedback": true,
+  "userFacing": true
+}

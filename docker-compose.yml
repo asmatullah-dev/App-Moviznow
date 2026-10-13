@@ -1,0 +1,18 @@
+services:
+  moviznow-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: moviznow-streaming-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
