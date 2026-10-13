@@ -95,31 +95,35 @@ export function parseWebVTT(vttText: string): SubtitleCue[] {
     }
   }
 
+  // Guarantee chronological sort
+  cues.sort((a, b) => a.start - b.start);
   return cues;
 }
 
 /**
- * Ultra-fast binary search to find the active cue at current playback time.
- * Cues are sorted chronologically by start time.
+ * Reliable cue matcher that guarantees smooth subtitle transitions during running playback
+ * as well as seeks. Supports overlapping dialogues and out-of-order tracks.
  */
 export function findActiveCue(cues: SubtitleCue[], currentTime: number): SubtitleCue | null {
   if (!cues || cues.length === 0) return null;
-  let low = 0;
-  let high = cues.length - 1;
 
-  while (low <= high) {
-    const mid = (low + high) >> 1;
-    const cue = cues[mid];
-    if (currentTime < cue.start - 0.25) {
-      high = mid - 1;
-    } else if (currentTime > cue.end + 0.25) {
-      low = mid + 1;
-    } else {
-      return cue;
+  const matched: SubtitleCue[] = [];
+  for (let i = 0; i < cues.length; i++) {
+    const cue = cues[i];
+    if (currentTime >= cue.start - 0.25 && currentTime <= cue.end + 0.25) {
+      matched.push(cue);
+      if (matched.length >= 2) break;
     }
   }
 
-  return null;
+  if (matched.length === 0) return null;
+  if (matched.length === 1) return matched[0];
+
+  return {
+    start: matched[0].start,
+    end: Math.max(...matched.map((m) => m.end)),
+    text: matched.map((m) => m.text).filter(Boolean).join("\n"),
+  };
 }
 
 const LANGUAGE_LABELS: Record<string, string> = {
