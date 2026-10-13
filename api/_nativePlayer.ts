@@ -1512,7 +1512,109 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
       targetUrl.toLowerCase().includes(".r2.") ||
       targetUrl.toLowerCase().includes("fastserver");
 
-    // 1. Try online subtitles first if title or imdbId is present (0 server choking, 0 Vercel compute)
+    const hasFFmpeg = await checkFFmpegAvailable();
+
+    // 1. If FFmpeg is available and embedded track is requested (or non-negative sub index), extract embedded track directly from media container
+    if (hasFFmpeg) {
+      const extractPromise = new Promise<{ ok: boolean; cues: Array<{ start: number; end: number; text: string }> }>(
+        async (resolve) => {
+          let referer = "";
+          if (targetUrl.includes("hbplay.pages.dev")) {
+            referer = "https://hbplay.pages.dev/";
+          }
+
+          const subHeaders = referer
+            ? `Referer: ${referer}\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`
+            : `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`;
+
+          const ffmpegArgs: string[] = [
+            "-v",
+            "warning",
+            "-headers",
+            subHeaders,
+            "-analyzeduration",
+            "5M",
+            "-probesize",
+            "5M",
+            "-i",
+            targetUrl,
+            "-vn",
+            "-an",
+            "-map",
+            `0:s:${subIdx}?`,
+            "-c:s",
+            "webvtt",
+            "-f",
+            "webvtt",
+            "pipe:1",
+          ];
+
+          let child: any;
+          try {
+            child = spawn("ffmpeg", ffmpegArgs, {
+              stdio: ["ignore", "pipe", "ignore"],
+            });
+          } catch {
+            const rawTitle = ((req.query.title as string) || "").trim();
+            const lang = ((req.query.lang as string) || "eng").trim();
+            const imdbId = ((req.query.imdbId as string) || "").trim();
+            const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
+            const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
+            const fallbackCues = await fetchOnlineSubtitles(rawTitle, lang, imdbId, season, episode);
+            return resolve({ ok: fallbackCues.length > 0, cues: fallbackCues });
+          }
+
+          let vttText = "";
+          let settled = false;
+
+          child.stdout.on("data", (chunk: any) => {
+            vttText += chunk.toString();
+          });
+
+          const finish = async () => {
+            if (settled) return;
+            settled = true;
+            try {
+              child.kill("SIGKILL");
+            } catch {}
+
+            const cues = parseWebVTT(vttText);
+            if (cues.length > 0) {
+              subtitleCuesCache.set(cacheKey, { cues, timestamp: Date.now() });
+              resolve({ ok: true, cues });
+            } else {
+              // Fallback to online subtitles
+              const rawTitle = ((req.query.title as string) || "").trim();
+              const lang = ((req.query.lang as string) || "eng").trim();
+              const imdbId = ((req.query.imdbId as string) || "").trim();
+              const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
+              const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
+              const online = await fetchOnlineSubtitles(rawTitle, lang, imdbId, season, episode);
+              if (online.length > 0) {
+                subtitleCuesCache.set(cacheKey, { cues: online, timestamp: Date.now() });
+                resolve({ ok: true, cues: online });
+              } else {
+                resolve({ ok: false, cues: [] });
+              }
+            }
+          };
+
+          child.on("close", finish);
+          child.on("error", finish);
+
+          // Responsive 15-second timeout for remote stream subtitle demuxing
+          setTimeout(finish, 15000);
+        }
+      );
+
+      inFlightSubtitles.set(cacheKey, extractPromise);
+      const result = await extractPromise;
+      inFlightSubtitles.delete(cacheKey);
+
+      return res.json(result);
+    }
+
+    // 2. If FFmpeg is not available, fallback to online subtitles
     if (imdbId || rawTitle) {
       try {
         const onlineCues = await fetchOnlineSubtitles(rawTitle, lang, imdbId, season, episode);
@@ -1523,112 +1625,7 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
       } catch {}
     }
 
-    // 2. For FSL streams, NEVER spawn FFmpeg against targetUrl to prevent connection choking
-    if (isFslOrDirect) {
-      return res.json({ ok: false, cues: [], error: "Subtitles unavailable" });
-    }
-
-    const hasFFmpeg = await checkFFmpegAvailable();
-    if (!hasFFmpeg) {
-      return res.json({ ok: false, cues: [], error: "No subtitles found" });
-    }
-
-    const extractPromise = new Promise<{ ok: boolean; cues: Array<{ start: number; end: number; text: string }> }>(
-      async (resolve) => {
-        let referer = "";
-        if (targetUrl.includes("hbplay.pages.dev")) {
-          referer = "https://hbplay.pages.dev/";
-        }
-
-        const subHeaders = referer
-          ? `Referer: ${referer}\r\nUser-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`
-          : `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36\r\n`;
-
-        const ffmpegArgs: string[] = [
-          "-v",
-          "warning",
-          "-headers",
-          subHeaders,
-          "-analyzeduration",
-          "2M",
-          "-probesize",
-          "2M",
-          "-i",
-          targetUrl,
-          "-vn",
-          "-an",
-          "-map",
-          `0:s:${subIdx}?`,
-          "-c:s",
-          "webvtt",
-          "-f",
-          "webvtt",
-          "pipe:1",
-        ];
-
-        let child: any;
-        try {
-          child = spawn("ffmpeg", ffmpegArgs, {
-            stdio: ["ignore", "pipe", "ignore"],
-          });
-        } catch {
-          const rawTitle = ((req.query.title as string) || "").trim();
-          const lang = ((req.query.lang as string) || "eng").trim();
-          const imdbId = ((req.query.imdbId as string) || "").trim();
-          const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
-          const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
-          const fallbackCues = await fetchOnlineSubtitles(rawTitle, lang, imdbId, season, episode);
-          return resolve({ ok: fallbackCues.length > 0, cues: fallbackCues });
-        }
-
-        let vttText = "";
-        let settled = false;
-
-        child.stdout.on("data", (chunk: any) => {
-          vttText += chunk.toString();
-        });
-
-        const finish = async () => {
-          if (settled) return;
-          settled = true;
-          try {
-            child.kill("SIGKILL");
-          } catch {}
-
-          const cues = parseWebVTT(vttText);
-          if (cues.length > 0) {
-            subtitleCuesCache.set(cacheKey, { cues, timestamp: Date.now() });
-            resolve({ ok: true, cues });
-          } else {
-            // Fallback to online subtitles
-            const rawTitle = ((req.query.title as string) || "").trim();
-            const lang = ((req.query.lang as string) || "eng").trim();
-            const imdbId = ((req.query.imdbId as string) || "").trim();
-            const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
-            const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
-            const online = await fetchOnlineSubtitles(rawTitle, lang, imdbId, season, episode);
-            if (online.length > 0) {
-              subtitleCuesCache.set(cacheKey, { cues: online, timestamp: Date.now() });
-              resolve({ ok: true, cues: online });
-            } else {
-              resolve({ ok: false, cues: [] });
-            }
-          }
-        };
-
-        child.on("close", finish);
-        child.on("error", finish);
-
-        // Responsive 15-second timeout for remote stream subtitle demuxing
-        setTimeout(finish, 15000);
-      }
-    );
-
-    inFlightSubtitles.set(cacheKey, extractPromise);
-    const result = await extractPromise;
-    inFlightSubtitles.delete(cacheKey);
-
-    return res.json(result);
+    return res.json({ ok: false, cues: [], error: "No subtitles found" });
   } catch (err: any) {
     return res.status(500).json({ error: err.message, cues: [] });
   }
@@ -1918,9 +1915,10 @@ nativePlayerRouter.all(
       const hasFFmpeg = await checkFFmpegAvailable();
       const isVercel = Boolean(process.env.VERCEL || process.env.NOW_REGION || process.env.VERCEL_ENV);
 
-      // On Vercel or when mode is explicitly redirect, or when FFmpeg is unavailable:
-      // avoid proxying video bytes. Redirect directly to origin via HTTP 307 to eliminate Vercel Fast Origin & Fast Data Transfer!
-      if (isVercel || !hasFFmpeg || mode === "redirect") {
+      // When mode is explicitly redirect, or when FFmpeg is unavailable:
+      // redirect directly to origin via HTTP 307.
+      // BUT if FFmpeg is available and transcode/audio track switching is requested, execute FFmpeg remuxing!
+      if ((!hasFFmpeg) || mode === "redirect" || (isVercel && !hasFFmpeg)) {
         if (req.query.proxy === "true" && hasFFmpeg && !isPixeldrain) {
           return streamViaProxy(targetUrl, req, res);
         }
@@ -1982,12 +1980,22 @@ nativePlayerRouter.all(
 
         // Check cached probe info to see if video can be fast-copied (0 CPU, instant streaming!)
         const cachedProbe = infoCache.get(targetUrl)?.data;
+        const isHevc =
+          targetUrl.toLowerCase().includes("hevc") ||
+          targetUrl.toLowerCase().includes("h265") ||
+          cachedProbe?.videoCodec === "hevc" ||
+          cachedProbe?.videoCodec === "h265";
         const videoIsH264 = cachedProbe
           ? (cachedProbe.videoCodec?.includes("h264") || cachedProbe.videoCodec?.includes("avc"))
-          : !targetUrl.toLowerCase().includes("hevc") && !targetUrl.toLowerCase().includes("h265");
+          : !isHevc;
 
-        if (videoIsH264) {
+        const allowVideoCopy = req.query.vcopy === "1" || req.query.vcodec === "copy" || videoIsH264 || isHevc;
+
+        if (allowVideoCopy) {
           ffmpegArgs.push("-c:v", "copy");
+          if (isHevc) {
+            ffmpegArgs.push("-tag:v", "hvc1");
+          }
         } else {
           ffmpegArgs.push(
             "-c:v", "libx264",

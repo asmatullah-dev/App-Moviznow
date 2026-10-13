@@ -37,6 +37,8 @@ export function parseWebVTT(vttText: string): SubtitleCue[] {
   const cues: SubtitleCue[] = [];
   if (!vttText || typeof vttText !== "string") return cues;
 
+  const cleanText = vttText.replace(/^\uFEFF/, "");
+
   const parseTime = (str: string): number => {
     if (!str) return 0;
     const parts = str.trim().replace(",", ".").split(":");
@@ -48,7 +50,7 @@ export function parseWebVTT(vttText: string): SubtitleCue[] {
     return parseFloat(str) || 0;
   };
 
-  const lines = vttText.split(/\r?\n/);
+  const lines = cleanText.split(/\r?\n/);
   let i = 0;
 
   while (i < lines.length) {
@@ -98,26 +100,6 @@ export function parseWebVTT(vttText: string): SubtitleCue[] {
   // Guarantee chronological sort
   cues.sort((a, b) => a.start - b.start);
 
-  // Post-process cues to prevent overlapping dialogues in time and line stacking:
-  // When a new dialogue begins, previous cue ends cleanly beforehand, so the new line never
-  // appears before the previous one disappears!
-  for (let idx = 0; idx < cues.length - 1; idx++) {
-    const cur = cues[idx];
-    const next = cues[idx + 1];
-    if (cur.end > next.start) {
-      cur.end = Math.max(cur.start, next.start - 0.05);
-    }
-    // Clean rollup repetition: if next cue starts with cur cue's dialogue, remove duplicate line
-    if (next.text && cur.text) {
-      const curLines = cur.text.split("\n").map((l) => l.trim()).filter(Boolean);
-      const nextLines = next.text.split("\n").map((l) => l.trim()).filter(Boolean);
-      if (nextLines.length > 1 && curLines.length > 0 && nextLines[0] === curLines[curLines.length - 1]) {
-        nextLines.shift();
-        next.text = nextLines.join("\n");
-      }
-    }
-  }
-
   return cleanSubtitleCues(cues);
 }
 
@@ -125,9 +107,8 @@ export function parseWebVTT(vttText: string): SubtitleCue[] {
  * Sanitizes and cleans subtitle cues:
  * 1. Chronologically sorts by start time.
  * 2. Strips HTML tags and entities.
- * 3. Removes repeated previous lines (roll-up subtitle redundancy), so new lines never appear on top of previous lines.
- * 4. Ensures cues do not overlap in end-time so previous lines disappear cleanly before next line appears.
- * 5. Strips empty or invalid duration cues.
+ * 3. Removes repeated previous lines (roll-up subtitle redundancy).
+ * 4. Preserves true cue duration and natural dialogue synchronization.
  */
 export function cleanSubtitleCues(rawCues: SubtitleCue[]): SubtitleCue[] {
   if (!rawCues || !Array.isArray(rawCues) || rawCues.length === 0) return [];
@@ -174,15 +155,6 @@ export function cleanSubtitleCues(rawCues: SubtitleCue[]): SubtitleCue[] {
     }
 
     cur.text = lines.join("\n");
-
-    // Prevent time-overlap with next cue:
-    // Previous line MUST disappear cleanly before or right when the new line begins!
-    if (idx < cues.length - 1) {
-      const next = cues[idx + 1];
-      if (cur.end > next.start) {
-        cur.end = Math.max(cur.start, next.start - 0.05);
-      }
-    }
   }
 
   return cues.filter((c) => c.text.trim().length > 0 && c.end > c.start);
@@ -221,8 +193,8 @@ export function findActiveCue(cues: SubtitleCue[], currentTime: number): Subtitl
     return candidate;
   }
 
-  // 3. In case of slight adjacent overlap, check nearby preceding cues (up to 4 back)
-  for (let i = candidateIndex - 1; i >= Math.max(0, candidateIndex - 4); i--) {
+  // 3. In case candidate already ended but an earlier ongoing dialogue is still active
+  for (let i = candidateIndex - 1; i >= Math.max(0, candidateIndex - 8); i--) {
     const prevCue = cues[i];
     if (prevCue.start <= currentTime && currentTime <= prevCue.end) {
       return prevCue;

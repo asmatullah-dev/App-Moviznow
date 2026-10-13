@@ -1059,10 +1059,7 @@ export function NativePlayer({
     activeMenuRef.current = activeMenu;
   }, [activeMenu]);
 
-  const [subtitleDelay, setSubtitleDelay] = useState<number>(() => {
-    const d = safeStorage.getItem("moviznow_subtitle_delay");
-    return d ? parseFloat(d) || 0 : 0;
-  });
+  const [subtitleDelay, setSubtitleDelay] = useState<number>(0);
   const subtitleDelayRef = useRef<number>(0);
   useEffect(() => {
     subtitleDelayRef.current = subtitleDelay;
@@ -1213,6 +1210,8 @@ export function NativePlayer({
     activeSubtitleTextRef.current = "";
     setSelectedSubtitleTrack(null);
     selectedSubtitleTrackRef.current = null;
+    setSubtitleDelay(0);
+    subtitleDelayRef.current = 0;
     setDirectSubtitlesList([]);
     setSelectedAudioTrack(0);
 
@@ -1290,12 +1289,8 @@ export function NativePlayer({
         (opt.url === activeWatchUrl || opt.url === activeStreamUrl);
 
       if (isCurrentlyActive || isSwitchingQuality) {
-        setActiveMenu(null);
         return;
       }
-
-      // Close menu immediately so video view remains unobstructed
-      setActiveMenu(null);
 
       // Keep previous quality state for seamless fallback if new quality fails to play/buffer
       const prevQualityLabel = currentQualityLabel;
@@ -1556,13 +1551,14 @@ export function NativePlayer({
   const currentStreamSrc = useMemo(() => {
     if (!directStreamUrl) return "";
 
-    // If stream is in transcode mode (MKV/HEVC container or non-native codec), stream via optimized engine immediately
-    if (streamMode === "transcode" && mediaInfo?.hasFFmpeg !== false) {
+    // If stream is in transcode mode OR user selected an audio track, stream via remux engine immediately
+    if (streamMode === "transcode" || selectedAudioTrack !== 0) {
       const params = new URLSearchParams();
       params.set("url", directStreamUrl);
       params.set("mode", "transcode");
+      params.set("audio", String(selectedAudioTrack));
+      params.set("vcopy", "1");
       if (seekOffset > 0) params.set("ss", String(seekOffset));
-      if (selectedAudioTrack > 0) params.set("audio", String(selectedAudioTrack));
       return `${getStreamingApiBase()}/api/native-player/stream?${params.toString()}`;
     }
 
@@ -1586,22 +1582,23 @@ export function NativePlayer({
   }, [currentStreamSrc]);
 
   const controlsShownAtRef = useRef<number>(Date.now());
+  const isInteractingControlsRef = useRef<boolean>(false);
 
-  // Handle Controls Auto-Hide: NEVER hide if any menu or customization window is open
+  // Handle Controls Auto-Hide: NEVER hide if any menu or window is open, or during active user interaction
   const resetControlsTimeout = useCallback(() => {
     setIsControlsVisible(true);
     controlsShownAtRef.current = Date.now();
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
-    // Don't hide menu when any window like subtitles window is open or action is performing!
-    if (activeMenuRef.current !== null || activeMenu !== null) {
+    // Don't hide menu when any window or popup is open, or user is actively interacting with controls!
+    if (activeMenuRef.current !== null || activeMenu !== null || isInteractingControlsRef.current) {
       return;
     }
     if (isPlaying) {
       controlsTimeoutRef.current = setTimeout(() => {
-        if (activeMenuRef.current === null && activeMenu === null) {
+        if (activeMenuRef.current === null && activeMenu === null && !isInteractingControlsRef.current) {
           setIsControlsVisible(false);
         }
-      }, 4500);
+      }, 5000);
     }
   }, [isPlaying, activeMenu]);
 
@@ -1749,6 +1746,16 @@ export function NativePlayer({
         case "C":
           e.preventDefault();
           handleSubtitleSelect(selectedSubtitleTrack === null ? 0 : null);
+          break;
+        case "g":
+        case "G":
+          e.preventDefault();
+          handleSubtitleDelayChange(subtitleDelayRef.current - 0.25);
+          break;
+        case "h":
+        case "H":
+          e.preventDefault();
+          handleSubtitleDelayChange(subtitleDelayRef.current + 0.25);
           break;
         case "f":
         case "F":
@@ -2112,10 +2119,8 @@ export function NativePlayer({
   const handleServerSelect = useCallback(
     (newServerKey: "pixeldrain" | "fsl" | "default") => {
       if (newServerKey === activeServer) {
-        setActiveMenu(null);
         return;
       }
-      setActiveMenu(null);
 
       // 1. Capture current playback position to remember position across server switch
       const curVideo = videoRef.current;
@@ -2383,7 +2388,6 @@ export function NativePlayer({
       videoRef.current.playbackRate = speed;
     }
     setPreferredPlaybackSpeed(speed);
-    setActiveMenu(null);
     showToast(`Speed: ${speed}x`);
     resetControlsTimeout();
   };
@@ -2396,16 +2400,8 @@ export function NativePlayer({
       list.push(...directSubtitlesList);
     }
 
-    // 2. Add embedded subtitle tracks ONLY if not an FSL stream (since FSL edge playback cannot demux MKV subtitles)
-    const isFsl =
-      activeServer === "fsl" ||
-      Boolean(fslCandidate) ||
-      directStreamUrl.toLowerCase().includes("fsl") ||
-      directStreamUrl.toLowerCase().includes("fastserver") ||
-      directStreamUrl.toLowerCase().includes("cloudflarestorage") ||
-      directStreamUrl.toLowerCase().includes(".r2.");
-
-    if (!isFsl && mediaInfo?.subtitleTracks && Array.isArray(mediaInfo.subtitleTracks) && mediaInfo.subtitleTracks.length > 0) {
+    // 2. Add embedded subtitle tracks from media container
+    if (mediaInfo?.subtitleTracks && Array.isArray(mediaInfo.subtitleTracks) && mediaInfo.subtitleTracks.length > 0) {
       mediaInfo.subtitleTracks.forEach((s) => {
         if (s && typeof s.id === "number") {
           const sLang = (s.language || "und").toLowerCase();
@@ -2441,63 +2437,49 @@ export function NativePlayer({
   }, [computedSubtitleTracks.length, selectedSubtitleTrack]);
 
   const handleAudioSelect = (trackId: number) => {
-    const track = mediaInfo?.audioTracks.find((a) => a.id === trackId);
-    if (trackId === selectedAudioTrack) {
-      setActiveMenu(null);
+    const track = mediaInfo?.audioTracks?.find((a) => a.id === trackId);
+    if (trackId === selectedAudioTrack && streamMode === "transcode") {
       return;
     }
 
     setSelectedAudioTrack(trackId);
-    setActiveMenu(null);
     showToast(`Audio: ${formatAudioLanguageLabel(track?.language) || "Track " + (trackId + 1)}`);
 
-    // 1. Direct browser audio track switching via HTMLMediaElement.audioTracks
-    if (videoRef.current) {
-      const el = videoRef.current as any;
-      if (el.audioTracks && el.audioTracks.length > 0) {
+    const activeVid = (activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current) || videoRef.current;
+    if (activeVid) {
+      const el = activeVid as any;
+      if (el.audioTracks && el.audioTracks.length > 1) {
         for (let i = 0; i < el.audioTracks.length; i++) {
           el.audioTracks[i].enabled = (i === trackId);
         }
-        return;
       }
     }
 
-    // 2. Direct streams (Pixeldrain / FSL / Direct MP4): Keep video streaming directly without forcing transcode
-    const isDirectServer =
-      activeServer === "pixeldrain" ||
-      directStreamUrl.toLowerCase().includes("pixeldrain") ||
-      activeServer === "fsl";
+    // Stream engine audio track remuxing
+    setIsSwitchingAudio(true);
+    isSwitchingAudioRef.current = true;
+    setTimeout(() => {
+      setIsSwitchingAudio(false);
+      isSwitchingAudioRef.current = false;
+    }, 2500);
 
-    if (isDirectServer || mediaInfo?.hasFFmpeg === false) {
-      return;
-    }
+    const targetPos = activeVid
+      ? Math.floor(
+          (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) +
+            (activeVid.currentTime || 0)
+        )
+      : Math.floor(currentPosition);
 
-    // 3. Fallback server-side audio track switch for streams where backend FFmpeg is available
-    if (streamMode === "transcode") {
-      setIsSwitchingAudio(true);
-      isSwitchingAudioRef.current = true;
-      setTimeout(() => {
-        setIsSwitchingAudio(false);
-        isSwitchingAudioRef.current = false;
-      }, 4000);
+    audioSwitchResumePosRef.current = targetPos;
+    pendingQualitySwitchPosRef.current = targetPos;
+    latestPositionRef.current = targetPos;
+    setCurrentPosition(targetPos);
+    savePlaybackPosition(targetPos);
 
-      const targetPos = videoRef.current
-        ? Math.floor(
-            (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) +
-              (videoRef.current.currentTime || 0)
-          )
-        : Math.floor(currentPosition);
-
-      audioSwitchResumePosRef.current = targetPos;
-      pendingQualitySwitchPosRef.current = targetPos;
-      latestPositionRef.current = targetPos;
-      setCurrentPosition(targetPos);
-      savePlaybackPosition(targetPos);
-
-      setStreamMode("transcode");
-      setSeekOffset(targetPos);
-      setStreamAttempt((p) => p + 1);
-    }
+    setStreamMode("transcode");
+    setSeekOffset(targetPos);
+    setStreamAttempt((p) => p + 1);
+    resetControlsTimeout();
   };
 
   const handleSubtitleSelect = async (subId: string | number | null, options?: { silent?: boolean }) => {
@@ -2618,21 +2600,7 @@ export function NativePlayer({
       }
     }
 
-    // 3. For FSL Server: NEVER call backend FFmpeg demuxer which chokes FSL edge playback!
-    const isFslStream =
-      activeServer === "fsl" ||
-      Boolean(fslCandidate) ||
-      directStreamUrl.toLowerCase().includes("fsl") ||
-      directStreamUrl.toLowerCase().includes("fastserver") ||
-      directStreamUrl.toLowerCase().includes("cloudflarestorage") ||
-      directStreamUrl.toLowerCase().includes(".r2.");
-
-    if (isFslStream) {
-      handleFailedCues();
-      return;
-    }
-
-    // 4. Server-side fallback for embedded MKV subtitle tracks
+    // 3. Server-side extraction for embedded MKV subtitle tracks
     const apiBase = getStreamingApiBase();
     const epNum = episodeInfo?.number ?? (episodeInfo as any)?.episodeNumber;
     const sNum = seasonInfo?.number ?? (seasonInfo as any)?.seasonNumber;
@@ -3450,13 +3418,37 @@ export function NativePlayer({
                         max={1}
                         step={0.05}
                         value={isMuted ? 0 : volume}
-                        onClick={(e) => e.stopPropagation()}
-                        onTouchEnd={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          resetControlsTimeout();
+                        }}
+                        onPointerDown={(e) => {
+                          e.stopPropagation();
+                          isInteractingControlsRef.current = true;
+                          resetControlsTimeout();
+                        }}
+                        onPointerUp={(e) => {
+                          e.stopPropagation();
+                          isInteractingControlsRef.current = false;
+                          resetControlsTimeout();
+                        }}
+                        onTouchStart={(e) => {
+                          e.stopPropagation();
+                          isInteractingControlsRef.current = true;
+                          resetControlsTimeout();
+                        }}
+                        onTouchEnd={(e) => {
+                          e.stopPropagation();
+                          isInteractingControlsRef.current = false;
+                          resetControlsTimeout();
+                        }}
                         onChange={(e) => {
+                          e.stopPropagation();
                           const val = parseFloat(e.target.value);
                           setVolume(val);
                           setIsMuted(false);
                           safeStorage.setItem("moviznow_volume", String(val));
+                          resetControlsTimeout();
                         }}
                         className="w-12 sm:w-20 h-1 accent-emerald-500 bg-zinc-700/80 rounded-lg cursor-pointer"
                         title="Volume"
