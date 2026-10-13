@@ -828,6 +828,8 @@ export function NativePlayer({
   const pendingQualitySwitchPosRef = useRef<number | null>(null);
   const isSwitchingQualityRef = useRef<boolean>(false);
   const wasPlayingBeforeQualitySwitchRef = useRef<boolean>(true);
+  const isSeekingRef = useRef<boolean>(false);
+  const seekSafetyTimerRef = useRef<any>(null);
 
   // Parse direct stream URL (prioritizing Pixeldrain candidate first, FSL candidate if Pixeldrain missing, decoded meta, activeStreamUrl, or direct watchUrl)
   const fslCandidate = useMemo(() => findFslCandidate(activeCandidates), [activeCandidates]);
@@ -837,42 +839,43 @@ export function NativePlayer({
   // Track server candidates that have failed during this session to eliminate bouncing loops
   const triedServersRef = useRef<Set<string>>(new Set());
 
-  // Active server: default to "pixeldrain" if pixeldrainCandidate exists, otherwise "fsl" if fslCandidate exists, else "default"
+  // Active server: default to "fsl" (first priority, fast CDN edge playback) then "pixeldrain", else "default"
   const [activeServer, setActiveServer] = useState<"fsl" | "pixeldrain" | "default">(() => {
-    if (pixeldrainCandidate) return "pixeldrain";
     if (fslCandidate) return "fsl";
+    if (pixeldrainCandidate) return "pixeldrain";
     return "default";
   });
 
-  // Keep activeServer in sync when modal opens or candidates change (Pixeldrain first, fallback to FSL)
+  // Keep activeServer in sync when modal opens or candidates change (FSL first priority, fallback to Pixeldrain)
   useEffect(() => {
     if (isOpen) {
       triedServersRef.current.clear();
-      if (pixeldrainCandidate) {
-        setActiveServer("pixeldrain");
-      } else if (fslCandidate) {
+      if (fslCandidate) {
         setActiveServer("fsl");
+      } else if (pixeldrainCandidate) {
+        setActiveServer("pixeldrain");
       } else {
         setActiveServer("default");
       }
     }
-  }, [isOpen, pixeldrainCandidate, fslCandidate]);
+  }, [isOpen, fslCandidate, pixeldrainCandidate]);
 
   const rawStreamUrl = useMemo(() => {
-    if (activeServer === "pixeldrain" && pixeldrainCandidate) {
-      return pixeldrainCandidate.streamUrl || pixeldrainCandidate.href;
-    }
     if (activeServer === "fsl" && fslCandidate) {
       return fslCandidate.href;
     }
+    if (activeServer === "pixeldrain" && pixeldrainCandidate) {
+      return pixeldrainCandidate.streamUrl || pixeldrainCandidate.href;
+    }
     return (
-      pixeldrainCandidate?.streamUrl ||
       fslCandidate?.href ||
+      pixeldrainCandidate?.streamUrl ||
+      pixeldrainCandidate?.href ||
       activeStreamUrl ||
       decodedMeta.streamUrl ||
       (activeWatchUrl && !activeWatchUrl.includes("hbplay.pages.dev") ? activeWatchUrl : "")
     );
-  }, [activeServer, pixeldrainCandidate, fslCandidate, activeStreamUrl, decodedMeta, activeWatchUrl]);
+  }, [activeServer, fslCandidate, pixeldrainCandidate, activeStreamUrl, decodedMeta, activeWatchUrl]);
 
   const directStreamUrl = normalizePixeldrainUrl(rawStreamUrl);
 
@@ -1762,14 +1765,26 @@ export function NativePlayer({
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
 
+    const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current || videoRef.current;
+    if (!activeVid) return;
+
+    // While user is seeking, do not let temporary video element latency snap position back
+    if (isSeekingRef.current) {
+      if (Math.abs(activeVid.currentTime - currentPosition) < 1.5) {
+        isSeekingRef.current = false;
+        setIsBuffering(false);
+      } else {
+        return;
+      }
+    }
+
     // Guard against temporary 0s during quality transition
     if (pendingQualitySwitchPosRef.current !== null) {
       const targetPos = pendingQualitySwitchPosRef.current;
-      const vTime = videoRef.current.currentTime;
+      const vTime = activeVid.currentTime;
       if (streamMode === "transcode" && seekOffset > 0) {
         pendingQualitySwitchPosRef.current = null;
       } else if (vTime < 1 && targetPos > 2) {
-        // Video element just reset to 0 before seeking; do not overwrite currentPosition or storage!
         return;
       } else if (vTime >= 1) {
         pendingQualitySwitchPosRef.current = null;
@@ -1778,12 +1793,12 @@ export function NativePlayer({
 
     const current =
       streamMode === "transcode" && seekOffset > 0
-        ? seekOffset + videoRef.current.currentTime
-        : videoRef.current.currentTime;
+        ? seekOffset + activeVid.currentTime
+        : activeVid.currentTime;
     setCurrentPosition(current);
     latestPositionRef.current = Math.floor(current);
 
-    if (current > 0 || (videoRef.current && videoRef.current.currentTime > 0)) {
+    if (current > 0 || activeVid.currentTime > 0) {
       hasStartedPlaybackRef.current = true;
     }
 
@@ -1793,9 +1808,9 @@ export function NativePlayer({
       savePlaybackPosition(current);
     }
 
-    // If time is actively advancing, stream is playing and NOT buffering!
-    if (!videoRef.current.paused) {
-      if (isBuffering && !isSwitchingAudioRef.current) setIsBuffering(false);
+    // If stream is playing and not paused, NEVER keep buffering spinner on!
+    if (!activeVid.paused) {
+      setIsBuffering(false);
       if (!isPlaying) setIsPlaying(true);
     }
 
@@ -1809,7 +1824,6 @@ export function NativePlayer({
       setActiveSubtitleText("");
     }
 
-    const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current || videoRef.current;
     // Authoritative media duration: probed media file duration > content runtime > video element (rejecting Chrome's 3600s synthetic 1-hour dummy)
     if (mediaInfo?.duration && mediaInfo.duration > 60) {
       if (totalDuration !== Math.round(mediaInfo.duration)) {
@@ -1947,11 +1961,11 @@ export function NativePlayer({
     // Mark current server as failed so we NEVER bounce back to it in this session
     triedServersRef.current.add(activeServer);
 
-    // 3. Fallback from Pixeldrain to FSL Server (if FSL hasn't been tried yet)
-    if (activeServer === "pixeldrain" && fslCandidate && !triedServersRef.current.has("fsl") && !hasStartedPlaybackRef.current) {
-      console.warn("[NativePlayer] Pixeldrain server exhausted. Falling back to FSL Server...");
-      showToast(t("Pixeldrain stream error. Falling back to FSL..."));
-      setActiveServer("fsl");
+    // 1. Fallback from FSL to Pixeldrain (if Pixeldrain hasn't been tried yet)
+    if (activeServer === "fsl" && pixeldrainCandidate && !triedServersRef.current.has("pixeldrain") && !hasStartedPlaybackRef.current) {
+      console.warn("[NativePlayer] FSL server error encountered before playback. Switching to Pixeldrain Server...");
+      showToast(t("FSL stream error. Switching to Pixeldrain..."));
+      setActiveServer("pixeldrain");
       const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
       setStreamMode(needsTc ? "transcode" : "proxy");
       setHasPlaybackError(false);
@@ -1960,11 +1974,21 @@ export function NativePlayer({
       return;
     }
 
-    // 4. Fallback from FSL to Pixeldrain (if Pixeldrain hasn't been tried yet)
-    if (activeServer === "fsl" && pixeldrainCandidate && !triedServersRef.current.has("pixeldrain") && !hasStartedPlaybackRef.current) {
-      console.warn("[NativePlayer] FSL server error encountered before playback. Switching to Pixeldrain Server...");
-      showToast(t("FSL server error. Switching to Pixeldrain..."));
-      setActiveServer("pixeldrain");
+    // 2. If Pixeldrain fails (e.g. on Vercel where raw MKV cannot play direct) and watchUrl is available, seamlessly use HubCloud Web Engine
+    if (activeServer === "pixeldrain" && watchUrl) {
+      console.warn("[NativePlayer] Pixeldrain stream cannot be decoded directly on Vercel. Switching to HubCloud Web Player...");
+      showToast(t("Playing via Web Player..."));
+      setEngine("web");
+      setIsBuffering(false);
+      setHasPlaybackError(false);
+      return;
+    }
+
+    // 3. Fallback from Pixeldrain to FSL Server (if FSL hasn't been tried yet)
+    if (activeServer === "pixeldrain" && fslCandidate && !triedServersRef.current.has("fsl") && !hasStartedPlaybackRef.current) {
+      console.warn("[NativePlayer] Pixeldrain server exhausted. Falling back to FSL Server...");
+      showToast(t("Pixeldrain stream error. Falling back to FSL..."));
+      setActiveServer("fsl");
       const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
       setStreamMode(needsTc ? "transcode" : "proxy");
       setHasPlaybackError(false);
@@ -2113,14 +2137,30 @@ export function NativePlayer({
 
   // Perform seek
   const executeSeek = (targetSeconds: number) => {
-    const duration = totalDuration || 100;
+    const duration =
+      totalDuration > 60
+        ? totalDuration
+        : mediaInfo?.duration && mediaInfo.duration > 60
+        ? Math.round(mediaInfo.duration)
+        : propDurationSeconds > 60
+        ? propDurationSeconds
+        : 100;
     const clampedTarget = Math.max(0, Math.min(duration, targetSeconds));
+
+    const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current || videoRef.current;
 
     // Do NOT show loading stream spinner if target seek is ALREADY buffered!
     const alreadyBuffered =
       streamMode !== "transcode" &&
-      videoRef.current &&
-      isTimeBuffered(videoRef.current, clampedTarget);
+      activeVid &&
+      isTimeBuffered(activeVid, clampedTarget);
+
+    isSeekingRef.current = true;
+    if (seekSafetyTimerRef.current) clearTimeout(seekSafetyTimerRef.current);
+    seekSafetyTimerRef.current = setTimeout(() => {
+      isSeekingRef.current = false;
+      setIsBuffering(false);
+    }, 1200);
 
     if (!alreadyBuffered) {
       setIsBuffering(true);
@@ -2139,14 +2179,14 @@ export function NativePlayer({
 
     if (streamMode === "transcode" && mediaInfo?.hasFFmpeg !== false) {
       setSeekOffset(clampedTarget);
-      if (videoRef.current) {
-        videoRef.current.currentTime = 0;
+      if (activeVid) {
+        activeVid.currentTime = 0;
       }
     } else {
       setSeekOffset(0);
-      if (videoRef.current) {
+      if (activeVid) {
         try {
-          videoRef.current.currentTime = clampedTarget;
+          activeVid.currentTime = clampedTarget;
         } catch {
           setSeekOffset(clampedTarget);
         }
@@ -2568,6 +2608,7 @@ export function NativePlayer({
   }, [streamMode]);
 
   const handleActiveSeeked = useCallback(() => {
+    isSeekingRef.current = false;
     if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
       setIsBuffering(false);
     }
@@ -3581,22 +3622,6 @@ export function NativePlayer({
                     {/* Server Menu Content */}
                     {activeMenu === "server" && (
                       <>
-                        {pixeldrainCandidate && (
-                          <button
-                            type="button"
-                            onClick={() => handleServerSelect("pixeldrain")}
-                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between gap-3 cursor-pointer ${
-                              activeServer === "pixeldrain"
-                                ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
-                                : "text-zinc-300 hover:bg-white/10 hover:text-white"
-                            }`}
-                          >
-                            <span className="font-bold truncate">Pixeldrain Server</span>
-                            {activeServer === "pixeldrain" && (
-                              <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />
-                            )}
-                          </button>
-                        )}
                         {fslCandidate && (
                           <button
                             type="button"
@@ -3609,6 +3634,22 @@ export function NativePlayer({
                           >
                             <span className="font-bold truncate">FSL Server</span>
                             {activeServer === "fsl" && (
+                              <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />
+                            )}
+                          </button>
+                        )}
+                        {pixeldrainCandidate && (
+                          <button
+                            type="button"
+                            onClick={() => handleServerSelect("pixeldrain")}
+                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between gap-3 cursor-pointer ${
+                              activeServer === "pixeldrain"
+                                ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
+                                : "text-zinc-300 hover:bg-white/10 hover:text-white"
+                            }`}
+                          >
+                            <span className="font-bold truncate">Pixeldrain Server</span>
+                            {activeServer === "pixeldrain" && (
                               <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />
                             )}
                           </button>

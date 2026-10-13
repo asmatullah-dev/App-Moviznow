@@ -996,11 +996,11 @@ nativePlayerRouter.all(["/api/native-player/info", "/native-player/info"], async
       try {
         const headerRes = await fetch(targetUrl, {
           headers: {
-            Range: "bytes=0-524287",
+            Range: "bytes=0-65535",
             "User-Agent":
               "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           },
-          signal: AbortSignal.timeout(2500),
+          signal: AbortSignal.timeout(5000),
         }).catch(() => null);
 
         if (headerRes && (headerRes.ok || headerRes.status === 206)) {
