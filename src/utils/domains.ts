@@ -149,6 +149,8 @@ export function getStreamingApiBase(): string {
       if (stored && (stored.includes('api.moviznow.com') || stored.includes('api-moviznow'))) {
         safeStorage.removeItem('custom_stream_api_url');
         localStorage.removeItem('custom_stream_api_url');
+      } else if (stored && typeof stored === 'string' && stored.trim().startsWith('http')) {
+        return stored.trim().replace(/\/+$/, '');
       }
     } catch {}
   }

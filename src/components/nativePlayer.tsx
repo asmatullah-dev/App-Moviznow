@@ -55,6 +55,10 @@ import {
   formatSubtitleLanguageLabel,
   DirectSubtitleTrack,
 } from "../utils/subtitleParser";
+import {
+  switchAudioTrackNatively,
+  ClientAudioSyncEngine,
+} from "../utils/clientAudioDemuxer";
 
 export interface NativeStreamData {
   hasWatchOnline?: boolean;
@@ -1031,6 +1035,25 @@ export function NativePlayer({
     selectedSubtitleTrackRef.current = selectedSubtitleTrack;
   }, [selectedSubtitleTrack]);
 
+  const clientAudioSyncRef = useRef<ClientAudioSyncEngine | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) {
+      if (clientAudioSyncRef.current) {
+        clientAudioSyncRef.current.destroy();
+        clientAudioSyncRef.current = null;
+      }
+      return;
+    }
+    if (!clientAudioSyncRef.current) {
+      clientAudioSyncRef.current = new ClientAudioSyncEngine();
+    }
+    const activeVid = (activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current) || videoRef.current;
+    if (activeVid && directStreamUrl) {
+      clientAudioSyncRef.current.attach(activeVid, directStreamUrl);
+    }
+  }, [isOpen, activeSlot, directStreamUrl]);
+
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
@@ -1551,22 +1574,18 @@ export function NativePlayer({
   const currentStreamSrc = useMemo(() => {
     if (!directStreamUrl) return "";
 
-    // If stream is in transcode mode OR user selected an audio track, stream via remux engine immediately
-    if (streamMode === "transcode" || selectedAudioTrack !== 0) {
+    // If stream is explicitly in transcode mode AND backend FFmpeg is available, stream via remux engine
+    if (streamMode === "transcode" && mediaInfo?.hasFFmpeg !== false && getStreamingApiBase()) {
       const params = new URLSearchParams();
       params.set("url", directStreamUrl);
       params.set("mode", "transcode");
-      params.set("audio", String(selectedAudioTrack));
+      if (selectedAudioTrack > 0) params.set("audio", String(selectedAudioTrack));
       params.set("vcopy", "1");
       if (seekOffset > 0) params.set("ss", String(seekOffset));
       return `${getStreamingApiBase()}/api/native-player/stream?${params.toString()}`;
     }
 
-    // Direct playback in nativePlayer from origin CDN edge (0 Vercel Fast Origin / Data Transfer) on attempt 0
-    if (streamAttempt === 0 && directStreamUrl.startsWith("http")) {
-      return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
-    }
-
+    // Direct playback in nativePlayer from origin CDN edge (0 Vercel Fast Origin / Data Transfer)
     return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
   }, [directStreamUrl, streamMode, seekOffset, selectedAudioTrack, streamAttempt, mediaInfo]);
 
@@ -2438,7 +2457,7 @@ export function NativePlayer({
 
   const handleAudioSelect = (trackId: number) => {
     const track = mediaInfo?.audioTracks?.find((a) => a.id === trackId);
-    if (trackId === selectedAudioTrack && streamMode === "transcode") {
+    if (trackId === selectedAudioTrack) {
       return;
     }
 
@@ -2446,39 +2465,50 @@ export function NativePlayer({
     showToast(`Audio: ${formatAudioLanguageLabel(track?.language) || "Track " + (trackId + 1)}`);
 
     const activeVid = (activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current) || videoRef.current;
+    
+    // 1. Direct browser audio track switching via HTMLMediaElement.audioTracks (MX Player / VLC style)
+    let switchedNatively = false;
     if (activeVid) {
-      const el = activeVid as any;
-      if (el.audioTracks && el.audioTracks.length > 1) {
-        for (let i = 0; i < el.audioTracks.length; i++) {
-          el.audioTracks[i].enabled = (i === trackId);
-        }
-      }
+      switchedNatively = switchAudioTrackNatively(activeVid, trackId);
     }
 
-    // Stream engine audio track remuxing
-    setIsSwitchingAudio(true);
-    isSwitchingAudioRef.current = true;
-    setTimeout(() => {
-      setIsSwitchingAudio(false);
-      isSwitchingAudioRef.current = false;
-    }, 2500);
+    // 2. Client-side audio sync engine for browsers where audioTracks is not exposed
+    if (clientAudioSyncRef.current) {
+      clientAudioSyncRef.current.selectTrack(trackId, mediaInfo?.audioTracks);
+    }
 
-    const targetPos = activeVid
-      ? Math.floor(
-          (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) +
-            (activeVid.currentTime || 0)
-        )
-      : Math.floor(currentPosition);
+    // Direct edge playback on Vercel / CDN: Seamless in-place switch without reloading video element!
+    if (switchedNatively || !mediaInfo?.hasFFmpeg || !getStreamingApiBase()) {
+      resetControlsTimeout();
+      return;
+    }
 
-    audioSwitchResumePosRef.current = targetPos;
-    pendingQualitySwitchPosRef.current = targetPos;
-    latestPositionRef.current = targetPos;
-    setCurrentPosition(targetPos);
-    savePlaybackPosition(targetPos);
+    // 3. Fallback only if backend FFmpeg is available and transcode mode was explicitly active
+    if (streamMode === "transcode" && Boolean(mediaInfo?.hasFFmpeg)) {
+      setIsSwitchingAudio(true);
+      isSwitchingAudioRef.current = true;
+      setTimeout(() => {
+        setIsSwitchingAudio(false);
+        isSwitchingAudioRef.current = false;
+      }, 2500);
 
-    setStreamMode("transcode");
-    setSeekOffset(targetPos);
-    setStreamAttempt((p) => p + 1);
+      const targetPos = activeVid
+        ? Math.floor(
+            (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) +
+              (activeVid.currentTime || 0)
+          )
+        : Math.floor(currentPosition);
+
+      audioSwitchResumePosRef.current = targetPos;
+      pendingQualitySwitchPosRef.current = targetPos;
+      latestPositionRef.current = targetPos;
+      setCurrentPosition(targetPos);
+      savePlaybackPosition(targetPos);
+
+      setStreamMode("transcode");
+      setSeekOffset(targetPos);
+      setStreamAttempt((p) => p + 1);
+    }
     resetControlsTimeout();
   };
 

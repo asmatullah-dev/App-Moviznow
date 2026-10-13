@@ -1,54 +1,91 @@
-# Fix NativePlayer Playback for Pixeldrain & FSL Server Streams
+# Client-Side Multi-Audio Track Switching on Vercel
 
-Restore direct, buffer-free playback for extracted HubCloud links (Pixeldrain and FSL Server) inside `nativePlayer` while strictly preserving zero Vercel Fast Data Transfer and Fast Origin Transfer.
+Implement seamless, client-side audio language track switching in `NativePlayer` that works directly in the browser on Vercel without relying on backend FFmpeg or consuming any Vercel Fast Origin / Fast Data Transfer bandwidth.
 
----
+## User Review & Critical Decisions
 
-## 1. Problem Diagnosis & Root Causes
+> [!IMPORTANT]
+> The user confirmed the following requirements:
+> 1. **Client-side multi-audio isolation in the browser**: Audio switching must occur entirely client-side on Vercel, bypassing server-side transcoding proxies and keeping Vercel Fast Data Transfer at strictly zero.
+> 2. **Seamless transition (MX Player / VLC style)**: Switching languages must keep the current playback second and transition audio instantaneously without reloading the video container or showing a buffering stall.
 
-Through live testing of `https://hubcloud.ist/drive/dqqii2ppchdd2vv`:
-1. **CORS Rejection on FSL Server (Cloudflare R2)**:
-   - In `src/components/nativePlayer.tsx`, `<video crossOrigin="anonymous">` was added.
-   - FSL Server streams from Cloudflare R2 (`b4d5...r2.cloudflarestorage.com`), which does **not** send `Access-Control-Allow-Origin`.
-   - The browser's media player immediately rejected the stream with a CORS failure before fetching video frames.
-2. **Matroska (MKV) & HEVC Container Incompatibility in HTML5 `<video>`**:
-   - The extracted link is `Maremma (2026) ... 480p.mkv` (HEVC video in Matroska container).
-   - Standard browser `<video src="...">` cannot decode raw `.mkv` files natively on desktop Chrome/Firefox without remuxing.
-3. **Overly Aggressive 307 Redirect in API**:
-   - `api/_nativePlayer.ts` was redirecting all FSL/Pixeldrain requests with HTTP 307 right back to the raw MKV URL even when a remux or transcode was required, creating an unplayable loop.
-4. **Download & Direct Link Retention**:
-   - Downloads should still open the official server drive/link in a new tab (Pixeldrain `/u/:id` and FSL direct drive link).
+- **Confirmed Decision 1 (Client-Side Track Management)**: Utilize `HTMLMediaElement.audioTracks` where supported (Safari, modern Chromium mobile/desktop, Edge), and provide client-side Web Audio / direct stream track demuxing for browsers where `video.audioTracks` is unavailable.
+- **Confirmed Decision 2 (Zero Vercel Transfer)**: Video and audio packets are streamed directly from edge CDNs (Cloudflare R2 / FSL / Pixeldrain) directly to the browser. Vercel serverless functions are not used for media byte proxying.
+- **Confirmed Decision 3 (Instant In-Place Sync)**: No video reloading or canvas unmounting when switching audio. Playback time is preserved to the exact frame, synchronizing audio dialogue smoothly just like MX Player and VLC.
 
 ---
 
-## 2. Proposed Architecture & Solution
+## 1. Overview & Core Concept
 
-### A. Remove Blocking `crossOrigin="anonymous"` from Video Elements
-- HTML5 `<video src="...">` can play media cross-origin without CORS credentials if `crossOrigin` attribute is omitted.
-- Stripping `crossOrigin="anonymous"` allows Cloudflare R2 FSL links to load and stream directly without CORS blocks.
-
-### B. Client-First Direct Edge Playback (0 Vercel Bandwidth)
-- **Direct Edge Strategy**:
-  - Pixeldrain streams directly via `https://pixeldrain.com/api/file/{id}`.
-  - FSL Server streams directly via the presigned edge URL without passing bytes through Vercel.
-  - No video packets route through Vercel serverless functions (guaranteeing 0 Fast Data Transfer and 0 Fast Origin Transfer).
-
-### C. Graceful Fallback for MKV/HEVC Containers
-- If a client device cannot decode the direct MKV stream (or on unsupported desktop browsers):
-  - In environments where backend FFmpeg is available (e.g. Docker, Cloud Run, local node server), stream through fast container remux (`-c:v copy -c:a aac`) at 0 CPU overhead.
-  - In Vercel environments (where FFmpeg is unavailable and serverless egress costs apply), seamlessly toggle to the HubCloud Web Engine (`engine === "web"` with `watchUrl` from `hbplay.pages.dev`) inside `nativePlayer` so playback never fails and 0 Vercel bandwidth is consumed.
-
-### D. Server Selector & Track Synchronization
-- The icon-only Server switcher button (`<Server className="w-3.5 h-3.5" />`) seamlessly toggles between **Pixeldrain Server** and **FSL Server**.
-- Switching servers retains current playback time (`currentTime`), refreshes embedded audio and subtitle tracks, and updates the download link.
+- **What It Does**: Enables users to switch audio languages (e.g. Hindi, Telugu, Tamil, English) on multi-audio movies and episodes on Vercel. Selecting a new language switches the audio feed in real time at the exact current position without restarting or blinking the video.
+- **Target Audience**: MovizNow viewers streaming dual-audio or multi-audio content across desktop and mobile browsers.
+- **Key Value**: Fluid, instantaneous audio track switching on Vercel with 0 server proxy latency and 0 Vercel transfer cost.
 
 ---
 
-## 3. Verification & Testing Steps
+## 2. User Experience & Visual Design
 
-1. Test extraction of `https://hubcloud.ist/drive/dqqii2ppchdd2vv` in `nativePlayer`.
-2. Verify Pixeldrain stream plays directly from `pixeldrain.com/api/file/9z8KpkwP`.
-3. Verify FSL Server plays without CORS errors.
-4. Verify server switching between Pixeldrain and FSL preserves playback timestamp.
-5. Verify download button opens Pixeldrain `/u/9z8KpkwP` or FSL drive link in a new tab.
-6. Verify app builds cleanly via `compile_applet`.
+- **Audio Track Selection**:
+  - The Audio menu dynamically lists all detected languages (e.g., `Hindi [Default]`, `Telugu`, `Tamil`, `English`) parsed from the media container's EBML tracks.
+  - Clicking a language shows an immediate subtle toast (e.g., `Audio: Telugu`) with an active emerald checkmark.
+- **Seamless MX Player / VLC Experience**:
+  - The video does NOT flicker, reload, or jump back to 0.
+  - Playback continues uninterrupted at the exact current timestamp.
+  - Lip sync and subtitle synchronization remain locked to the running playback position.
+
+---
+
+## 3. Key Product Decisions & Trade-Offs
+
+- **Decision 1: Native AudioTrack API with Web Audio Client Demuxer Fallback**
+  - *Chosen Approach*: First attempt `video.audioTracks` (supported natively by Safari, iOS WebKit, Edge, and modern Chromium). If the browser environment does not expose multiple audio tracks on direct `<video src>`, activate the client-side audio player feed using lightweight range-chunked audio synchronization.
+  - *Why*: Direct in-browser switching avoids any server dependency, avoids Vercel compute timeouts, and operates with zero data transfer cost.
+- **Decision 2: Elimination of Forced Server Transcoding on Vercel**
+  - *Chosen Approach*: On Vercel (or when `streamMode !== "transcode"`), never route audio track switches through `/api/native-player/stream?mode=transcode` where FFmpeg is absent.
+  - *Why*: Prevents HTTP 307 redirects that revert back to the default track, eliminating the bug where the UI shows the new language but the audio remains unchanged.
+- **Decision 3: Precise Time & Subtitle Continuity**
+  - *Chosen Approach*: Preserve `currentPosition` and `activeVid.currentTime` continuously during the switch, updating `selectedAudioTrack` and audio element state without mutating video element slot or reload state.
+  - *Why*: Matches MX Player and VLC mobile UX where audio switches mid-sentence without stuttering.
+
+---
+
+## 4. Technical Architecture & Data Strategy
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        NativePlayer (Client)                          │
+├────────────────────────────────────────────────────────────────────────┤
+│                                                                        │
+│  ┌───────────────────────┐              ┌───────────────────────────┐  │
+│  │ Direct Video Stream   │              │ Multi-Audio Track Manager │  │
+│  │ (Cloudflare R2 / FSL) │              │ - HTMLMediaElement.audio- │  │
+│  │ Direct Edge CDN URL   │              │   Tracks (Native Engine)  │  │
+│  └───────────┬───────────┘              │ - Client Web Audio Engine │  │
+│              │                          └─────────────┬─────────────┘  │
+│              ▼                                        │                │
+│  ┌───────────────────────┐                            │                │
+│  │ HTML5 <video> Element │ ◄──────────────────────────┘                │
+│  │ - Zero flicker/reload │   (Track enable/disable & in-place sync)    │
+│  │ - Continuous position │                                             │
+│  └───────────┬───────────┘                                             │
+│              │                                                         │
+│              ▼                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ Controls Bar & Audio Menu                                        │  │
+│  │ - Instant track indicator & toast feedback                       │  │
+│  │ - Zero Vercel Fast Origin / Data Transfer                        │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### Component & File Workflows
+
+1. `src/components/nativePlayer.tsx`:
+   - In `handleAudioSelect`:
+     - Inspect `video.audioTracks`: if the browser exposes `audioTracks` on the video element, iterate through tracks and set `enabled = (idx === trackId)` for instant client-side switching.
+     - For browsers without native `audioTracks` exposed on `<video>`, manage an auxiliary client-side audio element synchronized to `activeVid.currentTime` playing the target audio stream directly from edge range requests, muting the video's default track.
+     - Never force `setStreamMode("transcode")` or reload `/api/native-player/stream` when running on Vercel or when direct edge streaming is active.
+     - Maintain continuous playback without invoking `setIsBuffering(true)` or unmounting the video slot.
+2. `api/_nativePlayer.ts`:
+   - Ensure media info probing accurately extracts all audio track IDs, language codes, and track names from EBML / container headers, providing the client with complete track metadata for Hindi, Telugu, Tamil, etc.
+   - For environments with backend FFmpeg (AI Studio / Docker), preserve server remuxing capability as a secondary option while prioritizing zero-transfer direct edge playback.
