@@ -128,7 +128,7 @@ export default function Trial() {
         role: 'trial',
         status: 'active',
         trialActivated: true,
-        expiryDate: `${dateStr}T23:59:59.999Z`
+        expiryDate: `${dateStr}T23:59:59.999+05:00`
       }, undefined, true);
 
       // Force a full refresh to be absolutely sure

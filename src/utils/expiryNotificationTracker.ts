@@ -108,16 +108,18 @@ export function getDaysSinceExpiry(expiryDate?: string | null): number | null {
 
   if (isNaN(year) || isNaN(month) || isNaN(day)) return null;
 
-  const localBoundary = new Date(year, month, day + 1, 0, 0, 0, 0);
-  const utcBoundary = new Date(Date.UTC(year, month, day + 1, 0, 0, 0, 0));
-  const effectiveBoundary = localBoundary > utcBoundary ? localBoundary : utcBoundary;
+  const isMidnightBoundary = expiryDate.includes('T00:00:00') && !expiryDate.includes('23:59');
+  const boundaryDay = isMidnightBoundary ? day - 1 : day;
+
+  // Pakistan Time (PKT) UTC+5 expiry boundary: midnight at the end of the day (11:59:59 PM PKT = 19:00 UTC)
+  const pktExpiryBoundary = new Date(Date.UTC(year, month, boundaryDay, 19, 0, 0, 0));
 
   const now = new Date();
-  if (now < effectiveBoundary) {
+  if (now < pktExpiryBoundary) {
     return -1; // Not yet expired
   }
 
-  const msDiff = now.getTime() - effectiveBoundary.getTime();
+  const msDiff = now.getTime() - pktExpiryBoundary.getTime();
   return msDiff / (24 * 60 * 60 * 1000);
 }
 

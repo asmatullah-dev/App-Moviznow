@@ -206,7 +206,7 @@ export default function OrdersManagement() {
         const targetRole = order.planRole || (order.planName?.toLowerCase().includes('basic') ? 'basic' : 'vip');
         updates.role = targetRole;
         updates.status = 'active';
-        updates.expiryDate = `${dateStr}T23:59:59.999Z`;
+        updates.expiryDate = `${dateStr}T23:59:59.999+05:00`;
       } else if (order.type === 'content' && order.items) {
         const contentIds = order.items.map(item => 
           item.type === 'season' ? `${item.contentId}:${item.seasonId}` : item.contentId

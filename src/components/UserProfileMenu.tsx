@@ -299,9 +299,12 @@ export const UserProfileMenu = React.memo(({ onOpenLogoutModal }: { onOpenLogout
                         if (parts.length === 3 && parts[0].length === 4) {
                           const year = parseInt(parts[0], 10);
                           const month = parseInt(parts[1], 10) - 1;
-                          const day = parseInt(parts[2], 10);
+                          let day = parseInt(parts[2], 10);
+                          if (profile.expiryDate.includes('T00:00:00') && !profile.expiryDate.includes('23:59')) {
+                            day -= 1;
+                          }
                           if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
-                            return format(new Date(year, month, day), 'MMM dd, yyyy');
+                            return format(new Date(year, month, day, 12, 0, 0), 'MMM dd, yyyy');
                           }
                         }
                         return format(new Date(profile.expiryDate), 'MMM dd, yyyy');

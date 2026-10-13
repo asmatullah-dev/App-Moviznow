@@ -6,7 +6,24 @@ import { getDb, getEmailConfig, sendEmailMessage, isValidGmailAddress } from "./
 // Helper to format date nicely
 function formatDateDisplay(dateStr?: string): string {
   if (!dateStr) return "Today";
+  if (dateStr === "Lifetime") return "Lifetime Access";
   try {
+    const cleanDate = dateStr.trim().split("T")[0];
+    const parts = cleanDate.split(/[-/.]/);
+    if (parts.length === 3 && parts[0].length === 4) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      let day = parseInt(parts[2], 10);
+      if (dateStr.includes("T00:00:00") && !dateStr.includes("23:59")) {
+        day -= 1;
+      }
+      const d = new Date(year, month, day, 12, 0, 0);
+      return d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return dateStr;
     return d.toLocaleDateString("en-US", {
@@ -676,11 +693,11 @@ async function processUserDocs(
         const expiryMonth = parseInt(parts[1], 10) - 1;
         const expiryDay = parseInt(parts[2], 10);
 
-        // Expiry boundary is midnight starting the day AFTER the expiry date (expiryDay + 1).
-        // E.g., for "2026-08-20", boundary is 2026-08-21 00:00:00.
-        // The user remains ACTIVE for the ENTIRE duration of August 20th.
-        const expiryBoundary = new Date(Date.UTC(expiryYear, expiryMonth, expiryDay + 1, 0, 0, 0, 0));
-        if (now >= expiryBoundary || todayStr > expiryDateStr) {
+        // Pakistan Time (PKT) is UTC+5.
+        // Expiry boundary is midnight at the end of expiryDay in PKT (11:59:59 PM PKT / 12:00:00 AM PKT).
+        // 10 October 00:00:00 PKT in UTC is 9 October 19:00:00 UTC (00:00 minus 5 hours).
+        const expiryBoundary = new Date(Date.UTC(expiryYear, expiryMonth, expiryDay, 19, 0, 0, 0));
+        if (now >= expiryBoundary) {
           isExpired = true;
         }
         daysSinceExpiry = (now.getTime() - expiryBoundary.getTime()) / (24 * 60 * 60 * 1000);
@@ -984,6 +1001,8 @@ async function saveInAppMembershipUpdateNotification(
 
 export interface MembershipUpdateParams {
   userId: string;
+  userEmail?: string;
+  userDisplayName?: string;
   newExpiryDate: string;
   previousExpiryDate?: string;
   role?: string;
@@ -1004,13 +1023,10 @@ export async function sendMembershipUpdateNotification(params: MembershipUpdateP
 
   try {
     const userDoc = await firestore.collection("users").doc(userId).get();
-    if (!userDoc.exists) {
-      return { success: false, error: `User ${userId} not found` };
-    }
+    const data = userDoc.exists ? (userDoc.data() || {}) : {};
 
-    const data = userDoc.data() || {};
-    const email = (data.email || "").trim();
-    const displayName = data.displayName || email.split("@")[0] || "Member";
+    const email = (params.userEmail || data.email || "").trim();
+    const displayName = params.userDisplayName || data.displayName || email.split("@")[0] || "Member";
     const userRole = role || data.role || "user";
     const userStatus = status || data.status || "active";
 
@@ -1077,9 +1093,45 @@ export async function sendMembershipUpdateNotification(params: MembershipUpdateP
           topic: `user_${userId}`,
         };
 
-        await admin.messaging().send(message);
-        fcmSent = true;
-        console.log(`[Membership Update] FCM push sent to topic user_${userId}`);
+        try {
+          await admin.messaging().send(message);
+          fcmSent = true;
+          console.log(`[Membership Update] FCM push sent to topic user_${userId}`);
+        } catch (topicErr: any) {
+          console.warn(`[Membership Update] Topic send notice for user_${userId}:`, topicErr.message);
+        }
+
+        // Direct device tokens check
+        try {
+          const regSnap = await firestore.collection("fcm_tokens").get();
+          const directTokens: string[] = [];
+          for (const regDoc of regSnap.docs) {
+            if (!regDoc.id.startsWith("registry")) continue;
+            const tokensMap = regDoc.data()?.tokens || {};
+            for (const [tKey, entry] of Object.entries(tokensMap)) {
+              if ((entry as any)?.u === userId) {
+                directTokens.push(tKey);
+                if (directTokens.length >= 5) break;
+              }
+            }
+            if (directTokens.length >= 5) break;
+          }
+
+          if (directTokens.length > 0) {
+            const tokenMessages = directTokens.map(token => ({
+              ...message,
+              token,
+              topic: undefined,
+            }));
+            const directRes = await admin.messaging().sendEach(tokenMessages);
+            if (directRes.successCount > 0) {
+              fcmSent = true;
+              console.log(`[Membership Update] FCM direct tokens delivered (${directRes.successCount}/${directTokens.length}) for user ${userId}`);
+            }
+          }
+        } catch (tokenErr: any) {
+          console.warn(`[Membership Update] FCM direct token delivery notice:`, tokenErr.message);
+        }
       } catch (fcmErr: any) {
         console.warn(`[Membership Update FCM failed for user_${userId}]:`, fcmErr.message);
       }

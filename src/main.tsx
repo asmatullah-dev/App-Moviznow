@@ -264,6 +264,10 @@ window.addEventListener('unhandledrejection', (event) => {
   }
 });
 
+if (typeof window !== 'undefined') {
+  (window as any).__appMounted = true;
+}
+
 createRoot(document.getElementById('root')!).render(
     <HelmetProvider>
       <ErrorBoundary>
@@ -271,6 +275,14 @@ createRoot(document.getElementById('root')!).render(
       </ErrorBoundary>
     </HelmetProvider>,
 );
+
+if (typeof window !== 'undefined') {
+  (window as any).__appMounted = true;
+  const splashEl = document.getElementById('app-initial-splash');
+  if (splashEl && splashEl.parentNode) {
+    splashEl.parentNode.removeChild(splashEl);
+  }
+}
 
 // Prevent accidental selection/search popups on short clicks/taps, while allowing native selection & context menus on long press
 if (typeof window !== 'undefined') {

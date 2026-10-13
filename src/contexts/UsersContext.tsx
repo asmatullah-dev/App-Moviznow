@@ -28,16 +28,18 @@ export function isUserExpired(expiryDate?: string | null): boolean {
 
   if (isNaN(year) || isNaN(month) || isNaN(day)) return false;
 
-  // Expiry boundary is midnight starting the day AFTER parts[2]
-  // E.g. for "2026-08-19", boundary is 2026-08-20 00:00:00.
-  // The user remains ACTIVE for the ENTIRE duration of August 19th.
-  const localBoundary = new Date(year, month, day + 1, 0, 0, 0, 0);
-  const utcBoundary = new Date(Date.UTC(year, month, day + 1, 0, 0, 0, 0));
+  // If stored as midnight 00:00:00 of next day (e.g. 2026-10-10T00:00:00),
+  // that was already the midnight boundary.
+  const isMidnightBoundary = expiryDate.includes('T00:00:00') && !expiryDate.includes('23:59');
+  const boundaryDay = isMidnightBoundary ? day - 1 : day;
+
+  // Pakistan Time (PKT) is UTC+5.
+  // If Expiry date is 9 October, the user remains ACTIVE for all of 9 October.
+  // Membership expires on 9 October 11:59:59 PM PKT / 10 October 12:00:00 AM PKT.
+  // In UTC time: 10 October 00:00:00 PKT is 9 October 19:00:00 UTC (10 Oct 00:00 minus 5 hours).
+  const pktExpiryBoundary = new Date(Date.UTC(year, month, boundaryDay, 19, 0, 0, 0));
   
-  // Use the later boundary so timezone differences never prematurely expire a user during their valid date
-  const effectiveBoundary = localBoundary > utcBoundary ? localBoundary : utcBoundary;
-  
-  return new Date() >= effectiveBoundary;
+  return new Date() >= pktExpiryBoundary;
 }
 
 export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {

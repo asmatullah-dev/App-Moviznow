@@ -4398,12 +4398,14 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     ["/api/notifications/notify-membership-update", "/notifications/notify-membership-update"],
     async (req, res) => {
       try {
-        const { userId, newExpiryDate, previousExpiryDate, role, status, adminName } = req.body || {};
+        const { userId, userEmail, userDisplayName, newExpiryDate, previousExpiryDate, role, status, adminName } = req.body || {};
         if (!userId || !newExpiryDate) {
           return res.status(400).json({ error: "Missing required fields: userId and newExpiryDate" });
         }
         const result = await sendMembershipUpdateNotification({
           userId,
+          userEmail,
+          userDisplayName,
           newExpiryDate,
           previousExpiryDate,
           role,

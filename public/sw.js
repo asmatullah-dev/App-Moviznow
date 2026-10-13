@@ -358,13 +358,19 @@ self.addEventListener('fetch', (event) => {
           return cached;
         }
 
-        // Otherwise wait for network fetch
-        const networkResult = await networkFetch;
+        // Safety timeout of 6 seconds so static asset fetches never stall indefinitely on mobile network transitions
+        const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 6000));
+        const networkResult = await Promise.race([networkFetch, timeoutPromise]);
         if (networkResult) {
           return networkResult;
         }
 
-        return new Response('', { status: 408 });
+        // If timed out or failed, attempt direct network fetch bypass
+        try {
+          return await fetch(event.request);
+        } catch (e) {
+          return new Response('Asset load timeout', { status: 504, headers: { 'Content-Type': 'text/plain' } });
+        }
       })()
     );
     return;

@@ -431,19 +431,100 @@ export default function UserManagement() {
     return diffMinutes < 4; // Consider online if active in last 4 minutes (heartbeat is 2m)
   };
 
+  const formatExpiryDateDisplay = (dateVal: any, fmt: string = 'MMM dd, yyyy'): string => {
+    if (!dateVal || dateVal === 'null' || dateVal === 'undefined') return '-';
+    if (dateVal === 'Lifetime') return 'Lifetime';
+
+    if (typeof dateVal === 'string') {
+      const trimmed = dateVal.trim();
+      if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return '-';
+      if (trimmed === 'Lifetime') return 'Lifetime';
+
+      const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
+      if (match) {
+        let year = parseInt(match[1], 10);
+        let month = parseInt(match[2], 10) - 1;
+        let day = parseInt(match[3], 10);
+        const hours = match[4] ? parseInt(match[4], 10) : undefined;
+        const minutes = match[5] ? parseInt(match[5], 10) : undefined;
+
+        // If stored as midnight 00:00:00 of next day (e.g. 2026-10-10T00:00:00),
+        // that represents midnight when previous day expired (Oct 9 11:59PM -> Oct 10 12:00AM)
+        if (hours === 0 && (minutes === 0 || minutes === undefined) && !trimmed.includes('23:59')) {
+          const dObj = new Date(year, month, day - 1, 12, 0, 0);
+          return format(dObj, fmt);
+        }
+
+        const dObj = new Date(year, month, day, 12, 0, 0);
+        return isNaN(dObj.getTime()) ? 'Invalid Date' : format(dObj, fmt);
+      }
+
+      if (/^\d{12,14}$/.test(trimmed)) {
+        const ms = parseInt(trimmed, 10);
+        const pkt = new Date(ms + 5 * 3600 * 1000);
+        let y = pkt.getUTCFullYear();
+        let m = pkt.getUTCMonth();
+        let d = pkt.getUTCDate();
+        if (pkt.getUTCHours() === 0 && pkt.getUTCMinutes() === 0) {
+          d -= 1;
+        }
+        return format(new Date(y, m, d, 12, 0, 0), fmt);
+      }
+    }
+
+    if (typeof dateVal === 'number' || (typeof dateVal === 'object' && dateVal !== null)) {
+      const ms = typeof dateVal === 'number' ? dateVal : (dateVal.toMillis ? dateVal.toMillis() : dateVal.seconds ? dateVal.seconds * 1000 : 0);
+      if (ms > 0) {
+        const pkt = new Date(ms + 5 * 3600 * 1000);
+        let y = pkt.getUTCFullYear();
+        let m = pkt.getUTCMonth();
+        let d = pkt.getUTCDate();
+        if (pkt.getUTCHours() === 0 && pkt.getUTCMinutes() === 0) {
+          d -= 1;
+        }
+        return format(new Date(y, m, d, 12, 0, 0), fmt);
+      }
+    }
+
+    return 'Invalid Date';
+  };
+
+  const getExpiryDateInputValue = (dateVal?: string | null | any): string => {
+    if (!dateVal || dateVal === 'null' || dateVal === 'undefined') return '';
+    if (dateVal === 'Lifetime') return 'Lifetime';
+    if (typeof dateVal === 'string') {
+      const trimmed = dateVal.trim();
+      if (trimmed === 'Lifetime') return 'Lifetime';
+      const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/);
+      if (match) {
+        let y = parseInt(match[1], 10);
+        let m = parseInt(match[2], 10);
+        let d = parseInt(match[3], 10);
+        const h = match[4] ? parseInt(match[4], 10) : undefined;
+        const min = match[5] ? parseInt(match[5], 10) : undefined;
+        if (h === 0 && (min === 0 || min === undefined) && !trimmed.includes('23:59')) {
+          const dObj = new Date(y, m - 1, d - 1, 12, 0, 0);
+          const yyyy = dObj.getFullYear();
+          const mm = String(dObj.getMonth() + 1).padStart(2, '0');
+          const dd = String(dObj.getDate()).padStart(2, '0');
+          return `${yyyy}-${mm}-${dd}`;
+        }
+        return `${match[1]}-${match[2]}-${match[3]}`;
+      }
+    }
+    return '';
+  };
+
   const safeFormat = (dateStr: string | null | undefined, fmt: string) => {
     if (!dateStr) return 'N/A';
     if (dateStr === 'Lifetime') return 'Lifetime';
 
     const trimmed = String(dateStr).trim();
-    // If it's a date-only string like YYYY-MM-DD
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-      const parts = trimmed.split('-');
-      const year = parseInt(parts[0], 10);
-      const month = parseInt(parts[1], 10) - 1;
-      const day = parseInt(parts[2], 10);
-      const d = new Date(year, month, day);
-      return isNaN(d.getTime()) ? 'Invalid Date' : format(d, fmt);
+    // For date-only display formats (without time component):
+    // Always preserve the exact calendar date (YYYY-MM-DD) stored in data without timezone rollover
+    const dateMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (dateMatch && !fmt.includes('hh') && !fmt.includes('mm') && !fmt.includes('ss')) {
+      return formatExpiryDateDisplay(trimmed, fmt);
     }
 
     const ms = parseVersionTime(trimmed);
@@ -746,7 +827,7 @@ export default function UserManagement() {
       email: user.email || '',
       phone: user.phone || '',
       city: user.city || '',
-      expiryDate: user.expiryDate ? user.expiryDate.split('T')[0] : '',
+      expiryDate: user.role === 'owner' ? 'Lifetime' : getExpiryDateInputValue(user.expiryDate),
       role: user.role,
       status: user.status,
       permissions: user.permissions || [],
@@ -818,44 +899,54 @@ export default function UserManagement() {
       
       if (editForm.expiryDate && editForm.expiryDate !== 'Lifetime') {
         const dateStr = editForm.expiryDate.split('T')[0];
-        updateData.expiryDate = `${dateStr}T23:59:59.999Z`;
+        updateData.expiryDate = `${dateStr}T23:59:59.999+05:00`;
       } else if (editForm.expiryDate === 'Lifetime') {
         updateData.expiryDate = 'Lifetime';
-      } else if (editForm.status === 'active' && (editForm.role as string) !== 'owner' && (editForm.role as string) !== 'admin' && (selectedUser as any).role !== 'owner' && (selectedUser as any).role !== 'admin') {
-        // Active status requires an expiry date — default to 30 days if left empty
-        const defaultExp = new Date();
-        defaultExp.setDate(defaultExp.getDate() + 30);
-        const yyyy = defaultExp.getFullYear();
-        const mm = String(defaultExp.getMonth() + 1).padStart(2, '0');
-        const dd = String(defaultExp.getDate()).padStart(2, '0');
-        const dateStr = `${yyyy}-${mm}-${dd}`;
-        updateData.expiryDate = `${dateStr}T23:59:59.999Z`;
+        updateData.status = 'active';
       } else {
         updateData.expiryDate = null;
-      }
-
-      // Detect if membership expiry date increased by more than 5 days.
-      let membershipDateIncreased = false;
-      if (updateData.expiryDate) {
-        const newTime = new Date(updateData.expiryDate).getTime();
-        let oldTime = 0;
-        if (selectedUser.expiryDate && selectedUser.expiryDate !== 'Lifetime') {
-          oldTime = new Date(selectedUser.expiryDate).getTime();
-        } else {
-          oldTime = Date.now();
-        }
-        
-        const diffDays = (newTime - oldTime) / (24 * 60 * 60 * 1000);
-        if (diffDays > 5) {
-          membershipDateIncreased = true;
+        if (updateData.role !== 'owner' && updateData.role !== 'admin') {
+          updateData.status = 'pending';
         }
       }
 
-      if (membershipDateIncreased) {
+      // Detect if membership expiry date changed or extended
+      const oldExpiryRaw = selectedUser.expiryDate || '';
+      const oldExpiry = oldExpiryRaw === 'Lifetime' ? 'Lifetime' : (oldExpiryRaw ? getExpiryDateInputValue(oldExpiryRaw) : '');
+      const newExpiryRaw = updateData.expiryDate || '';
+      const newExpiry = newExpiryRaw === 'Lifetime' ? 'Lifetime' : (newExpiryRaw ? getExpiryDateInputValue(newExpiryRaw) : '');
+      const isDateChanged = newExpiry !== oldExpiry;
+
+      // Trigger membership expiry notification via Email and FCM if expiry date was changed/extended
+      if (isDateChanged && newExpiry) {
+        fetch('/api/notifications/notify-membership-update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: editingId || selectedUser.uid,
+            userEmail: updateData.email || selectedUser.email,
+            userDisplayName: updateData.displayName || selectedUser.displayName,
+            newExpiryDate: updateData.expiryDate,
+            previousExpiryDate: selectedUser.expiryDate,
+            role: updateData.role || selectedUser.role,
+            status: updateData.status || selectedUser.status,
+            adminName: profile?.displayName || profile?.email || 'Admin',
+          }),
+        }).catch(err => {
+          console.warn('[Membership update notification trigger error]:', err);
+        });
+      }
+
+      if (newExpiry === 'Lifetime') {
+        updateData.status = 'active';
+      } else if (isDateChanged && updateData.expiryDate && !isUserExpired(updateData.expiryDate)) {
         updateData.status = 'active';
       }
 
-      const isBecomingExpired = (updateData.status === 'expired' || (updateData.expiryDate && isUserExpired(updateData.expiryDate))) && ((selectedUser.role as string) !== 'owner' && (selectedUser.role as string) !== 'admin');
+      const isBecomingExpired =
+        (updateData.status === 'expired' ||
+          (updateData.expiryDate && updateData.expiryDate !== 'Lifetime' && isUserExpired(updateData.expiryDate))) &&
+        ((selectedUser.role as string) !== 'owner' && (selectedUser.role as string) !== 'admin');
       
       if (isBecomingExpired) {
         updateData.status = 'expired';
@@ -864,15 +955,16 @@ export default function UserManagement() {
         updateData.expiryNoticeSentDate = undefined;
         updateData.lastExpiryNoticeFor = undefined;
         updateData.lastExpiryNoticeSentAt = undefined;
-        clearNoticeRecord(editingId);
+        clearNoticeRecord(editingId || selectedUser.uid);
       }
 
-      const currentEditingId = editingId;
+      const currentEditingId = editingId || selectedUser.uid;
       const previousRole = selectedUser.role;
       const newRole = editForm.role;
 
-      // Save to local pending changes buffer
+      // Save to local pending changes buffer and commit to Firestore
       updateUserFields(currentEditingId, updateData);
+      await finalizeUserChanges(true);
 
       // Handle Manager role changes locally
       const wasManager = previousRole === 'user_manager' || previousRole === 'manager' || selectedUser.isUserManager;
@@ -1076,7 +1168,7 @@ export default function UserManagement() {
         const todayDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         diffDays = Math.ceil((targetDate.getTime() - todayDate.getTime()) / (1000 * 60 * 60 * 24));
       }
-      const expiryStr = formatDateToMonthDDYYYY(user.expiryDate);
+      const expiryStr = formatExpiryDateDisplay(user.expiryDate, 'MMMM d, yyyy');
 
       if (diffDays <= 0) {
         message = `Assalam O Alaikum! ${name},\n\nYour ${membershipType} for ${settings?.headerText || 'MovizNow'} app is Expired. Please renew to continue enjoying our services.\nVisit Now: MovizNow.com\nThank You`;
@@ -1599,7 +1691,7 @@ export default function UserManagement() {
             updateData.expiryDate = 'Lifetime';
           } else {
             const dateStr = newUserForm.expiryDate.split('T')[0];
-            updateData.expiryDate = `${dateStr}T23:59:59.999Z`;
+            updateData.expiryDate = `${dateStr}T23:59:59.999+05:00`;
           }
         }
         
@@ -1628,7 +1720,7 @@ export default function UserManagement() {
                 defaultExpiryDate = 'Lifetime';
               } else {
                 const dateStr = newUserForm.expiryDate.split('T')[0];
-                defaultExpiryDate = `${dateStr}T23:59:59.999Z`;
+                defaultExpiryDate = `${dateStr}T23:59:59.999+05:00`;
               }
             } else if (newUserForm.status === 'active' && (newUserForm.role as string) !== 'owner' && (newUserForm.role as string) !== 'admin') {
               const defaultExp = new Date();
@@ -1637,7 +1729,7 @@ export default function UserManagement() {
               const mm = String(defaultExp.getMonth() + 1).padStart(2, '0');
               const dd = String(defaultExp.getDate()).padStart(2, '0');
               const dateStr = `${yyyy}-${mm}-${dd}`;
-              defaultExpiryDate = `${dateStr}T23:59:59.999Z`;
+              defaultExpiryDate = `${dateStr}T23:59:59.999+05:00`;
             }
 
             const updateData: any = {
@@ -1661,7 +1753,7 @@ export default function UserManagement() {
           let defaultExpiryDate: string | null = null;
           if (newUserForm.expiryDate && newUserForm.expiryDate !== 'Lifetime') {
             const dateStr = newUserForm.expiryDate.split('T')[0];
-            defaultExpiryDate = `${dateStr}T23:59:59.999Z`;
+            defaultExpiryDate = `${dateStr}T23:59:59.999+05:00`;
           } else if (newUserForm.expiryDate === 'Lifetime') {
             defaultExpiryDate = 'Lifetime';
           } else if (newUserForm.status === 'active' && newUserForm.role !== 'owner' && newUserForm.role !== 'admin') {
@@ -1671,7 +1763,7 @@ export default function UserManagement() {
             const mm = String(defaultExp.getMonth() + 1).padStart(2, '0');
             const dd = String(defaultExp.getDate()).padStart(2, '0');
             const dateStr = `${yyyy}-${mm}-${dd}`;
-            defaultExpiryDate = `${dateStr}T23:59:59.999Z`;
+            defaultExpiryDate = `${dateStr}T23:59:59.999+05:00`;
           }
 
           const newUserData: any = {
@@ -2607,14 +2699,65 @@ export default function UserManagement() {
                     <ArrowRight className="w-4 h-4 text-zinc-600 shrink-0 mt-5" />
 
                     <div className="flex-1">
-                      <label className="block text-[10px] font-bold text-zinc-500 uppercase mb-1">Expiry Date</label>
-                      <input
-                        type="date"
-                        value={editForm.expiryDate || ''}
-                        onChange={(e) => setEditForm({ ...editForm, expiryDate: e.target.value })}
-                        disabled={selectedUser.uid === profile?.uid}
-                        className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 disabled:opacity-50"
-                      />
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-[10px] font-bold text-zinc-500 uppercase">Expiry Date</label>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setEditForm(prev => ({ ...prev, expiryDate: 'Lifetime', status: 'active' }))}
+                            disabled={selectedUser.uid === profile?.uid}
+                            className={clsx(
+                              "text-[10px] font-semibold px-2 py-0.5 rounded-md transition-colors cursor-pointer",
+                              editForm.expiryDate === 'Lifetime'
+                                ? "bg-emerald-500 text-white shadow-xs"
+                                : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-emerald-500 hover:bg-emerald-500/10"
+                            )}
+                            title="Set lifetime access (Never expires)"
+                          >
+                            Lifetime
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditForm(prev => ({ ...prev, expiryDate: '', status: 'pending' }))}
+                            disabled={selectedUser.uid === profile?.uid}
+                            className={clsx(
+                              "text-[10px] font-semibold px-2 py-0.5 rounded-md transition-colors cursor-pointer",
+                              !editForm.expiryDate
+                                ? "bg-zinc-300 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200"
+                                : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-red-500 hover:bg-red-500/10"
+                            )}
+                            title="Clear expiry date (Sets to None/Pending)"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+
+                      {editForm.expiryDate === 'Lifetime' ? (
+                        <div className="flex items-center justify-between px-3 py-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
+                          <span className="text-xs font-bold text-emerald-500 flex items-center gap-1.5">
+                            👑 Lifetime Access
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const todayStr = new Date().toISOString().split('T')[0];
+                              setEditForm(prev => ({ ...prev, expiryDate: todayStr }));
+                            }}
+                            className="text-[10px] text-zinc-400 hover:text-zinc-900 dark:hover:text-white underline cursor-pointer"
+                          >
+                            Change to Date
+                          </button>
+                        </div>
+                      ) : (
+                        <input
+                          type="date"
+                          value={editForm.expiryDate || ''}
+                          onChange={(e) => setEditForm({ ...editForm, expiryDate: e.target.value })}
+                          disabled={selectedUser.uid === profile?.uid}
+                          className="w-full bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 disabled:opacity-50"
+                        />
+                      )}
                     </div>
                   </div>
 
@@ -3813,13 +3956,62 @@ export default function UserManagement() {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400 mb-1">Expiry Date</label>
-                    <input
-                      type="date"
-                      value={newUserForm.expiryDate}
-                      onChange={(e) => setNewUserForm({ ...newUserForm, expiryDate: e.target.value })}
-                      className="w-full p-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-medium text-zinc-500 dark:text-zinc-400">Expiry Date</label>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setNewUserForm(prev => ({ ...prev, expiryDate: 'Lifetime', status: 'active' }))}
+                          className={clsx(
+                            "text-xs font-semibold px-2 py-0.5 rounded-md transition-colors cursor-pointer",
+                            newUserForm.expiryDate === 'Lifetime'
+                              ? "bg-emerald-500 text-white shadow-xs"
+                              : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-emerald-500 hover:bg-emerald-500/10"
+                          )}
+                          title="Set lifetime membership"
+                        >
+                          Lifetime
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setNewUserForm(prev => ({ ...prev, expiryDate: '', status: 'pending' }))}
+                          className={clsx(
+                            "text-xs font-semibold px-2 py-0.5 rounded-md transition-colors cursor-pointer",
+                            !newUserForm.expiryDate
+                              ? "bg-zinc-300 dark:bg-zinc-700 text-zinc-800 dark:text-zinc-200"
+                              : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-red-500 hover:bg-red-500/10"
+                          )}
+                          title="Clear expiry date"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+
+                    {newUserForm.expiryDate === 'Lifetime' ? (
+                      <div className="flex items-center justify-between p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl">
+                        <span className="text-sm font-bold text-emerald-500 flex items-center gap-1.5">
+                          👑 Lifetime Access
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const todayStr = new Date().toISOString().split('T')[0];
+                            setNewUserForm(prev => ({ ...prev, expiryDate: todayStr }));
+                          }}
+                          className="text-xs text-zinc-400 hover:text-zinc-900 dark:hover:text-white underline cursor-pointer"
+                        >
+                          Change to Date
+                        </button>
+                      </div>
+                    ) : (
+                      <input
+                        type="date"
+                        value={newUserForm.expiryDate}
+                        onChange={(e) => setNewUserForm({ ...newUserForm, expiryDate: e.target.value })}
+                        className="w-full p-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-transparent"
+                      />
+                    )}
                   </div>
                 </div>
               ) : (

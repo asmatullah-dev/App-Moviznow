@@ -143,19 +143,111 @@
         console.log('PWA: appinstalled event captured globally');
       });
     </script>
+    <script>
+      // Early self-healing startup recovery engine
+      window.__appMounted = false;
+
+      window.__recoverAppStartup = function(isAuto) {
+        var now = Date.now();
+        var lastAuto = parseInt(sessionStorage.getItem('last_startup_auto_recover') || '0', 10);
+
+        // Tell Service Worker to skip waiting & clear stale shell caches that may have obsolete chunk hashes
+        try {
+          if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function(regs) {
+              for (var i = 0; i < regs.length; i++) {
+                regs[i].update().catch(function() {});
+                if (regs[i].waiting) {
+                  regs[i].waiting.postMessage({ type: 'SKIP_WAITING' });
+                }
+              }
+            }).catch(function() {});
+          }
+          if ('caches' in window) {
+            caches.delete('moviznow-shell-v3').catch(function() {});
+            caches.delete('app-shell-cache').catch(function() {});
+          }
+        } catch (e) {}
+
+        // Prevent infinite auto-reload loop: if auto recovery ran within 12 seconds, present manual button
+        if (isAuto) {
+          if (now - lastAuto < 12000) {
+            var note = document.getElementById('splash-slow-note');
+            if (note) {
+              note.style.display = 'block';
+              var p = note.querySelector('p');
+              if (p) p.textContent = 'Connection is taking longer than usual.';
+            }
+            return;
+          }
+          sessionStorage.setItem('last_startup_auto_recover', String(now));
+          setTimeout(function() {
+            window.location.reload();
+          }, 150);
+          return;
+        }
+
+        // Manual user click: clean reload with fresh attempt
+        try {
+          sessionStorage.removeItem('last_startup_auto_recover');
+        } catch (e) {}
+        window.location.reload();
+      };
+
+      // Catch critical script / module load errors before React mounts
+      window.addEventListener('error', function(event) {
+        if (window.__appMounted) return;
+        var target = event.target;
+        var isScriptOrLink = target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK');
+        var msg = (event.message || '') + '';
+        var isChunkError = (
+          msg.indexOf('Failed to fetch dynamically imported module') !== -1 ||
+          msg.indexOf('Loading chunk') !== -1 ||
+          msg.indexOf('Importing a module script failed') !== -1 ||
+          msg.indexOf('SyntaxError') !== -1
+        );
+
+        if (isScriptOrLink || isChunkError) {
+          console.warn('[Startup] Critical load failure caught during initialization:', event);
+          var splash = document.getElementById('app-initial-splash');
+          if (splash && document.getElementById('root') && document.getElementById('root').contains(splash)) {
+            window.__recoverAppStartup(true);
+          }
+        }
+      }, true);
+
+      window.addEventListener('unhandledrejection', function(event) {
+        if (window.__appMounted) return;
+        var reason = (event.reason && event.reason.message) || String(event.reason || '');
+        if (
+          reason.indexOf('Failed to fetch dynamically imported module') !== -1 ||
+          reason.indexOf('Loading chunk') !== -1 ||
+          reason.indexOf('Importing a module script failed') !== -1
+        ) {
+          console.warn('[Startup] Unhandled chunk rejection during initialization:', reason);
+          var splash = document.getElementById('app-initial-splash');
+          if (splash && document.getElementById('root') && document.getElementById('root').contains(splash)) {
+            window.__recoverAppStartup(true);
+          }
+        }
+      });
+    </script>
   </head>
   <body class="bg-gray-950 text-white min-h-screen">
     <div id="root">
       <!-- Fast-rendering initial application splash loader while React JavaScript initializes -->
       <div id="app-initial-splash" style="min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; background-color: #0b0f19; color: #ffffff; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
-        <div style="display: flex; flex-direction: column; align-items: center; gap: 16px;">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 14px;">
           <img src="/logo.svg" alt="MovizNow Logo" style="width: 64px; height: 64px; object-fit: contain; animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;" />
           <div class="initial-splash-spinner" style="width: 32px; height: 32px; border: 3px solid rgba(59, 130, 246, 0.2); border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+          <div id="splash-sub-text" style="font-size: 13px; color: #9ca3af; margin-top: 4px; transition: opacity 0.3s ease;">
+            Starting MovizNow...
+          </div>
         </div>
-        <div id="splash-slow-note" style="display: none; margin-top: 20px; text-align: center; max-width: 280px; animation: fadeIn 0.4s ease-out;">
-          <p style="font-size: 13px; color: #9ca3af; margin-bottom: 12px; line-height: 1.4;">Connecting taking longer than usual...</p>
-          <button onclick="window.location.reload()" style="background: #2563eb; color: #ffffff; border: none; border-radius: 8px; padding: 8px 18px; font-size: 13px; font-weight: 500; cursor: pointer; transition: opacity 0.2s;">
-            Retry
+        <div id="splash-slow-note" style="display: none; margin-top: 18px; text-align: center; max-width: 290px; animation: fadeIn 0.4s ease-out;">
+          <p style="font-size: 13px; color: #9ca3af; margin-bottom: 12px; line-height: 1.4;">Connecting is taking longer than usual...</p>
+          <button onclick="window.__recoverAppStartup ? window.__recoverAppStartup(false) : window.location.reload()" style="background: #2563eb; color: #ffffff; border: none; border-radius: 8px; padding: 9px 20px; font-size: 13px; font-weight: 600; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);">
+            Reload App
           </button>
         </div>
         <style>
@@ -166,14 +258,31 @@
       </div>
     </div>
     <script>
-      // Startup watchdog: if slow internet or script evaluation stalls, reveal recovery option after 3.5 seconds
+      // Startup watchdog: handles slow mobile internet and auto-resolves stuck state
       setTimeout(function() {
+        if (window.__appMounted) return;
+        var subText = document.getElementById('splash-sub-text');
+        if (subText) subText.textContent = 'Almost ready...';
+      }, 3500);
+
+      // After 7.5 seconds, if React hasn't mounted, auto-recover once or reveal the Reload button
+      setTimeout(function() {
+        if (window.__appMounted) return;
         var splash = document.getElementById('app-initial-splash');
         if (splash && document.getElementById('root') && document.getElementById('root').contains(splash)) {
           var note = document.getElementById('splash-slow-note');
           if (note) note.style.display = 'block';
+
+          // Attempt proactive self-healing if stuck on first visit after deploy
+          var lastAuto = parseInt(sessionStorage.getItem('last_startup_auto_recover') || '0', 10);
+          if (Date.now() - lastAuto > 20000 && navigator.onLine) {
+            console.log('[Startup] Watchdog auto-recovery triggered after 7.5s stall');
+            if (window.__recoverAppStartup) {
+              window.__recoverAppStartup(true);
+            }
+          }
         }
-      }, 3500);
+      }, 7500);
     </script>
 
     <!-- Semantic Crawler and Non-JS SEO Fallback: Crawlers without JS see full textual content and links -->
@@ -206,7 +315,7 @@
         </footer>
       </div>
     </noscript>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/main.tsx" onerror="window.__recoverAppStartup && window.__recoverAppStartup(true)"></script>
   </body>
 </html>
 
