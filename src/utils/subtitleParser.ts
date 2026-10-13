@@ -118,34 +118,114 @@ export function parseWebVTT(vttText: string): SubtitleCue[] {
     }
   }
 
-  return cues;
+  return cleanSubtitleCues(cues);
 }
 
 /**
- * Ultra-fast binary search to find the active cue at current playback time.
- * Cues are strictly chronological and non-overlapping.
+ * Sanitizes and cleans subtitle cues:
+ * 1. Chronologically sorts by start time.
+ * 2. Strips HTML tags and entities.
+ * 3. Removes repeated previous lines (roll-up subtitle redundancy), so new lines never appear on top of previous lines.
+ * 4. Ensures cues do not overlap in end-time so previous lines disappear cleanly before next line appears.
+ * 5. Strips empty or invalid duration cues.
+ */
+export function cleanSubtitleCues(rawCues: SubtitleCue[]): SubtitleCue[] {
+  if (!rawCues || !Array.isArray(rawCues) || rawCues.length === 0) return [];
+
+  // Clone and sort strictly by start time
+  const cues: SubtitleCue[] = rawCues
+    .map((c) => ({
+      start: Number(c.start) || 0,
+      end: Number(c.end) || 0,
+      text: String(c.text || "").trim(),
+    }))
+    .filter((c) => c.text.length > 0 && c.end > c.start)
+    .sort((a, b) => a.start - b.start);
+
+  for (let idx = 0; idx < cues.length; idx++) {
+    const cur = cues[idx];
+
+    // Decode HTML entities and strip styling tags
+    const cleanRaw = decodeHtmlEntities(
+      cur.text
+        .replace(/\{[^}]*\}/g, "")
+        .replace(/<[^>]+>/g, "")
+        .trim()
+    );
+
+    let lines = cleanRaw
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    // Roll-up caption cleanup: if this cue has multiple lines and the first line was the previous cue's text,
+    // remove the repeated previous line so dialogue doesn't stack or duplicate!
+    if (idx > 0 && lines.length > 1) {
+      const prev = cues[idx - 1];
+      const prevClean = prev.text.toLowerCase().trim();
+      if (prevClean && lines[0].toLowerCase().trim() === prevClean) {
+        lines.shift();
+      } else if (prevClean) {
+        const prevLines = prev.text.split(/\r?\n/).map((l) => l.toLowerCase().trim()).filter(Boolean);
+        if (prevLines.length > 0 && lines[0].toLowerCase().trim() === prevLines[prevLines.length - 1]) {
+          lines.shift();
+        }
+      }
+    }
+
+    cur.text = lines.join("\n");
+
+    // Prevent time-overlap with next cue:
+    // Previous line MUST disappear cleanly before or right when the new line begins!
+    if (idx < cues.length - 1) {
+      const next = cues[idx + 1];
+      if (cur.end > next.start) {
+        cur.end = Math.max(cur.start, next.start - 0.05);
+      }
+    }
+  }
+
+  return cues.filter((c) => c.text.trim().length > 0 && c.end > c.start);
+}
+
+/**
+ * Ultra-reliable cue matcher for running playback.
+ * Guaranteed to find the active dialogue at currentTime without missing cues or getting stuck.
  * When playback enters dialogue, returns active cue; when between dialogues, returns null.
  */
 export function findActiveCue(cues: SubtitleCue[], currentTime: number): SubtitleCue | null {
   if (!cues || cues.length === 0) return null;
 
+  // 1. Binary search to find the highest index whose start <= currentTime
   let low = 0;
   let high = cues.length - 1;
+  let candidateIndex = -1;
 
   while (low <= high) {
     const mid = (low + high) >> 1;
-    const cue = cues[mid];
-
-    if (currentTime < cue.start) {
-      high = mid - 1;
-    } else if (currentTime > cue.end) {
+    if (cues[mid].start <= currentTime) {
+      candidateIndex = mid;
       low = mid + 1;
     } else {
-      // Check if immediate next cue has started at this boundary
-      if (mid + 1 < cues.length && cues[mid + 1].start <= currentTime && currentTime <= cues[mid + 1].end) {
-        return cues[mid + 1];
-      }
-      return cue;
+      high = mid - 1;
+    }
+  }
+
+  if (candidateIndex === -1) {
+    return null;
+  }
+
+  // 2. Check candidateIndex first (most recent dialogue that has started)
+  const candidate = cues[candidateIndex];
+  if (candidate.start <= currentTime && currentTime <= candidate.end) {
+    return candidate;
+  }
+
+  // 3. In case of slight adjacent overlap, check nearby preceding cues (up to 4 back)
+  for (let i = candidateIndex - 1; i >= Math.max(0, candidateIndex - 4); i--) {
+    const prevCue = cues[i];
+    if (prevCue.start <= currentTime && currentTime <= prevCue.end) {
+      return prevCue;
     }
   }
 

@@ -51,6 +51,7 @@ import {
   fetchDirectSubtitleTracks,
   fetchDirectSubtitleCues,
   findActiveCue,
+  cleanSubtitleCues,
   formatSubtitleLanguageLabel,
   DirectSubtitleTrack,
 } from "../utils/subtitleParser";
@@ -1053,6 +1054,19 @@ export function NativePlayer({
   const [fitMode, setFitMode] = useState<"contain" | "cover" | "fill">("contain");
 
   const [activeMenu, setActiveMenu] = useState<"speed" | "audio" | "subtitles" | "quality" | "server" | null>(null);
+  const activeMenuRef = useRef<"speed" | "audio" | "subtitles" | "quality" | "server" | null>(null);
+  useEffect(() => {
+    activeMenuRef.current = activeMenu;
+  }, [activeMenu]);
+
+  const [subtitleDelay, setSubtitleDelay] = useState<number>(() => {
+    const d = safeStorage.getItem("moviznow_subtitle_delay");
+    return d ? parseFloat(d) || 0 : 0;
+  });
+  const subtitleDelayRef = useRef<number>(0);
+  useEffect(() => {
+    subtitleDelayRef.current = subtitleDelay;
+  }, [subtitleDelay]);
   const [doubleTapFeedback, setDoubleTapFeedback] = useState<"left" | "right" | null>(null);
 
   // Measure container width for responsive adaptive controls priority
@@ -1194,8 +1208,12 @@ export function NativePlayer({
 
     setMediaInfo(null);
     setSubtitleCues([]);
+    subtitleCuesRef.current = [];
     setActiveSubtitleText("");
+    activeSubtitleTextRef.current = "";
     setSelectedSubtitleTrack(null);
+    selectedSubtitleTrackRef.current = null;
+    setDirectSubtitlesList([]);
     setSelectedAudioTrack(0);
 
     setActiveMenu(null);
@@ -1569,25 +1587,29 @@ export function NativePlayer({
 
   const controlsShownAtRef = useRef<number>(Date.now());
 
-  // Handle Controls Auto-Hide
+  // Handle Controls Auto-Hide: NEVER hide if any menu or customization window is open
   const resetControlsTimeout = useCallback(() => {
-    setIsControlsVisible((prev) => {
-      if (!prev) {
-        controlsShownAtRef.current = Date.now();
-      }
-      return true;
-    });
+    setIsControlsVisible(true);
+    controlsShownAtRef.current = Date.now();
     if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    // Don't hide menu when any window like subtitles window is open or action is performing!
+    if (activeMenuRef.current !== null || activeMenu !== null) {
+      return;
+    }
     if (isPlaying) {
       controlsTimeoutRef.current = setTimeout(() => {
-        setIsControlsVisible(false);
-        setActiveMenu(null);
-      }, 3500);
+        if (activeMenuRef.current === null && activeMenu === null) {
+          setIsControlsVisible(false);
+        }
+      }, 4500);
     }
-  }, [isPlaying]);
+  }, [isPlaying, activeMenu]);
 
   useEffect(() => {
-    if (isPlaying) {
+    if (activeMenu !== null) {
+      setIsControlsVisible(true);
+      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    } else if (isPlaying) {
       resetControlsTimeout();
     } else {
       setIsControlsVisible(true);
@@ -1597,16 +1619,19 @@ export function NativePlayer({
     return () => {
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     };
-  }, [isPlaying, resetControlsTimeout]);
+  }, [isPlaying, activeMenu, resetControlsTimeout]);
+
+  // Controls are strictly visible if isControlsVisible is true OR any popup window/menu is open
+  const effectiveControlsVisible = isControlsVisible || activeMenu !== null;
 
   // Prevent changing duration on 1st click only when menu/controls are completely hidden
   const canSeekNow = useCallback((): boolean => {
-    if (!isControlsVisible) {
+    if (!effectiveControlsVisible) {
       resetControlsTimeout();
       return false;
     }
     return true;
-  }, [isControlsVisible, resetControlsTimeout]);
+  }, [effectiveControlsVisible, resetControlsTimeout]);
 
   // Remember new position every 5 to 10 seconds during playback
   useEffect(() => {
@@ -1839,7 +1864,7 @@ export function NativePlayer({
     const currentSubTrack = selectedSubtitleTrackRef.current !== null ? selectedSubtitleTrackRef.current : selectedSubtitleTrack;
     const currentCues = subtitleCuesRef.current.length > 0 ? subtitleCuesRef.current : subtitleCues;
     if (currentSubTrack !== null && currentCues.length > 0) {
-      const activeCue = findActiveCue(currentCues, current);
+      const activeCue = findActiveCue(currentCues, current + subtitleDelayRef.current);
       const targetText = activeCue ? activeCue.text : "";
       if (targetText !== activeSubtitleTextRef.current) {
         activeSubtitleTextRef.current = targetText;
@@ -1918,7 +1943,7 @@ export function NativePlayer({
     const syncSubtitle = () => {
       const vid = (activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current) || videoRef.current;
       if (vid && !vid.paused) {
-        const cur = streamMode === "transcode" && seekOffset > 0 ? seekOffset + vid.currentTime : vid.currentTime;
+        const cur = (streamMode === "transcode" && seekOffset > 0 ? seekOffset + vid.currentTime : vid.currentTime) + subtitleDelayRef.current;
         const cues = subtitleCuesRef.current.length > 0 ? subtitleCuesRef.current : subtitleCues;
         if (cues.length > 0) {
           const activeCue = findActiveCue(cues, cur);
@@ -1935,7 +1960,7 @@ export function NativePlayer({
     return () => {
       if (animId) cancelAnimationFrame(animId);
     };
-  }, [isPlaying, selectedSubtitleTrack, streamMode, seekOffset]);
+  }, [isPlaying, selectedSubtitleTrack, subtitleCues, streamMode, seekOffset, subtitleDelay]);
 
   const handleRetryPlayback = useCallback(() => {
     setHasPlaybackError(false);
@@ -2371,8 +2396,16 @@ export function NativePlayer({
       list.push(...directSubtitlesList);
     }
 
-    // 2. Add embedded subtitle tracks if not already provided by direct open-CDN tracks
-    if (mediaInfo?.subtitleTracks && Array.isArray(mediaInfo.subtitleTracks) && mediaInfo.subtitleTracks.length > 0) {
+    // 2. Add embedded subtitle tracks ONLY if not an FSL stream (since FSL edge playback cannot demux MKV subtitles)
+    const isFsl =
+      activeServer === "fsl" ||
+      Boolean(fslCandidate) ||
+      directStreamUrl.toLowerCase().includes("fsl") ||
+      directStreamUrl.toLowerCase().includes("fastserver") ||
+      directStreamUrl.toLowerCase().includes("cloudflarestorage") ||
+      directStreamUrl.toLowerCase().includes(".r2.");
+
+    if (!isFsl && mediaInfo?.subtitleTracks && Array.isArray(mediaInfo.subtitleTracks) && mediaInfo.subtitleTracks.length > 0) {
       mediaInfo.subtitleTracks.forEach((s) => {
         if (s && typeof s.id === "number") {
           const sLang = (s.language || "und").toLowerCase();
@@ -2393,7 +2426,19 @@ export function NativePlayer({
     }
 
     return list;
-  }, [mediaInfo, directSubtitlesList]);
+  }, [mediaInfo, directSubtitlesList, activeServer, fslCandidate, directStreamUrl]);
+
+  // If no subtitles are available for this video, guarantee selectedSubtitleTrack is null and text is cleared
+  useEffect(() => {
+    if (computedSubtitleTracks.length === 0 && selectedSubtitleTrack !== null) {
+      setSelectedSubtitleTrack(null);
+      selectedSubtitleTrackRef.current = null;
+      setSubtitleCues([]);
+      subtitleCuesRef.current = [];
+      setActiveSubtitleText("");
+      activeSubtitleTextRef.current = "";
+    }
+  }, [computedSubtitleTracks.length, selectedSubtitleTrack]);
 
   const handleAudioSelect = (trackId: number) => {
     const track = mediaInfo?.audioTracks.find((a) => a.id === trackId);
@@ -2456,10 +2501,9 @@ export function NativePlayer({
   };
 
   const handleSubtitleSelect = async (subId: string | number | null, options?: { silent?: boolean }) => {
-    setSelectedSubtitleTrack(subId);
-    selectedSubtitleTrackRef.current = subId;
-    setActiveMenu(null);
     if (subId === null) {
+      setSelectedSubtitleTrack(null);
+      selectedSubtitleTrackRef.current = null;
       subtitleCuesRef.current = [];
       activeSubtitleTextRef.current = "";
       setSubtitleCues([]);
@@ -2468,32 +2512,60 @@ export function NativePlayer({
       if (!options?.silent) {
         showToast("Subtitles: Off");
       }
+      resetControlsTimeout();
       return;
     }
-    safeStorage.setItem("moviznow_subtitles_enabled", "true");
+
     const sub = computedSubtitleTracks.find((s) => String(s.id) === String(subId));
     const subLabel = formatSubtitleLanguageLabel(sub?.language, sub?.title, subId);
     if (!options?.silent) {
       showToast(`Loading ${subLabel}...`);
     }
 
+    const applyLoadedCues = (rawCues: any[]) => {
+      const cues = cleanSubtitleCues(rawCues);
+      if (!cues || cues.length === 0) {
+        handleFailedCues();
+        return;
+      }
+      setSelectedSubtitleTrack(subId);
+      selectedSubtitleTrackRef.current = subId;
+      subtitleCuesRef.current = cues;
+      setSubtitleCues(cues);
+      safeStorage.setItem("moviznow_subtitles_enabled", "true");
+      const curTime = (videoRef.current
+        ? (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) + (videoRef.current.currentTime || 0)
+        : currentPosition) + subtitleDelayRef.current;
+      const activeCue = findActiveCue(cues, curTime);
+      const activeTxt = activeCue ? activeCue.text : "";
+      activeSubtitleTextRef.current = activeTxt;
+      setActiveSubtitleText(activeTxt);
+      if (!options?.silent) {
+        showToast(`Subtitles: ${subLabel}`);
+      }
+      resetControlsTimeout();
+    };
+
+    const handleFailedCues = () => {
+      setSelectedSubtitleTrack(null);
+      selectedSubtitleTrackRef.current = null;
+      subtitleCuesRef.current = [];
+      setSubtitleCues([]);
+      activeSubtitleTextRef.current = "";
+      setActiveSubtitleText("");
+      setDirectSubtitlesList((prev) => prev.filter((d) => String(d.id) !== String(subId)));
+      if (!options?.silent) {
+        showToast(t("No subtitles available"));
+      }
+      resetControlsTimeout();
+    };
+
     // 1. Direct Subtitle Fetch: Fetch directly in browser from open CDN (0 Vercel transfer!)
     if (sub?.isDirect && (sub as DirectSubtitleTrack).url) {
       try {
         const cues = await fetchDirectSubtitleCues((sub as DirectSubtitleTrack).url!);
         if (cues && cues.length > 0) {
-          subtitleCuesRef.current = cues;
-          setSubtitleCues(cues);
-          const curTime = videoRef.current
-            ? (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) + (videoRef.current.currentTime || 0)
-            : currentPosition;
-          const activeCue = findActiveCue(cues, curTime);
-          const activeTxt = activeCue ? activeCue.text : "";
-          activeSubtitleTextRef.current = activeTxt;
-          setActiveSubtitleText(activeTxt);
-          if (!options?.silent) {
-            showToast(`Subtitles: ${subLabel}`);
-          }
+          applyLoadedCues(cues);
           return;
         }
       } catch (err) {
@@ -2511,18 +2583,7 @@ export function NativePlayer({
       try {
         const cues = await fetchDirectSubtitleCues(directMatch.url);
         if (cues && cues.length > 0) {
-          subtitleCuesRef.current = cues;
-          setSubtitleCues(cues);
-          const curTime = videoRef.current
-            ? (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) + (videoRef.current.currentTime || 0)
-            : currentPosition;
-          const activeCue = findActiveCue(cues, curTime);
-          const activeTxt = activeCue ? activeCue.text : "";
-          activeSubtitleTextRef.current = activeTxt;
-          setActiveSubtitleText(activeTxt);
-          if (!options?.silent) {
-            showToast(`Subtitles: ${subLabel}`);
-          }
+          applyLoadedCues(cues);
           return;
         }
       } catch (err) {}
@@ -2547,18 +2608,7 @@ export function NativePlayer({
           if (matchingOpen && matchingOpen.url) {
             const cues = await fetchDirectSubtitleCues(matchingOpen.url);
             if (cues && cues.length > 0) {
-              subtitleCuesRef.current = cues;
-              setSubtitleCues(cues);
-              const curTime = videoRef.current
-                ? (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) + (videoRef.current.currentTime || 0)
-                : currentPosition;
-              const activeCue = findActiveCue(cues, curTime);
-              const activeTxt = activeCue ? activeCue.text : "";
-              activeSubtitleTextRef.current = activeTxt;
-              setActiveSubtitleText(activeTxt);
-              if (!options?.silent) {
-                showToast(`Subtitles: ${subLabel}`);
-              }
+              applyLoadedCues(cues);
               return;
             }
           }
@@ -2578,9 +2628,7 @@ export function NativePlayer({
       directStreamUrl.toLowerCase().includes(".r2.");
 
     if (isFslStream) {
-      if (!options?.silent) {
-        showToast(t("Subtitles unavailable"));
-      }
+      handleFailedCues();
       return;
     }
 
@@ -2602,35 +2650,21 @@ export function NativePlayer({
       .then((r) => r.json())
       .then((res) => {
         if (res.cues && Array.isArray(res.cues) && res.cues.length > 0) {
-          subtitleCuesRef.current = res.cues;
-          setSubtitleCues(res.cues);
-          const curTime = videoRef.current
-            ? (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) + (videoRef.current.currentTime || 0)
-            : currentPosition;
-          const activeCue = findActiveCue(res.cues, curTime);
-          const activeTxt = activeCue ? activeCue.text : "";
-          activeSubtitleTextRef.current = activeTxt;
-          setActiveSubtitleText(activeTxt);
-          if (!options?.silent) {
-            showToast(`Subtitles: ${subLabel}`);
-          }
+          applyLoadedCues(res.cues);
         } else {
-          if (!options?.silent) {
-            showToast(`No subtitles found`);
-          }
+          handleFailedCues();
         }
       })
       .catch((err) => {
         console.warn("Subtitle fetch error:", err);
-        if (!options?.silent) {
-          showToast("Subtitles unavailable");
-        }
+        handleFailedCues();
       });
   };
 
   const handleSubtitleSizeSelect = (size: "small" | "normal" | "large") => {
     setSubtitleSize(size);
     safeStorage.setItem("moviznow_subtitle_size", size);
+    resetControlsTimeout();
     const sizeMap: Record<string, string> = {
       small: "Small",
       normal: "Normal",
@@ -2642,12 +2676,23 @@ export function NativePlayer({
   const handleSubtitleBgSelect = (bg: "black" | "semi" | "transparent") => {
     setSubtitleBg(bg);
     safeStorage.setItem("moviznow_subtitle_bg", bg);
+    resetControlsTimeout();
     const bgMap: Record<string, string> = {
       black: "Black",
       semi: "Semi-Transparent",
       transparent: "None",
     };
     showToast(`${t("Subtitle Background:")} ${bgMap[bg] || bg}`);
+  };
+
+  const handleSubtitleDelayChange = (newDelay: number) => {
+    const clamped = Math.round(newDelay * 100) / 100;
+    setSubtitleDelay(clamped);
+    subtitleDelayRef.current = clamped;
+    safeStorage.setItem("moviznow_subtitle_delay", String(clamped));
+    resetControlsTimeout();
+    const sign = clamped > 0 ? "+" : "";
+    showToast(`${t("Subtitle Sync:")} ${sign}${clamped.toFixed(2)}s`);
   };
 
   // Double tap to seek on touch screens (strictly on video viewport background)
@@ -2992,11 +3037,11 @@ export function NativePlayer({
             {/* Custom High-Definition Subtitle Cue Overlay in Background Overlay Layer */}
             {selectedSubtitleTrack !== null && activeSubtitleText && (
               <div
-                className={`absolute pointer-events-none inset-x-0 flex flex-col items-center justify-center px-4 transition-all duration-300 z-20 ${
-                  isControlsVisible ? "bottom-24 sm:bottom-28" : "bottom-8 sm:bottom-12"
+                className={`absolute pointer-events-none inset-x-0 flex flex-col items-center justify-center px-4 transition-all duration-200 z-10 ${
+                  effectiveControlsVisible ? "bottom-20 sm:bottom-24" : "bottom-6 sm:bottom-8"
                 }`}
               >
-                <div className="pointer-events-none flex flex-col items-center gap-1 max-w-[92%] sm:max-w-[85%] text-center select-none">
+                <div className="pointer-events-none flex flex-col items-center text-center select-none max-w-[90%] sm:max-w-[80%]">
                   {activeSubtitleText
                     .split("\n")
                     .map((line) => line.trim())
@@ -3004,12 +3049,12 @@ export function NativePlayer({
                     .map((line, idx) => (
                       <span
                         key={idx}
-                        className={`pointer-events-none inline-block font-semibold text-center select-none tracking-normal leading-normal transition-all ${
+                        className={`pointer-events-none inline font-semibold text-center select-none tracking-normal transition-all ${
                           subtitleBg === "transparent"
-                            ? "bg-transparent text-white"
+                            ? "bg-transparent text-white drop-shadow-[0_2px_4px_rgba(0,0,0,1)]"
                             : subtitleBg === "semi"
-                            ? "bg-black/60 text-white px-2 py-0.5 rounded-sm backdrop-blur-2xs"
-                            : "bg-black/85 text-white px-2 py-0.5 rounded-sm"
+                            ? "bg-black/50 text-white px-1.5 py-0.5 rounded-[4px] shadow-sm backdrop-blur-2xs"
+                            : "bg-black/80 text-white px-1.5 py-0.5 rounded-[4px] shadow-sm"
                         }`}
                         style={{
                           pointerEvents: "none",
@@ -3017,12 +3062,15 @@ export function NativePlayer({
                             subtitleSize === "small"
                               ? "13px"
                               : subtitleSize === "large"
-                              ? "20px"
-                              : "16px",
+                              ? "19px"
+                              : "15px",
+                          lineHeight: 1.35,
+                          boxDecorationBreak: "clone",
+                          WebkitBoxDecorationBreak: "clone",
                           textShadow:
                             subtitleBg === "transparent"
-                              ? "0 2px 4px rgba(0,0,0,1), 0 0 4px rgba(0,0,0,1), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000"
-                              : "0 1px 2px rgba(0,0,0,0.9)",
+                              ? "0 2px 4px #000, 0 0 3px #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000"
+                              : "0 1px 2px rgba(0,0,0,0.8)",
                         }}
                       >
                         {line}
@@ -3130,7 +3178,7 @@ export function NativePlayer({
                 className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 w-12 h-12 sm:w-14 sm:h-14 rounded-full border border-white/85 bg-black/65 hover:bg-black/85 hover:scale-108 backdrop-blur-md shadow-2xl flex items-center justify-center cursor-pointer transition-all duration-200 active:scale-95 ${
                   !isPlaying
                     ? "opacity-100 pointer-events-auto"
-                    : isControlsVisible
+                    : effectiveControlsVisible
                     ? "opacity-85 pointer-events-auto"
                     : "opacity-0 pointer-events-none"
                 }`}
@@ -3149,7 +3197,7 @@ export function NativePlayer({
           {/* Clean Top Bar Overlay (Unified layout from PlayerFU) */}
           <div
             className={`absolute top-0 inset-x-0 p-4 sm:p-5 bg-gradient-to-b from-black/85 via-black/40 to-transparent flex items-center justify-between z-30 transition-opacity duration-300 ${
-              isControlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+              effectiveControlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
             }`}
           >
             {/* Title & Metadata (Unified from PlayerFU embed-chrome) */}
@@ -3238,7 +3286,7 @@ export function NativePlayer({
                 resetControlsTimeout();
               }}
               className={`absolute bottom-0 inset-x-0 h-1 sm:h-1.5 z-20 cursor-pointer transition-opacity duration-300 ${
-                !isControlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+                !effectiveControlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
               }`}
               title="Click to show controls"
             >
@@ -3271,8 +3319,16 @@ export function NativePlayer({
                 e.stopPropagation();
                 resetControlsTimeout();
               }}
+              onMouseEnter={() => {
+                if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+                setIsControlsVisible(true);
+              }}
+              onMouseMove={(e) => {
+                e.stopPropagation();
+                resetControlsTimeout();
+              }}
               className={`control-bar absolute bottom-0 inset-x-0 p-3 sm:p-4 md:p-5 bg-gradient-to-t from-black/90 via-black/50 to-transparent flex flex-col gap-2 z-30 transition-opacity duration-300 ${
-                isControlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
+                effectiveControlsVisible ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
               }`}
             >
               {/* Timeline Progress Bar (Full Width across controls, unified position from PlayerFU) */}

@@ -393,14 +393,21 @@ export function parseMkvEbml(buf: Buffer): {
         audioIdx++;
       } else if (trackType === 17 || trackType === 0x11 || trackType === 16) {
         // Subtitle track
-        let subLang = lang;
+        let subLang = (lang || "").trim();
+        const lowerName = (name || "").toLowerCase();
         if (!subLang || subLang.toLowerCase() === "und") {
-          const lowerName = name.toLowerCase();
           if (lowerName.includes("eng") || lowerName.includes("en")) subLang = "eng";
           else if (lowerName.includes("hin") || lowerName.includes("hi")) subLang = "hin";
-          else subLang = "eng";
+          else if (lowerName.includes("tam")) subLang = "tam";
+          else if (lowerName.includes("tel")) subLang = "tel";
+          else if (lowerName.includes("spa")) subLang = "spa";
+          else subLang = "";
         }
-        const langName = isoLangToName(subLang);
+        // If neither a valid language code nor descriptive title exists, do NOT manufacture a fake track!
+        if (!subLang && !name) {
+          continue;
+        }
+        const langName = subLang ? isoLangToName(subLang) : name;
         const titleStr = sanitizeTrackTitle(name, langName);
         subtitleTracks.push({
           id: subIdx,
