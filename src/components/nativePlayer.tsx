@@ -51,6 +51,7 @@ import {
   fetchDirectSubtitleTracks,
   fetchDirectSubtitleCues,
   findActiveCue,
+  formatSubtitleLanguageLabel,
   DirectSubtitleTrack,
 } from "../utils/subtitleParser";
 
@@ -1010,6 +1011,7 @@ export function NativePlayer({
   }, [propDurationSeconds, totalDuration]);
   const [selectedAudioTrack, setSelectedAudioTrack] = useState<number>(0);
   const [selectedSubtitleTrack, setSelectedSubtitleTrack] = useState<string | number | null>(null);
+  const selectedSubtitleTrackRef = useRef<string | number | null>(null);
   const [directSubtitlesList, setDirectSubtitlesList] = useState<DirectSubtitleTrack[]>([]);
   const [subtitleCues, setSubtitleCues] = useState<Array<{ start: number; end: number; text: string }>>([]);
   const [activeSubtitleText, setActiveSubtitleText] = useState<string>("");
@@ -1019,6 +1021,14 @@ export function NativePlayer({
     const s = safeStorage.getItem("moviznow_subtitle_size");
     return (s as any) || "normal";
   });
+  const [subtitleBg, setSubtitleBg] = useState<"black" | "semi" | "transparent">(() => {
+    const b = safeStorage.getItem("moviznow_subtitle_bg");
+    return (b as any) || "black";
+  });
+
+  useEffect(() => {
+    selectedSubtitleTrackRef.current = selectedSubtitleTrack;
+  }, [selectedSubtitleTrack]);
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -1488,7 +1498,7 @@ export function NativePlayer({
           const prefSub = safeStorage.getItem("moviznow_subtitles_enabled");
           if (prefSub === "true") {
             setTimeout(() => {
-              if (isMounted) handleSubtitleSelect(0);
+              if (isMounted) handleSubtitleSelect(0, { silent: true });
             }, 300);
           }
         }
@@ -1514,7 +1524,7 @@ export function NativePlayer({
         setDirectSubtitlesList(tracks);
         const prefSub = safeStorage.getItem("moviznow_subtitles_enabled");
         if (prefSub === "true") {
-          handleSubtitleSelect(tracks[0].id);
+          handleSubtitleSelect(tracks[0].id, { silent: true });
         }
       }
     });
@@ -1826,15 +1836,16 @@ export function NativePlayer({
     }
 
     // Match inbuilt or external subtitle cue without delay on running playback
+    const currentSubTrack = selectedSubtitleTrackRef.current !== null ? selectedSubtitleTrackRef.current : selectedSubtitleTrack;
     const currentCues = subtitleCuesRef.current.length > 0 ? subtitleCuesRef.current : subtitleCues;
-    if (selectedSubtitleTrack !== null && currentCues.length > 0) {
+    if (currentSubTrack !== null && currentCues.length > 0) {
       const activeCue = findActiveCue(currentCues, current);
       const targetText = activeCue ? activeCue.text : "";
       if (targetText !== activeSubtitleTextRef.current) {
         activeSubtitleTextRef.current = targetText;
         setActiveSubtitleText(targetText);
       }
-    } else if (selectedSubtitleTrack === null && activeSubtitleTextRef.current) {
+    } else if (currentSubTrack === null && activeSubtitleTextRef.current) {
       activeSubtitleTextRef.current = "";
       setActiveSubtitleText("");
     }
@@ -1898,6 +1909,33 @@ export function NativePlayer({
       setIsPlaying(false);
     });
   };
+
+  // Continuous subtitle sync loop during active playback
+  // Guarantees subtitle dialogue changes accurately with duration on running playback
+  useEffect(() => {
+    if (!isPlaying || selectedSubtitleTrack === null) return;
+    let animId: number;
+    const syncSubtitle = () => {
+      const vid = (activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current) || videoRef.current;
+      if (vid && !vid.paused) {
+        const cur = streamMode === "transcode" && seekOffset > 0 ? seekOffset + vid.currentTime : vid.currentTime;
+        const cues = subtitleCuesRef.current.length > 0 ? subtitleCuesRef.current : subtitleCues;
+        if (cues.length > 0) {
+          const activeCue = findActiveCue(cues, cur);
+          const targetText = activeCue ? activeCue.text : "";
+          if (targetText !== activeSubtitleTextRef.current) {
+            activeSubtitleTextRef.current = targetText;
+            setActiveSubtitleText(targetText);
+          }
+        }
+      }
+      animId = requestAnimationFrame(syncSubtitle);
+    };
+    animId = requestAnimationFrame(syncSubtitle);
+    return () => {
+      if (animId) cancelAnimationFrame(animId);
+    };
+  }, [isPlaying, selectedSubtitleTrack, streamMode, seekOffset]);
 
   const handleRetryPlayback = useCallback(() => {
     setHasPlaybackError(false);
@@ -2346,7 +2384,7 @@ export function NativePlayer({
             list.push({
               id: s.id,
               language: s.language || "und",
-              title: s.title || formatAudioLanguageLabel(s.language) || `Subtitle ${s.id + 1}`,
+              title: formatSubtitleLanguageLabel(s.language, s.title, s.id + 1),
               isDirect: false,
             });
           }
@@ -2417,8 +2455,9 @@ export function NativePlayer({
     }
   };
 
-  const handleSubtitleSelect = async (subId: string | number | null) => {
+  const handleSubtitleSelect = async (subId: string | number | null, options?: { silent?: boolean }) => {
     setSelectedSubtitleTrack(subId);
+    selectedSubtitleTrackRef.current = subId;
     setActiveMenu(null);
     if (subId === null) {
       subtitleCuesRef.current = [];
@@ -2426,13 +2465,17 @@ export function NativePlayer({
       setSubtitleCues([]);
       setActiveSubtitleText("");
       safeStorage.setItem("moviznow_subtitles_enabled", "false");
-      showToast("Subtitles: Off");
+      if (!options?.silent) {
+        showToast("Subtitles: Off");
+      }
       return;
     }
     safeStorage.setItem("moviznow_subtitles_enabled", "true");
     const sub = computedSubtitleTracks.find((s) => String(s.id) === String(subId));
-    const subLabel = formatAudioLanguageLabel(sub?.language) || sub?.title || `Subtitle ${subId}`;
-    showToast(`Loading ${subLabel}...`);
+    const subLabel = formatSubtitleLanguageLabel(sub?.language, sub?.title, subId);
+    if (!options?.silent) {
+      showToast(`Loading ${subLabel}...`);
+    }
 
     // 1. Direct Subtitle Fetch: Fetch directly in browser from open CDN (0 Vercel transfer!)
     if (sub?.isDirect && (sub as DirectSubtitleTrack).url) {
@@ -2448,7 +2491,9 @@ export function NativePlayer({
           const activeTxt = activeCue ? activeCue.text : "";
           activeSubtitleTextRef.current = activeTxt;
           setActiveSubtitleText(activeTxt);
-          showToast(`Subtitles: ${subLabel}`);
+          if (!options?.silent) {
+            showToast(`Subtitles: ${subLabel}`);
+          }
           return;
         }
       } catch (err) {
@@ -2475,7 +2520,9 @@ export function NativePlayer({
           const activeTxt = activeCue ? activeCue.text : "";
           activeSubtitleTextRef.current = activeTxt;
           setActiveSubtitleText(activeTxt);
-          showToast(`Subtitles: ${subLabel}`);
+          if (!options?.silent) {
+            showToast(`Subtitles: ${subLabel}`);
+          }
           return;
         }
       } catch (err) {}
@@ -2509,7 +2556,9 @@ export function NativePlayer({
               const activeTxt = activeCue ? activeCue.text : "";
               activeSubtitleTextRef.current = activeTxt;
               setActiveSubtitleText(activeTxt);
-              showToast(`Subtitles: ${subLabel}`);
+              if (!options?.silent) {
+                showToast(`Subtitles: ${subLabel}`);
+              }
               return;
             }
           }
@@ -2529,7 +2578,9 @@ export function NativePlayer({
       directStreamUrl.toLowerCase().includes(".r2.");
 
     if (isFslStream) {
-      showToast(t("Subtitles unavailable"));
+      if (!options?.silent) {
+        showToast(t("Subtitles unavailable"));
+      }
       return;
     }
 
@@ -2560,20 +2611,43 @@ export function NativePlayer({
           const activeTxt = activeCue ? activeCue.text : "";
           activeSubtitleTextRef.current = activeTxt;
           setActiveSubtitleText(activeTxt);
-          showToast(`Subtitles: ${subLabel}`);
+          if (!options?.silent) {
+            showToast(`Subtitles: ${subLabel}`);
+          }
         } else {
-          showToast(`No subtitles found`);
+          if (!options?.silent) {
+            showToast(`No subtitles found`);
+          }
         }
       })
       .catch((err) => {
         console.warn("Subtitle fetch error:", err);
-        showToast("Subtitles unavailable");
+        if (!options?.silent) {
+          showToast("Subtitles unavailable");
+        }
       });
   };
 
   const handleSubtitleSizeSelect = (size: "small" | "normal" | "large") => {
     setSubtitleSize(size);
     safeStorage.setItem("moviznow_subtitle_size", size);
+    const sizeMap: Record<string, string> = {
+      small: "Small",
+      normal: "Normal",
+      large: "Large",
+    };
+    showToast(`${t("Subtitle Size:")} ${sizeMap[size] || size}`);
+  };
+
+  const handleSubtitleBgSelect = (bg: "black" | "semi" | "transparent") => {
+    setSubtitleBg(bg);
+    safeStorage.setItem("moviznow_subtitle_bg", bg);
+    const bgMap: Record<string, string> = {
+      black: "Black",
+      semi: "Semi-Transparent",
+      transparent: "None",
+    };
+    showToast(`${t("Subtitle Background:")} ${bgMap[bg] || bg}`);
   };
 
   // Double tap to seek on touch screens (strictly on video viewport background)
@@ -2918,12 +2992,18 @@ export function NativePlayer({
             {/* Custom High-Definition Subtitle Cue Overlay in Background Overlay Layer */}
             {selectedSubtitleTrack !== null && activeSubtitleText && (
               <div
-                className={`absolute pointer-events-none inset-x-0 flex items-center justify-center px-4 transition-all duration-300 z-[15] ${
-                  isControlsVisible ? "bottom-24 sm:bottom-28" : "bottom-10 sm:bottom-14"
+                className={`absolute pointer-events-none inset-x-0 flex items-center justify-center px-4 transition-all duration-300 z-20 ${
+                  isControlsVisible ? "bottom-24 sm:bottom-28" : "bottom-8 sm:bottom-12"
                 }`}
               >
                 <div
-                  className="pointer-events-none bg-black/80 text-white font-semibold text-center rounded-xl px-4 py-2 max-w-[90%] sm:max-w-[80%] leading-relaxed shadow-2xl border border-white/20 select-none animate-in fade-in duration-150 backdrop-blur-xs"
+                  className={`pointer-events-none font-semibold text-center rounded-xl px-4 py-2 max-w-[90%] sm:max-w-[80%] leading-relaxed select-none animate-in fade-in duration-150 transition-all ${
+                    subtitleBg === "transparent"
+                      ? "bg-transparent border-none text-white"
+                      : subtitleBg === "semi"
+                      ? "bg-black/60 backdrop-blur-xs border border-white/10 text-white shadow-xl"
+                      : "bg-black/90 border border-white/20 text-white shadow-2xl"
+                  }`}
                   style={{
                     pointerEvents: "none",
                     fontSize:
@@ -2932,7 +3012,10 @@ export function NativePlayer({
                         : subtitleSize === "large"
                         ? "22px"
                         : "17px",
-                    textShadow: "0 2px 4px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,1)",
+                    textShadow:
+                      subtitleBg === "transparent"
+                        ? "0 2px 4px rgba(0,0,0,1), 0 0 4px rgba(0,0,0,1), -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000"
+                        : "0 2px 4px rgba(0,0,0,0.9), 0 0 2px rgba(0,0,0,1)",
                   }}
                   dangerouslySetInnerHTML={{
                     __html: activeSubtitleText.replace(/\n/g, "<br/>"),
@@ -3634,8 +3717,7 @@ export function NativePlayer({
                           computedSubtitleTracks.map((sub) => {
                             const cleanSubLabel =
                               sub.title ||
-                              formatAudioLanguageLabel(sub.language) ||
-                              `Subtitle ${sub.id}`;
+                              formatSubtitleLanguageLabel(sub.language, undefined, sub.id);
 
                             const isSelected = String(selectedSubtitleTrack) === String(sub.id);
 
@@ -3676,6 +3758,35 @@ export function NativePlayer({
                                   }`}
                                 >
                                   {sz}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Subtitle Background Adjuster */}
+                        {selectedSubtitleTrack !== null && (
+                          <div className="border-t border-white/10 pt-1.5 mt-1 flex flex-col gap-1">
+                            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider px-2 py-0.5">
+                              {t("Subtitle Background")}
+                            </span>
+                            <div className="grid grid-cols-3 gap-1 px-1">
+                              {([
+                                { id: "black", label: t("Black") },
+                                { id: "semi", label: t("Semi") },
+                                { id: "transparent", label: t("None") },
+                              ] as const).map((bgOpt) => (
+                                <button
+                                  key={bgOpt.id}
+                                  type="button"
+                                  onClick={() => handleSubtitleBgSelect(bgOpt.id)}
+                                  className={`py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${
+                                    subtitleBg === bgOpt.id
+                                      ? "bg-emerald-500 text-white"
+                                      : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                                  }`}
+                                >
+                                  {bgOpt.label}
                                 </button>
                               ))}
                             </div>

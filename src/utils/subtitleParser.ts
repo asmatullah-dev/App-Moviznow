@@ -97,33 +97,85 @@ export function parseWebVTT(vttText: string): SubtitleCue[] {
 
   // Guarantee chronological sort
   cues.sort((a, b) => a.start - b.start);
+
+  // Post-process cues to prevent overlapping dialogues in time and line stacking:
+  // When a new dialogue begins, previous cue ends cleanly beforehand, so the new line never
+  // appears before the previous one disappears!
+  for (let idx = 0; idx < cues.length - 1; idx++) {
+    const cur = cues[idx];
+    const next = cues[idx + 1];
+    if (cur.end > next.start) {
+      cur.end = Math.max(cur.start, next.start - 0.05);
+    }
+    // Clean rollup repetition: if next cue starts with cur cue's dialogue, remove duplicate line
+    if (next.text && cur.text) {
+      const curLines = cur.text.split("\n").map((l) => l.trim()).filter(Boolean);
+      const nextLines = next.text.split("\n").map((l) => l.trim()).filter(Boolean);
+      if (nextLines.length > 1 && curLines.length > 0 && nextLines[0] === curLines[curLines.length - 1]) {
+        nextLines.shift();
+        next.text = nextLines.join("\n");
+      }
+    }
+  }
+
   return cues;
 }
 
 /**
- * Reliable cue matcher that guarantees smooth subtitle transitions during running playback
- * as well as seeks. Supports overlapping dialogues and out-of-order tracks.
+ * Ultra-fast binary search to find the active cue at current playback time.
+ * Cues are strictly chronological and non-overlapping.
+ * When playback enters dialogue, returns active cue; when between dialogues, returns null.
  */
 export function findActiveCue(cues: SubtitleCue[], currentTime: number): SubtitleCue | null {
   if (!cues || cues.length === 0) return null;
 
-  const matched: SubtitleCue[] = [];
-  for (let i = 0; i < cues.length; i++) {
-    const cue = cues[i];
-    if (currentTime >= cue.start - 0.25 && currentTime <= cue.end + 0.25) {
-      matched.push(cue);
-      if (matched.length >= 2) break;
+  let low = 0;
+  let high = cues.length - 1;
+
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const cue = cues[mid];
+
+    if (currentTime < cue.start) {
+      high = mid - 1;
+    } else if (currentTime > cue.end) {
+      low = mid + 1;
+    } else {
+      // Check if immediate next cue has started at this boundary
+      if (mid + 1 < cues.length && cues[mid + 1].start <= currentTime && currentTime <= cues[mid + 1].end) {
+        return cues[mid + 1];
+      }
+      return cue;
     }
   }
 
-  if (matched.length === 0) return null;
-  if (matched.length === 1) return matched[0];
+  return null;
+}
 
-  return {
-    start: matched[0].start,
-    end: Math.max(...matched.map((m) => m.end)),
-    text: matched.map((m) => m.text).filter(Boolean).join("\n"),
-  };
+/**
+ * Formats subtitle language label cleanly.
+ * NEVER returns "Audio". Always returns clean language name or "Default Subtitles".
+ */
+export function formatSubtitleLanguageLabel(lang?: string, title?: string, id?: string | number): string {
+  if (title && !title.toLowerCase().includes("audio") && title.trim().length > 0) {
+    return title.trim();
+  }
+  if (!lang || typeof lang !== "string") {
+    return id !== undefined && id !== null ? `Subtitle ${String(id).replace("direct_", "")}` : "Default Subtitles";
+  }
+  const clean = lang.trim().toLowerCase();
+  if (clean === "und" || clean === "none" || clean === "default" || clean === "") {
+    return id !== undefined && id !== null ? `Subtitle ${String(id).replace("direct_", "")}` : "Default Subtitles";
+  }
+  if (LANGUAGE_LABELS[clean]) {
+    return LANGUAGE_LABELS[clean];
+  }
+  for (const [code, label] of Object.entries(LANGUAGE_LABELS)) {
+    if (clean === code || (code.length >= 3 && clean.startsWith(code))) {
+      return label;
+    }
+  }
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
 const LANGUAGE_LABELS: Record<string, string> = {
