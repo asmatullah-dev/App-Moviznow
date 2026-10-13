@@ -1493,19 +1493,36 @@ nativePlayerRouter.get(["/api/native-player/subtitles", "/native-player/subtitle
       return res.json(inFlightResult);
     }
 
+    const rawTitle = ((req.query.title as string) || "").trim();
+    const lang = ((req.query.lang as string) || "eng").trim();
+    const imdbId = ((req.query.imdbId as string) || "").trim();
+    const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
+    const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
+
+    const isFslOrDirect =
+      targetUrl.toLowerCase().includes("fsl") ||
+      targetUrl.toLowerCase().includes("cloudflarestorage") ||
+      targetUrl.toLowerCase().includes(".r2.") ||
+      targetUrl.toLowerCase().includes("fastserver");
+
+    // 1. Try online subtitles first if title or imdbId is present (0 server choking, 0 Vercel compute)
+    if (imdbId || rawTitle) {
+      try {
+        const onlineCues = await fetchOnlineSubtitles(rawTitle, lang, imdbId, season, episode);
+        if (onlineCues.length > 0) {
+          subtitleCuesCache.set(cacheKey, { cues: onlineCues, timestamp: Date.now() });
+          return res.json({ ok: true, cues: onlineCues });
+        }
+      } catch {}
+    }
+
+    // 2. For FSL streams, NEVER spawn FFmpeg against targetUrl to prevent connection choking
+    if (isFslOrDirect) {
+      return res.json({ ok: false, cues: [], error: "Subtitles unavailable" });
+    }
+
     const hasFFmpeg = await checkFFmpegAvailable();
     if (!hasFFmpeg) {
-      const rawTitle = ((req.query.title as string) || "").trim();
-      const lang = ((req.query.lang as string) || "eng").trim();
-      const imdbId = ((req.query.imdbId as string) || "").trim();
-      const season = req.query.season ? parseInt(req.query.season as string, 10) : undefined;
-      const episode = req.query.episode ? parseInt(req.query.episode as string, 10) : undefined;
-
-      const onlineCues = await fetchOnlineSubtitles(rawTitle, lang, imdbId, season, episode);
-      if (onlineCues.length > 0) {
-        subtitleCuesCache.set(cacheKey, { cues: onlineCues, timestamp: Date.now() });
-        return res.json({ ok: true, cues: onlineCues });
-      }
       return res.json({ ok: false, cues: [], error: "No subtitles found" });
     }
 

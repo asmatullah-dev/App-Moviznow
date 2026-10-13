@@ -50,6 +50,7 @@ import {
 import {
   fetchDirectSubtitleTracks,
   fetchDirectSubtitleCues,
+  findActiveCue,
   DirectSubtitleTrack,
 } from "../utils/subtitleParser";
 
@@ -1586,9 +1587,9 @@ export function NativePlayer({
     };
   }, [isPlaying, resetControlsTimeout]);
 
-  // Prevent changing duration on 1st click when menu/controls are hidden
+  // Prevent changing duration on 1st click only when menu/controls are completely hidden
   const canSeekNow = useCallback((): boolean => {
-    if (!isControlsVisible || Date.now() - controlsShownAtRef.current < 500) {
+    if (!isControlsVisible) {
       resetControlsTimeout();
       return false;
     }
@@ -1768,9 +1769,16 @@ export function NativePlayer({
     const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current || videoRef.current;
     if (!activeVid) return;
 
-    // While user is seeking, do not let temporary video element latency snap position back
+    // If stream is playing and not paused, NEVER keep buffering spinner or seeking lock on!
+    if (!activeVid.paused) {
+      if (isSeekingRef.current) isSeekingRef.current = false;
+      if (isBuffering) setIsBuffering(false);
+      if (!isPlaying) setIsPlaying(true);
+    }
+
+    // While user is seeking, do not let temporary video element latency snap position back if paused
     if (isSeekingRef.current) {
-      if (Math.abs(activeVid.currentTime - currentPosition) < 1.5) {
+      if (!activeVid.paused || Math.abs(activeVid.currentTime - currentPosition) < 2.0) {
         isSeekingRef.current = false;
         setIsBuffering(false);
       } else {
@@ -1784,9 +1792,9 @@ export function NativePlayer({
       const vTime = activeVid.currentTime;
       if (streamMode === "transcode" && seekOffset > 0) {
         pendingQualitySwitchPosRef.current = null;
-      } else if (vTime < 1 && targetPos > 2) {
+      } else if (vTime < 1 && targetPos > 2 && activeVid.paused) {
         return;
-      } else if (vTime >= 1) {
+      } else {
         pendingQualitySwitchPosRef.current = null;
       }
     }
@@ -1814,25 +1822,32 @@ export function NativePlayer({
       if (!isPlaying) setIsPlaying(true);
     }
 
-    // Match inbuilt or external subtitle cue without delay
+    // Match inbuilt or external subtitle cue without delay using binary search
     if (selectedSubtitleTrack !== null && subtitleCues.length > 0) {
-      const activeCue = subtitleCues.find(
-        (cue) => current >= (cue.start - 0.25) && current <= (cue.end + 0.25)
-      );
-      setActiveSubtitleText(activeCue ? activeCue.text : "");
+      const activeCue = findActiveCue(subtitleCues, current);
+      const targetText = activeCue ? activeCue.text : "";
+      if (targetText !== activeSubtitleText) {
+        setActiveSubtitleText(targetText);
+      }
     } else if (selectedSubtitleTrack === null && activeSubtitleText) {
       setActiveSubtitleText("");
     }
 
-    // Authoritative media duration: probed media file duration > content runtime > video element (rejecting Chrome's 3600s synthetic 1-hour dummy)
+    // Authoritative media duration: probed media file duration > video element (finite & valid) > content runtime
     if (mediaInfo?.duration && mediaInfo.duration > 60) {
-      if (totalDuration !== Math.round(mediaInfo.duration)) {
-        setTotalDuration(Math.round(mediaInfo.duration));
+      const targetDur = Math.round(mediaInfo.duration);
+      if (totalDuration !== targetDur) {
+        setTotalDuration(targetDur);
       }
-    } else if (propDurationSeconds > 60 && totalDuration <= 60) {
+    } else if (activeVid && isFinite(activeVid.duration) && activeVid.duration > 60 && Math.round(activeVid.duration) !== 3600) {
+      const targetDur = Math.round(activeVid.duration);
+      if (totalDuration <= 60 || totalDuration === 100 || Math.abs(totalDuration - targetDur) > 60) {
+        setTotalDuration(targetDur);
+      }
+    } else if (propDurationSeconds > 60 && (totalDuration <= 60 || totalDuration === 100)) {
       setTotalDuration(propDurationSeconds);
-    } else if (activeVid && isFinite(activeVid.duration) && activeVid.duration > 60 && Math.round(activeVid.duration) !== 3600 && totalDuration <= 60) {
-      setTotalDuration(Math.round(activeVid.duration));
+    } else if (current > totalDuration && totalDuration > 0) {
+      setTotalDuration(Math.max(totalDuration, Math.round(current) + 120));
     }
 
     updateBufferMetrics();
@@ -1852,6 +1867,8 @@ export function NativePlayer({
       if (!totalDuration || Math.abs(totalDuration - vidDur) > 30) {
         setTotalDuration(Math.round(vidDur));
       }
+    } else if (totalDuration <= 60 && propDurationSeconds > 0) {
+      setTotalDuration(propDurationSeconds);
     }
     setIsBuffering(false);
     setHasPlaybackError(false);
@@ -2137,19 +2154,20 @@ export function NativePlayer({
 
   // Perform seek
   const executeSeek = (targetSeconds: number) => {
+    const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current || videoRef.current;
     const duration =
       totalDuration > 60
         ? totalDuration
         : mediaInfo?.duration && mediaInfo.duration > 60
         ? Math.round(mediaInfo.duration)
+        : (activeVid && isFinite(activeVid.duration) && activeVid.duration > 60 && Math.round(activeVid.duration) !== 3600)
+        ? Math.round(activeVid.duration)
         : propDurationSeconds > 60
         ? propDurationSeconds
         : 100;
     const clampedTarget = Math.max(0, Math.min(duration, targetSeconds));
 
-    const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current || videoRef.current;
-
-    // Do NOT show loading stream spinner if target seek is ALREADY buffered!
+    // Do NOT show loading stream spinner if target seek is ALREADY buffered or already playing!
     const alreadyBuffered =
       streamMode !== "transcode" &&
       activeVid &&
@@ -2160,9 +2178,9 @@ export function NativePlayer({
     seekSafetyTimerRef.current = setTimeout(() => {
       isSeekingRef.current = false;
       setIsBuffering(false);
-    }, 1200);
+    }, 600);
 
-    if (!alreadyBuffered) {
+    if (!alreadyBuffered && activeVid?.paused) {
       setIsBuffering(true);
     }
     setCurrentPosition(clampedTarget);
@@ -2171,9 +2189,7 @@ export function NativePlayer({
 
     // Instantly preview subtitle cue at new position if subtitles are on
     if (selectedSubtitleTrack !== null && subtitleCues.length > 0) {
-      const activeCue = subtitleCues.find(
-        (cue) => clampedTarget >= (cue.start - 0.25) && clampedTarget <= (cue.end + 0.25)
-      );
+      const activeCue = findActiveCue(subtitleCues, clampedTarget);
       setActiveSubtitleText(activeCue ? activeCue.text : "");
     }
 
@@ -2303,31 +2319,30 @@ export function NativePlayer({
   const computedSubtitleTracks = useMemo(() => {
     const list: Array<DirectSubtitleTrack | { id: number | string; language: string; title: string; isDirect?: boolean }> = [];
 
-    // 1. Embedded subtitles provided directly by the video stream (Pixeldrain or FSL server)
+    // 1. Direct external subtitles from open CDN as first priority (0 Vercel transfer, 0 server choking)
+    if (directSubtitlesList.length > 0) {
+      list.push(...directSubtitlesList);
+    }
+
+    // 2. Add embedded subtitle tracks if not already provided by direct open-CDN tracks
     if (mediaInfo?.subtitleTracks && Array.isArray(mediaInfo.subtitleTracks) && mediaInfo.subtitleTracks.length > 0) {
       mediaInfo.subtitleTracks.forEach((s) => {
         if (s && typeof s.id === "number") {
-          list.push({
-            id: s.id,
-            language: s.language || "und",
-            title: s.title || formatAudioLanguageLabel(s.language) || `Subtitle ${s.id + 1}`,
-            isDirect: false,
+          const sLang = (s.language || "und").toLowerCase();
+          const alreadyInList = list.some((existing) => {
+            const exLang = (existing.language || "").toLowerCase();
+            return exLang === sLang || (sLang.length >= 2 && exLang.startsWith(sLang.slice(0, 2)));
           });
+          if (!alreadyInList) {
+            list.push({
+              id: s.id,
+              language: s.language || "und",
+              title: s.title || formatAudioLanguageLabel(s.language) || `Subtitle ${s.id + 1}`,
+              isDirect: false,
+            });
+          }
         }
       });
-    }
-
-    // 2. Direct external subtitles from open CDN as fallback or additional language options
-    if (directSubtitlesList.length > 0) {
-      if (list.length === 0) {
-        list.push(...directSubtitlesList);
-      } else {
-        directSubtitlesList.forEach((ext) => {
-          if (!list.some((existing) => existing.language.toLowerCase() === ext.language.toLowerCase())) {
-            list.push(ext);
-          }
-        });
-      }
     }
 
     return list;
@@ -2417,19 +2432,88 @@ export function NativePlayer({
           const curTime = videoRef.current
             ? (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) + (videoRef.current.currentTime || 0)
             : currentPosition;
-          const activeCue = cues.find(
-            (cue) => curTime >= (cue.start - 0.25) && curTime <= (cue.end + 0.25)
-          );
+          const activeCue = findActiveCue(cues, curTime);
           setActiveSubtitleText(activeCue ? activeCue.text : "");
           showToast(`Subtitles: ${subLabel}`);
           return;
         }
       } catch (err) {
-        console.warn("[Direct subtitle fetch error, falling back to server]:", err);
+        console.warn("[Direct subtitle fetch error, checking alternative]:", err);
       }
     }
 
-    // 2. Server-side fallback for embedded MKV subtitle tracks
+    // 1b. Check if directSubtitlesList has matching track for this language before calling server
+    const targetLang = (sub?.language || "").toLowerCase();
+    const directMatch = directSubtitlesList.find((d) => {
+      const dLang = (d.language || "").toLowerCase();
+      return dLang === targetLang || (targetLang.length >= 2 && dLang.startsWith(targetLang.slice(0, 2)));
+    });
+    if (directMatch && directMatch.url) {
+      try {
+        const cues = await fetchDirectSubtitleCues(directMatch.url);
+        if (cues && cues.length > 0) {
+          setSubtitleCues(cues);
+          const curTime = videoRef.current
+            ? (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) + (videoRef.current.currentTime || 0)
+            : currentPosition;
+          const activeCue = findActiveCue(cues, curTime);
+          setActiveSubtitleText(activeCue ? activeCue.text : "");
+          showToast(`Subtitles: ${subLabel}`);
+          return;
+        }
+      } catch (err) {}
+    }
+
+    // 2. Direct online subtitle lookup via OpenSubtitles CDN before server demuxing (0 server choking)
+    if (imdbId) {
+      try {
+        const epNum = episodeInfo?.number ?? (episodeInfo as any)?.episodeNumber;
+        const sNum = seasonInfo?.number ?? (seasonInfo as any)?.seasonNumber;
+        const openTracks = await fetchDirectSubtitleTracks(imdbId, sNum, epNum);
+        if (openTracks.length > 0) {
+          const matchingOpen = openTracks.find((o) => {
+            const oLang = (o.language || "").toLowerCase();
+            return (
+              oLang === targetLang ||
+              (targetLang.length >= 2 && oLang.startsWith(targetLang.slice(0, 2))) ||
+              oLang.includes("eng")
+            );
+          }) || openTracks[0];
+
+          if (matchingOpen && matchingOpen.url) {
+            const cues = await fetchDirectSubtitleCues(matchingOpen.url);
+            if (cues && cues.length > 0) {
+              setSubtitleCues(cues);
+              const curTime = videoRef.current
+                ? (streamMode === "transcode" && seekOffset > 0 ? seekOffset : 0) + (videoRef.current.currentTime || 0)
+                : currentPosition;
+              const activeCue = findActiveCue(cues, curTime);
+              setActiveSubtitleText(activeCue ? activeCue.text : "");
+              showToast(`Subtitles: ${subLabel}`);
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("[Direct subtitle fallback warning]:", e);
+      }
+    }
+
+    // 3. For FSL Server: NEVER call backend FFmpeg demuxer which chokes FSL edge playback!
+    const isFslStream =
+      activeServer === "fsl" ||
+      Boolean(fslCandidate) ||
+      directStreamUrl.toLowerCase().includes("fsl") ||
+      directStreamUrl.toLowerCase().includes("fastserver") ||
+      directStreamUrl.toLowerCase().includes("cloudflarestorage") ||
+      directStreamUrl.toLowerCase().includes(".r2.");
+
+    if (isFslStream) {
+      showToast(t("Subtitles unavailable"));
+      return;
+    }
+
+    // 3. Server-side fallback for embedded MKV subtitle tracks
     const apiBase = getStreamingApiBase();
     const epNum = episodeInfo?.number ?? (episodeInfo as any)?.episodeNumber;
     const sNum = seasonInfo?.number ?? (seasonInfo as any)?.seasonNumber;
@@ -2596,16 +2680,12 @@ export function NativePlayer({
   const handleActiveSeeking = useCallback(() => {
     if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
       const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current;
-      if (activeVid) {
-        const alreadyBuffered =
-          streamMode !== "transcode" &&
-          isTimeBuffered(activeVid, activeVid.currentTime);
-        if (!alreadyBuffered) {
-          setIsBuffering(true);
-        }
+      // Only show buffering indicator if the video is paused during seek
+      if (activeVid && activeVid.paused) {
+        setIsBuffering(true);
       }
     }
-  }, [streamMode]);
+  }, []);
 
   const handleActiveSeeked = useCallback(() => {
     isSeekingRef.current = false;
@@ -2615,6 +2695,7 @@ export function NativePlayer({
   }, []);
 
   const handleActivePlaying = useCallback(() => {
+    isSeekingRef.current = false;
     setIsBuffering(false);
     setIsPlaying(true);
     setIsSwitchingAudio(false);
@@ -2806,13 +2887,14 @@ export function NativePlayer({
             {/* Custom High-Definition Subtitle Cue Overlay */}
             {selectedSubtitleTrack !== null && activeSubtitleText && (
               <div
-                className={`absolute pointer-events-none inset-x-0 flex items-center justify-center px-4 transition-all duration-300 z-[35] ${
+                className={`absolute pointer-events-none inset-x-0 flex items-center justify-center px-4 transition-all duration-300 z-[25] ${
                   isControlsVisible ? "bottom-24 sm:bottom-28" : "bottom-10 sm:bottom-14"
                 }`}
               >
                 <div
-                  className="bg-black/90 text-white font-semibold text-center rounded-xl px-4 py-2 max-w-[90%] sm:max-w-[80%] leading-relaxed shadow-2xl border border-white/20 select-none animate-in fade-in duration-150"
+                  className="pointer-events-none bg-black/90 text-white font-semibold text-center rounded-xl px-4 py-2 max-w-[90%] sm:max-w-[80%] leading-relaxed shadow-2xl border border-white/20 select-none animate-in fade-in duration-150"
                   style={{
+                    pointerEvents: "none",
                     fontSize:
                       subtitleSize === "small"
                         ? "14px"
@@ -3124,7 +3206,7 @@ export function NativePlayer({
                   max={totalDuration || 100}
                   step={1}
                   value={currentPosition}
-                  disabled={!isControlsVisible || Date.now() - controlsShownAtRef.current < 500}
+                  disabled={!isControlsVisible}
                   onChange={handleScrubberChange}
                   onClick={(e) => e.stopPropagation()}
                   onTouchEnd={(e) => e.stopPropagation()}

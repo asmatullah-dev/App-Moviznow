@@ -98,6 +98,30 @@ export function parseWebVTT(vttText: string): SubtitleCue[] {
   return cues;
 }
 
+/**
+ * Ultra-fast binary search to find the active cue at current playback time.
+ * Cues are sorted chronologically by start time.
+ */
+export function findActiveCue(cues: SubtitleCue[], currentTime: number): SubtitleCue | null {
+  if (!cues || cues.length === 0) return null;
+  let low = 0;
+  let high = cues.length - 1;
+
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    const cue = cues[mid];
+    if (currentTime < cue.start - 0.25) {
+      high = mid - 1;
+    } else if (currentTime > cue.end + 0.25) {
+      low = mid + 1;
+    } else {
+      return cue;
+    }
+  }
+
+  return null;
+}
+
 const LANGUAGE_LABELS: Record<string, string> = {
   eng: "English",
   en: "English",

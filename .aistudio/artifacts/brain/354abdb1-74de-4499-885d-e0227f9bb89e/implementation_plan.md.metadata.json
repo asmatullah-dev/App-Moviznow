@@ -1,0 +1,6 @@
+{
+  "summary": "Implementation plan to fix FSL server duration, seeking, loading overlay, and subtitle rendering in nativePlayer:\n1. Fixes subtitle conflict blocking duration and seeking by prioritizing direct client-side open-CDN WebVTT subtitles and removing remote FFmpeg demuxing that throttled FSL stream connections.\n2. Fixes subtitle overlay z-index and pointer-events so subtitle text boxes never block timeline scrubbing or player controls.\n3. Fixes seeking lock in handleTimeUpdate so the 'Loading Stream...' overlay dismisses instantly when the video plays frames.\n4. Protects stream duration and progress bar math so the scrubber remains moving and interactive on FSL streams.\n5. Strictly ensures zero Vercel Fast Origin and Fast Data Transfer consumption.",
+  "updatedAt": "2026-10-13T06:48:59.301674249Z",
+  "requestFeedback": true,
+  "userFacing": true
+}
