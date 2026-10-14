@@ -1027,6 +1027,46 @@ export function isPhoneMatch(
 }
 
 /**
+ * Checks if a user's email matches any email in a Google Contact person.
+ */
+export function isEmailMatch(userEmail: string | undefined, person: GoogleContactPerson): boolean {
+  if (!userEmail || !person.emailAddresses || person.emailAddresses.length === 0) return false;
+  const target = userEmail.trim().toLowerCase();
+  if (!target || !target.includes('@') || target.endsWith('@moviznow.com')) return false;
+  return person.emailAddresses.some(e => e.value && e.value.trim().toLowerCase() === target);
+}
+
+/**
+ * Searches Google Contacts directly via Google People API search endpoint using email query.
+ */
+export async function searchGoogleContactsByEmail(
+  emailStr: string,
+  accessToken: string
+): Promise<GoogleContactPerson | null> {
+  const cleanEmail = emailStr.trim().toLowerCase();
+  if (!cleanEmail || !cleanEmail.includes('@') || cleanEmail.endsWith('@moviznow.com')) return null;
+
+  try {
+    const url = `https://people.googleapis.com/v1/people:searchContacts?query=${encodeURIComponent(cleanEmail)}&readMask=names,phoneNumbers,emailAddresses,birthdays,biographies,userDefined,memberships&pageSize=10`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.results && Array.isArray(data.results)) {
+      for (const item of data.results) {
+        if (item.person && isEmailMatch(cleanEmail, item.person)) {
+          return item.person;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('searchGoogleContactsByEmail error:', e);
+  }
+  return null;
+}
+
+/**
  * Searches Google Contacts directly via Google People API search endpoint using phone number query.
  */
 export async function searchGoogleContactsByPhone(
@@ -1059,17 +1099,29 @@ export async function searchGoogleContactsByPhone(
 }
 
 /**
- * Finds a contact in Google Contacts list strictly matching a user's phone number.
+ * Finds a contact in Google Contacts list strictly matching a user's phone number or email address.
  */
 export function findMatchingContact(
   user: { phone?: string; email?: string; displayName?: string },
   connectionsList: GoogleContactPerson[] = []
 ): GoogleContactPerson | null {
-  if (!user.phone || !connectionsList || connectionsList.length === 0) return null;
+  if (!connectionsList || connectionsList.length === 0) return null;
 
-  for (const person of connectionsList) {
-    if (isPhoneMatch(user.phone, person)) {
-      return person;
+  // 1. Primary: Match by phone number
+  if (user.phone) {
+    for (const person of connectionsList) {
+      if (isPhoneMatch(user.phone, person)) {
+        return person;
+      }
+    }
+  }
+
+  // 2. Secondary: Match by email address (if not default dummy @moviznow.com)
+  if (user.email && user.email.includes('@') && !user.email.endsWith('@moviznow.com')) {
+    for (const person of connectionsList) {
+      if (isEmailMatch(user.email, person)) {
+        return person;
+      }
     }
   }
 
@@ -1078,7 +1130,7 @@ export function findMatchingContact(
 
 /**
  * Syncs a single user to Google Contacts.
- * Always checks by phone number. If found, replaces the contact's name with the new formatted name.
+ * Checks by phone number or email. If found, updates the contact's name with the new formatted name prefix.
  * If not found, creates a new contact.
  */
 export async function syncSingleUserContact(
@@ -1095,26 +1147,31 @@ export async function syncSingleUserContact(
   error?: string;
   isTokenError?: boolean;
 }> {
-  if (!user.phone) {
+  if (!user.phone && !user.email) {
     return {
       success: false,
       created: false,
       updated: false,
       contactName: '',
       phoneUsed: '',
-      error: 'User has no phone or WhatsApp number'
+      error: 'User has no phone or email address'
     };
   }
 
-  const { normalized, matchKey } = normalizePhone(user.phone);
-  if (!normalized || !matchKey) {
+  let normalized = '';
+  if (user.phone) {
+    const { normalized: norm } = normalizePhone(user.phone);
+    normalized = norm;
+  }
+
+  if (!normalized && (!user.email || user.email.endsWith('@moviznow.com'))) {
     return {
       success: false,
       created: false,
       updated: false,
       contactName: '',
-      phoneUsed: user.phone,
-      error: 'Invalid phone number format'
+      phoneUsed: user.phone || '',
+      error: 'Invalid phone number format and no valid email address'
     };
   }
 
@@ -1132,12 +1189,17 @@ export async function syncSingleUserContact(
       connections = await fetchAllGoogleContacts(accessToken);
     }
 
-    // 1. Check in fetched connections list by phone
+    // 1. Check in fetched connections list by phone or email
     let existingPerson = findMatchingContact(user, connections);
 
     // 2. Fallback: Search directly via Google Contacts API if not found in top connections list
     if (!existingPerson) {
-      existingPerson = await searchGoogleContactsByPhone(user.phone, accessToken);
+      if (user.phone) {
+        existingPerson = await searchGoogleContactsByPhone(user.phone, accessToken);
+      }
+      if (!existingPerson && user.email) {
+        existingPerson = await searchGoogleContactsByEmail(user.email, accessToken);
+      }
     }
 
     if (existingPerson) {
@@ -1405,7 +1467,7 @@ export async function syncSingleUserContact(
 
       const createBody: any = {
         names: [{ givenName: formattedName, familyName: '', middleName: '' }],
-        phoneNumbers: [{ value: normalized }]
+        phoneNumbers: normalized ? [{ value: normalized }] : []
       };
 
       if (user.email && user.email.trim()) {
@@ -1664,7 +1726,7 @@ export async function syncUserContactWithAutoOAuth(
   userToSync: UserProfile,
   interactivePromptIfNoToken: boolean = true
 ): Promise<{ success: boolean; pending: boolean; contactName?: string; error?: string; syncedCount?: number }> {
-  if (!userToSync.phone) {
+  if (!userToSync.phone && !userToSync.email) {
     return { success: true, pending: false };
   }
 

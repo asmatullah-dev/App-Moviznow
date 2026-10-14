@@ -9,6 +9,7 @@ import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
 import AlertModal from '../../components/AlertModal';
 import ConfirmModal from '../../components/ConfirmModal';
+import SendEmailConfirmModal from '../../components/SendEmailConfirmModal';
 import { Button } from '../../components/Button';
 import { UserDataFieldsView } from '../../components/UserDataFieldsView';
 import { ChunkMetaDocModal } from '../../components/ChunkMetaDocModal';
@@ -78,6 +79,7 @@ export default function UserManagement() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<UserProfile>>({});
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; message: string }>({ isOpen: false, title: '', message: '' });
+  const [emailModalUser, setEmailModalUser] = useState<UserProfile | null>(null);
   
   const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem('user_mgmt_search') || '');
   const debouncedSearchTerm = useDebounce(searchTerm, 100);
@@ -222,12 +224,12 @@ export default function UserManagement() {
   }, [isUserPhoneWhitelisted, unwhitelistPhoneNumber, whitelistPhoneNumber]);
 
   const autoSyncUserToContacts = useCallback(async (userToSync: UserProfile, interactive = false) => {
-    if (!userToSync.phone) return;
+    if (!userToSync.phone && !userToSync.email) return;
     setIsSyncingContacts(true);
     try {
       const res = await syncUserContactWithAutoOAuth(userToSync, interactive);
       if (res.success) {
-        console.log(`[Google Contacts Auto-Sync] Synced ${userToSync.displayName || userToSync.phone} -> ${res.contactName}`);
+        console.log(`[Google Contacts Auto-Sync] Synced ${userToSync.displayName || userToSync.phone || userToSync.email} -> ${res.contactName}`);
       } else if (res.pending) {
         console.warn(`[Google Contacts] User ${userToSync.uid} kept in pending sync queue:`, res.error);
       }
@@ -997,10 +999,14 @@ export default function UserManagement() {
 
       setEditingId(null);
       setIsEditingOverlay(false);
-      setSelectedUser({
+      const updatedUser: UserProfile = {
         ...selectedUser,
         ...updateData
-      });
+      };
+      setSelectedUser(updatedUser);
+
+      // Auto-sync updated user to Google Contacts immediately in background
+      autoSyncUserToContacts(updatedUser, false);
     } catch (error) {
       console.error('Error updating user:', error);
       setAlertConfig({ isOpen: true, title: 'Error', message: 'Failed to update user' });
@@ -1017,19 +1023,27 @@ export default function UserManagement() {
       updateUserFields(selectedUser.uid, updatedFields);
 
       // 2. Update active selectedUser state so the details view reflects the new fields immediately
-      setSelectedUser(prev => {
-        if (!prev) return null;
-        const next = { ...prev, ...updatedFields };
-        if (deletedKeys && deletedKeys.length > 0) {
-          deletedKeys.forEach(k => delete (next as any)[k]);
+      const nextUser = { ...selectedUser, ...updatedFields };
+      if (deletedKeys && deletedKeys.length > 0) {
+        deletedKeys.forEach(k => delete (nextUser as any)[k]);
+      }
+      for (const k in nextUser) {
+        if ((nextUser as any)[k] === '__DELETE_FIELD__') {
+          delete (nextUser as any)[k];
         }
-        for (const k in next) {
-          if ((next as any)[k] === '__DELETE_FIELD__') {
-            delete (next as any)[k];
-          }
-        }
-        return next as UserProfile;
-      });
+      }
+      setSelectedUser(nextUser as UserProfile);
+
+      // Auto-sync updated user to Google Contacts immediately in background if expiryDate or other identity fields were updated
+      if (
+        updatedFields.expiryDate !== undefined ||
+        updatedFields.status !== undefined ||
+        updatedFields.role !== undefined ||
+        updatedFields.phone !== undefined ||
+        updatedFields.displayName !== undefined
+      ) {
+        autoSyncUserToContacts(nextUser as UserProfile, false);
+      }
     } catch (err: any) {
       console.error("Failed to save all user fields locally:", err);
       throw err;
@@ -2425,7 +2439,7 @@ export default function UserManagement() {
                       <button 
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleSendStatusEmail(user);
+                          setEmailModalUser(user);
                         }}
                         className="p-1.5 text-blue-500 hover:bg-blue-500/10 rounded-lg transition-colors disabled:opacity-50"
                         title="Send Status Email (Active/Expired) to Gmail"
@@ -3579,7 +3593,7 @@ export default function UserManagement() {
                     Send Reminder
                   </Button>
                   <Button
-                    onClick={() => handleSendStatusEmail(selectedUser)}
+                    onClick={() => setEmailModalUser(selectedUser)}
                     variant="secondary"
                     className="px-4 py-2.5 text-sm"
                     loading={processing[`email_status_${selectedUser.uid}`]}
@@ -4131,6 +4145,18 @@ export default function UserManagement() {
           onClose={() => setContactsSyncResult(null)}
         />
       )}
+
+      {/* Email Notification Confirmation Modal with full preview */}
+      <SendEmailConfirmModal
+        isOpen={!!emailModalUser}
+        user={emailModalUser}
+        onClose={() => setEmailModalUser(null)}
+        isLoading={emailModalUser ? !!processing[`email_status_${emailModalUser.uid}`] : false}
+        onConfirm={async (targetUser) => {
+          await handleSendStatusEmail(targetUser);
+          setEmailModalUser(null);
+        }}
+      />
     </div>
   );
 }

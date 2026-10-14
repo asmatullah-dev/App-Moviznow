@@ -23,7 +23,6 @@ import {
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import { getMessaging, getToken, onMessage } from 'firebase/messaging';
-import { getAnalytics, isSupported, setUserProperties } from 'firebase/analytics';
 import firebaseConfig from '../firebase-applet-config.json';
 import { safeStorage } from './utils/safeStorage';
 import { APP_VERSION, APP_NAME } from './version';
@@ -79,49 +78,9 @@ if (typeof window !== 'undefined') {
   }
 }
 
-export const analyticsPromise = typeof window !== 'undefined' 
-  ? isSupported()
-      .then(yes => {
-        let isOwner = false;
-        try {
-          const cachedProfile = window.localStorage.getItem('profile_cache');
-          if (cachedProfile) {
-            const profile = JSON.parse(cachedProfile);
-            if (profile.role === 'owner') {
-               isOwner = true;
-            }
-          }
-        } catch (e) {}
-
-        if (isOwner) {
-           console.log("Analytics disabled for owner.");
-           return null;
-        }
-
-        let analyticsInstance = null;
-        if (yes) {
-          try {
-            analyticsInstance = getAnalytics(app);
-            setUserProperties(analyticsInstance, { 
-               app_version: APP_VERSION,
-               version: APP_VERSION,
-               app_name: APP_NAME
-            });
-          } catch(e) {
-            console.warn("Could not initialize Firebase Analytics:", e);
-          }
-        }
-        
-        return analyticsInstance;
-      })
-      .catch((e) => {
-        console.warn("Analytics not supported or failed to initialize", e);
-        return null;
-      })
-  : Promise.resolve(null);
-
+// Firebase Analytics is disabled to eliminate unnecessary webConfig and telemetry network requests
+export const analyticsPromise: Promise<any> = Promise.resolve(null);
 export let analytics: any = null;
-analyticsPromise.then(a => { analytics = a; });
 
 export const getGuestDeviceId = (): string => {
   if (typeof window === 'undefined') return 'guest_server';

@@ -19,6 +19,7 @@ import {
   modalGpuStyle,
 } from '../../utils/modalAnimations';
 import { normalizeOrder, toMinimalOrder } from '../../utils/orderUtils';
+import { syncUserContactWithAutoOAuth } from '../../services/googleContactsService';
 
 const CACHE_KEY = 'admin_orders_cache';
 const PHONES_CACHE_KEY = 'admin_user_phones_cache';
@@ -223,6 +224,14 @@ export default function OrdersManagement() {
       updates.orders = updatedOrders;
 
       updateUserFields(order.userId, updates);
+
+      // Auto-sync updated user contact to Google Contacts immediately in background
+      if (order.type === 'membership') {
+        const targetUser = { ...userData, ...updates };
+        syncUserContactWithAutoOAuth(targetUser, false).catch(err => {
+          console.warn('[OrdersManagement] Contact sync on order approval error:', err);
+        });
+      }
 
       // Send Order Approved Notification
       fetch('/api/notifications/notify-order-approved', {

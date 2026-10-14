@@ -1,5 +1,3 @@
-import { logEvent as firebaseLogEvent } from 'firebase/analytics';
-import { analytics, analyticsPromise } from '../firebase';
 import { safeStorage } from '../utils/safeStorage';
 import { APP_VERSION } from '../version';
 
@@ -111,23 +109,7 @@ export const logEvent = async (
     }
   }
 
-  try {
-    // Log to Firebase Analytics if initialized
-    const gaInstance = analytics || await analyticsPromise;
-    if (gaInstance) {
-      try {
-        firebaseLogEvent(gaInstance, type, {
-          user_id: userId,
-          app_version: APP_VERSION,
-          ...data
-        });
-      } catch (e) {
-        // ignore
-      }
-    }
-  } catch (error) {
-    console.error('Error logging analytics event:', error);
-  }
+  // Firebase Analytics disabled
 };
 
 export const updateTimeSpent = async (userId: string, minutes: number) => {
