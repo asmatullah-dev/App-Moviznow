@@ -3125,15 +3125,6 @@ export function NativePlayer({
               </div>
             )}
 
-            {/* Seamless Audio Track Switch Badge (no full-screen Loading Stream when only changing language) */}
-            {isSwitchingAudio && engine === "native" && (
-              <div className="absolute top-16 left-1/2 -translate-x-1/2 pointer-events-none flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-black/80 backdrop-blur-md border border-emerald-500/30 text-emerald-400 text-xs font-semibold shadow-xl z-20 animate-in fade-in duration-150">
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400 shrink-0" />
-                <span>
-                  {t("Switching Audio Track...")}
-                </span>
-              </div>
-            )}
 
             {/* Seamless Quality Switch Badge (no full-screen Loading Stream when switching quality) */}
             {isSwitchingQuality && engine === "native" && (
