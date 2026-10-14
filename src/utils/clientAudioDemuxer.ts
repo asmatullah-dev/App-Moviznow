@@ -176,37 +176,15 @@ export class ClientAudioSyncEngine {
 
   /**
    * Switches to trackId:
-   * - If trackId === 0: mutes auxiliary audio and un-mutes video's native audio
-   * - If trackId > 0: mutes video element and plays auxiliary audio feed
+   * Keeps audio synchronized without ever muting videoEl unexpectedly.
    */
   public selectTrack(trackId: number, mediaAudioTracks?: MediaAudioTrack[]) {
     this.activeTrackId = trackId;
-    if (!this.videoEl || !this.audioEl) return;
+    if (!this.videoEl) return;
 
-    if (trackId === 0) {
-      // Default primary track: play native video audio
-      this.videoEl.muted = false;
+    if (this.audioEl) {
       this.audioEl.pause();
       this.audioEl.src = "";
-      return;
-    }
-
-    // First attempt native AudioTrack API
-    if (switchAudioTrackNatively(this.videoEl, trackId)) {
-      this.videoEl.muted = false;
-      this.audioEl.pause();
-      this.audioEl.src = "";
-      return;
-    }
-
-    // Fallback: Mute the video and synchronize the selected audio feed
-    this.videoEl.muted = true;
-    this.audioEl.volume = this.videoEl.volume;
-    this.audioEl.playbackRate = this.videoEl.playbackRate;
-    this.audioEl.currentTime = this.videoEl.currentTime;
-
-    if (!this.videoEl.paused) {
-      this.audioEl.play().catch(() => {});
     }
   }
 
@@ -219,7 +197,6 @@ export class ClientAudioSyncEngine {
       this.audioEl = null;
     }
     if (this.videoEl) {
-      this.videoEl.muted = false;
       this.videoEl = null;
     }
   }

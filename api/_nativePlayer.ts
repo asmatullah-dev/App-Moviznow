@@ -1972,14 +1972,23 @@ nativePlayerRouter.all(
 
         ffmpegArgs.push("-i", targetUrl);
 
+        // Check cached probe info to see if video can be fast-copied (0 CPU, instant streaming!)
+        const cachedProbe = infoCache.get(targetUrl)?.data;
+        const validAudioIdx =
+          cachedProbe?.audioTracks &&
+          cachedProbe.audioTracks.length > 0 &&
+          audioIdx >= 0 &&
+          audioIdx < cachedProbe.audioTracks.length
+            ? audioIdx
+            : audioIdx >= 0
+            ? audioIdx
+            : 0;
+
         // Map video and specified audio stream
         ffmpegArgs.push(
           "-map", "0:v:0",
-          "-map", `0:a:${audioIdx}?`
+          "-map", `0:a:${validAudioIdx}?`
         );
-
-        // Check cached probe info to see if video can be fast-copied (0 CPU, instant streaming!)
-        const cachedProbe = infoCache.get(targetUrl)?.data;
         const isHevc =
           targetUrl.toLowerCase().includes("hevc") ||
           targetUrl.toLowerCase().includes("h265") ||
