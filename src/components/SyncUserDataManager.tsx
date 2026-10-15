@@ -137,15 +137,34 @@ export async function executeSyncUserData(currentUserUid: string, currentProfile
     }
 
     updatesToPush.lastActive = nowUtc;
+    updatesToPush.uid = currentUserUid;
 
     if (!navigator.onLine) {
       safeStorage.setItem('needs_user_sync', 'true');
       return false;
     }
 
+    // Recursively sanitize to prevent Firestore Unsupported field value: undefined errors
+    const sanitizePayload = (obj: any): any => {
+      if (obj === null || obj === undefined) return null;
+      if (typeof obj !== 'object') return obj;
+      if (Array.isArray(obj)) {
+        return obj.filter(item => item !== undefined).map(sanitizePayload);
+      }
+      const clean: Record<string, any> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (v !== undefined) {
+          clean[k] = sanitizePayload(v);
+        }
+      }
+      return clean;
+    };
+
+    const cleanPayload = sanitizePayload(updatesToPush);
+
     try {
       const batch = writeBatch(db);
-      batch.set(userRef, updatesToPush, { merge: true });
+      batch.set(userRef, cleanPayload, { merge: true });
       batch.set(doc(db, 'chunk_meta', 'versions'), {
         users: {
           [currentUserUid]: nowUtc

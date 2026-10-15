@@ -46,16 +46,28 @@ if (typeof importScripts === 'function') {
       }
       
       if (payload.data) {
-        const notificationTitle = payload.data.title || 'New Notification';
-        const targetUrl = payload.data.url || payload.data.link || payload.data.click_action || '/';
+        const poster = payload.data.imageUrl || payload.data.posterUrl || payload.data.image || payload.data.poster || '';
+        const notificationTitle = payload.data.title || 'MovizNow Alert';
+        let targetUrl = payload.data.url || payload.data.link || payload.data.click_action;
+        if (!targetUrl && payload.data.contentId) {
+          const type = payload.data.contentType || payload.data.type || 'movie';
+          targetUrl = type === 'series' ? `/series/${payload.data.contentId}` : `/movie/${payload.data.contentId}`;
+        }
+        if (!targetUrl) targetUrl = '/';
+
         const notificationOptions = {
-          body: payload.data.body,
-          icon: payload.data.imageUrl || '/launcher.svg',
-          image: payload.data.imageUrl,
+          body: payload.data.body || '',
+          icon: poster || '/launcher.svg',
+          image: poster || undefined,
           badge: '/launcher.svg',
           data: Object.assign({}, payload.data, {
-            url: targetUrl
-          })
+            url: targetUrl,
+            posterUrl: poster
+          }),
+          actions: [
+            { action: 'watch', title: '▶ Watch Now' },
+            { action: 'download', title: '⬇ Download' }
+          ]
         };
 
         self.registration.showNotification(notificationTitle, notificationOptions);
@@ -114,6 +126,18 @@ self.addEventListener('notificationclick', (event) => {
   } catch (e) {
     targetUrl = self.location.origin + (rawUrl.startsWith('/') ? rawUrl : '/' + rawUrl);
   }
+
+  // Handle action buttons
+  try {
+    const urlObj = new URL(targetUrl);
+    if (event.action === 'watch') {
+      urlObj.searchParams.set('auto_action', 'watch');
+      targetUrl = urlObj.href;
+    } else if (event.action === 'download') {
+      urlObj.searchParams.set('auto_action', 'download');
+      targetUrl = urlObj.href;
+    }
+  } catch (e) {}
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windowClients) => {

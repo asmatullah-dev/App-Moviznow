@@ -28,8 +28,9 @@ import { OfflineBanner } from './components/OfflineBanner';
 import { SyncBanner } from './components/SyncBanner';
 import { SyncUserDataManager } from './components/SyncUserDataManager';
 import { RefreshAppDataManager } from './components/RefreshAppDataManager';
-import { AnalyticsTracker } from './components/AnalyticsTracker';
 import { NotificationPermissionPrompt } from './components/NotificationPermissionPrompt';
+import { PWAInstallReminder } from './components/PWAInstallReminder';
+import { AnalyticsTracker } from './components/AnalyticsTracker';
 
 // Eager Loaded Core User Pages for Instant Client-Side Navigation
 import Home from './pages/user/Home';
@@ -304,6 +305,7 @@ export default function App() {
                     <SyncUserDataManager />
                     <SystemNotificationWrapper />
                     <NotificationPermissionPrompt />
+                    <PWAInstallReminder />
                     <BrowserRouter>
                     <GlobalNavigationLoader />
                     <ScrollToTopOrRestore />

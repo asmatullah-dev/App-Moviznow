@@ -1,46 +1,126 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bell, X, CheckCircle2, Sparkles, ShieldCheck } from 'lucide-react';
-import { requestNotificationPermission } from '../firebase';
+import { Bell, X, CheckCircle2, Sparkles, ShieldCheck, AlertCircle, RefreshCw } from 'lucide-react';
+import { requestNotificationPermission, db, runWithNetwork, checkIsBrowserFcmCapable, isFcmSupported } from '../firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { safeStorage } from '../utils/safeStorage';
+import { doc, setDoc } from 'firebase/firestore';
 
 export const NotificationPermissionPrompt: React.FC = () => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [isVisible, setIsVisible] = useState(false);
   const [isGranted, setIsGranted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isDenied, setIsDenied] = useState(false);
+
+  const evaluatePromptEligibility = useCallback((): boolean => {
+    if (typeof window === 'undefined') return false;
+
+    // RULE: "Don't ask if browser doesn't support fcm"
+    if (!checkIsBrowserFcmCapable()) return false;
+
+    // 1. Check if user or device is already registered with FCM
+    const localToken = safeStorage.getItem('active_fcm_token') ||
+      (typeof window !== 'undefined' ? window.localStorage?.getItem('active_fcm_token') : null) ||
+      safeStorage.getItem('guest_fcm_token') ||
+      safeStorage.getItem(`fcm_token_v4_last_update_${user?.uid || 'guest'}`) ||
+      safeStorage.getItem(`fcm_auto_registered_${user?.uid || 'guest'}`);
+
+    const profileToken = profile?.fcmToken || (profile as any)?.fcm_token;
+    const isFcmRegistered = Boolean(localToken || profileToken);
+
+    // 2. Check if notification is disabled by user in Settings
+    const isFcmDisabledInSettings = Boolean(
+      profile?.notification === 'no' ||
+      profile?.isFcmDisabled === true ||
+      profile?.notificationPreferences?.fcm?.enabled === false
+    );
+
+    // REQUIREMENT: "don't remind if disable by settings but registered with fcm"
+    if (isFcmRegistered && isFcmDisabledInSettings) {
+      return false;
+    }
+
+    // If already registered with FCM and browser notification permission is granted, no prompt needed
+    if (isFcmRegistered && Notification.permission === 'granted') {
+      return false;
+    }
+
+    // REQUIREMENT: "Remind every time to user to enable notification if already not registered with fcm"
+    // Short-term snooze check (5 minutes after user clicks "Maybe Later" so it doesn't interrupt continuous video play or page transitions within same 5 mins)
+    const snoozedUntilStr = safeStorage.getItem('notif_prompt_snoozed_until');
+    if (snoozedUntilStr) {
+      const snoozedUntil = parseInt(snoozedUntilStr, 10);
+      if (!isNaN(snoozedUntil) && Date.now() < snoozedUntil) {
+        return false;
+      }
+    }
+
+    return true;
+  }, [user?.uid, profile?.fcmToken, profile?.notification, profile?.isFcmDisabled, profile?.notificationPreferences]);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (typeof window === 'undefined') return;
 
-    // Check current permission state
-    if (Notification.permission === 'granted') {
-      // Silently ensure token is registered
-      const hasRegistered = safeStorage.getItem(`fcm_auto_registered_${user?.uid || 'guest'}`);
-      if (!hasRegistered) {
-        requestNotificationPermission().then(token => {
-          if (token) {
-            safeStorage.setItem(`fcm_auto_registered_${user?.uid || 'guest'}`, 'true');
-          }
-        }).catch(() => {});
-      }
+    // RULE: "Don't ask if browser doesn't support fcm"
+    if (!checkIsBrowserFcmCapable()) {
+      setIsVisible(false);
       return;
     }
 
-    if (Notification.permission === 'denied') return;
+    let isMounted = true;
+    let timer: any = null;
 
-    // Check if user dismissed prompt in this session
-    const isDismissed = sessionStorage.getItem('notif_prompt_dismissed') === 'true';
-    if (isDismissed) return;
+    isFcmSupported().then(supported => {
+      if (!isMounted) return;
+      if (!supported) {
+        setIsVisible(false);
+        return;
+      }
 
-    // Trigger floating prompt after 2.5 seconds
-    const timer = setTimeout(() => {
-      setIsVisible(true);
-    }, 2500);
+      const shouldRemind = evaluatePromptEligibility();
+      if (!shouldRemind) {
+        setIsVisible(false);
+        return;
+      }
 
-    return () => clearTimeout(timer);
-  }, [user?.uid]);
+      // If browser permission is already granted but FCM token not yet synced locally or to user profile:
+      if (Notification.permission === 'granted') {
+        const hasRegistered = safeStorage.getItem(`fcm_auto_registered_${user?.uid || 'guest'}`);
+        if (!hasRegistered) {
+          requestNotificationPermission().then(token => {
+            if (token) {
+              safeStorage.setItem(`fcm_auto_registered_${user?.uid || 'guest'}`, 'true');
+              if (user?.uid) {
+                const userRef = doc(db, 'users', user.uid);
+                runWithNetwork(() => setDoc(userRef, {
+                  fcmToken: token,
+                  fcmTokenUpdatedAt: new Date().toISOString(),
+                  notification: 'yes',
+                  isFcmDisabled: false
+                }, { merge: true })).catch(() => {});
+              }
+            }
+          }).catch(() => {});
+        }
+        return;
+      }
+
+      setIsDenied(Notification.permission === 'denied');
+
+      // Trigger floating reminder prompt after 2 seconds
+      timer = setTimeout(() => {
+        if (isMounted) {
+          setIsVisible(true);
+        }
+      }, 2000);
+    });
+
+    return () => {
+      isMounted = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [evaluatePromptEligibility, user?.uid]);
 
   const handleAllow = async () => {
     setLoading(true);
@@ -49,34 +129,78 @@ export const NotificationPermissionPrompt: React.FC = () => {
       if (token) {
         setIsGranted(true);
         safeStorage.setItem(`fcm_auto_registered_${user?.uid || 'guest'}`, 'true');
+        safeStorage.removeItem('notif_prompt_snoozed_until');
+
+        // Ensure user document in Firestore is directly updated with fcmToken and notification: yes
+        if (user?.uid) {
+          try {
+            const userRef = doc(db, 'users', user.uid);
+            await runWithNetwork(() => setDoc(userRef, {
+              fcmToken: token,
+              fcmTokenUpdatedAt: new Date().toISOString(),
+              notification: 'yes',
+              isFcmDisabled: false,
+              notificationPreferences: {
+                fcm: {
+                  enabled: true,
+                  newContent: true,
+                  membershipAlerts: true,
+                  membershipExpiry: true,
+                  orders: true
+                }
+              }
+            }, { merge: true })).catch(() => {});
+          } catch (docErr) {
+            console.warn("Could not write FCM token to user document:", docErr);
+          }
+        }
+
         setTimeout(() => {
           setIsVisible(false);
-        }, 3000);
+        }, 2500);
       } else if (Notification.permission === 'granted') {
-        // Try fallback attempt
         const retryToken = await requestNotificationPermission(true);
         if (retryToken) {
           setIsGranted(true);
           safeStorage.setItem(`fcm_auto_registered_${user?.uid || 'guest'}`, 'true');
+          safeStorage.removeItem('notif_prompt_snoozed_until');
+
+          if (user?.uid) {
+            const userRef = doc(db, 'users', user.uid);
+            runWithNetwork(() => setDoc(userRef, {
+              fcmToken: retryToken,
+              fcmTokenUpdatedAt: new Date().toISOString(),
+              notification: 'yes',
+              isFcmDisabled: false
+            }, { merge: true })).catch(() => {});
+          }
+
           setTimeout(() => {
             setIsVisible(false);
-          }, 3000);
+          }, 2500);
         } else {
           setIsVisible(false);
         }
+      } else if (Notification.permission === 'denied') {
+        setIsDenied(true);
       } else {
         setIsVisible(false);
       }
     } catch (err) {
       console.warn("Failed to request notification permission:", err);
-      setIsVisible(false);
+      if (typeof Notification !== 'undefined' && Notification.permission === 'denied') {
+        setIsDenied(true);
+      } else {
+        setIsVisible(false);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const handleDismiss = () => {
-    sessionStorage.setItem('notif_prompt_dismissed', 'true');
+    // Snooze for 5 minutes so it doesn't disturb immediately, but reminds user again on next session or after 5 mins
+    safeStorage.setItem('notif_prompt_snoozed_until', (Date.now() + 5 * 60 * 1000).toString());
     setIsVisible(false);
   };
 
@@ -101,8 +225,56 @@ export const NotificationPermissionPrompt: React.FC = () => {
                 Notifications Enabled! <Sparkles className="w-4 h-4 text-amber-400" />
               </h4>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                {user ? "You'll receive personalized alerts directly on your device." : "Guest device registered! You'll receive latest updates."}
+                {user ? "Your device is registered for personalized movie & series alerts." : "Device registered! You'll receive instant updates."}
               </p>
+            </div>
+          </div>
+        ) : isDenied ? (
+          <div>
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20 shrink-0">
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-black text-sm text-zinc-900 dark:text-white leading-tight">
+                    Notifications Blocked
+                  </h4>
+                  <span className="text-[10px] font-bold text-amber-500 uppercase tracking-wider">
+                    Browser Setting Required
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleDismiss}
+                className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1 rounded-lg transition-colors cursor-pointer"
+                title="Dismiss"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-zinc-600 dark:text-zinc-300 mb-4 leading-relaxed">
+              Browser permissions are currently blocked. Click the lock/settings icon 🔒 in your browser's address bar, change <strong>Notifications</strong> to <strong>Allow</strong>, then tap below.
+            </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleAllow}
+                disabled={loading}
+                className="flex-1 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white text-xs font-bold py-2.5 px-4 rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : "Retry Activation"}
+              </button>
+              <button
+                type="button"
+                onClick={handleDismiss}
+                className="px-3 py-2.5 text-xs font-bold text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors cursor-pointer"
+              >
+                Dismiss
+              </button>
             </div>
           </div>
         ) : (
@@ -119,7 +291,7 @@ export const NotificationPermissionPrompt: React.FC = () => {
                   </h4>
                   <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider flex items-center gap-1">
                     <ShieldCheck className="w-3 h-3" />
-                    {user ? "User Device Alert" : "Guest Device Alert"}
+                    {user ? "Device Alert Registration" : "Guest Device Alert"}
                   </span>
                 </div>
               </div>
@@ -134,7 +306,7 @@ export const NotificationPermissionPrompt: React.FC = () => {
             </div>
 
             <p className="text-xs text-zinc-600 dark:text-zinc-300 mb-4 leading-relaxed">
-              Get instant alerts when new movies, series episodes, or fresh download links are added!
+              Never miss new movies, series episodes, or fresh download links! Enable notifications to receive instant updates.
             </p>
 
             <div className="flex items-center gap-2">

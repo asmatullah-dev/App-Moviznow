@@ -22,7 +22,7 @@ import {
   deleteField
 } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
-import { getMessaging, getToken, onMessage } from 'firebase/messaging';
+import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
 import firebaseConfig from '../firebase-applet-config.json';
 import { safeStorage } from './utils/safeStorage';
 import { APP_VERSION, APP_NAME } from './version';
@@ -72,11 +72,40 @@ export const storage = getStorage(app);
 export let messaging: any = null;
 if (typeof window !== 'undefined') {
   try {
-    messaging = getMessaging(app);
+    if ('Notification' in window && 'serviceWorker' in navigator && 'PushManager' in window) {
+      messaging = getMessaging(app);
+    }
   } catch (e) {
     console.warn('Firebase Messaging is not supported in this browser/environment:', e);
   }
 }
+let fcmSupportCache: boolean | null = null;
+
+export const isFcmSupported = async (): Promise<boolean> => {
+  if (typeof window === 'undefined') return false;
+  if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    fcmSupportCache = false;
+    return false;
+  }
+  if (fcmSupportCache !== null) return fcmSupportCache;
+  try {
+    const supported = await isSupported();
+    fcmSupportCache = Boolean(supported);
+    return fcmSupportCache;
+  } catch (e) {
+    fcmSupportCache = false;
+    return false;
+  }
+};
+
+export const checkIsBrowserFcmCapable = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  if (!('Notification' in window)) return false;
+  if (!('serviceWorker' in navigator)) return false;
+  if (!('PushManager' in window)) return false;
+  if (fcmSupportCache === false) return false;
+  return true;
+};
 
 // Firebase Analytics is disabled to eliminate unnecessary webConfig and telemetry network requests
 export const analyticsPromise: Promise<any> = Promise.resolve(null);
@@ -276,10 +305,36 @@ export const requestNotificationPermission = async (force: boolean = false): Pro
 
           if (auth.currentUser) {
             try {
+              const userDocRef = doc(db, 'users', auth.currentUser.uid);
+              await runWithNetwork(() => setDoc(userDocRef, {
+                fcmToken: token,
+                fcmTokenUpdatedAt: new Date().toISOString(),
+                notification: 'yes',
+                isFcmDisabled: false,
+                notificationPreferences: {
+                  fcm: {
+                    enabled: true,
+                    newContent: true,
+                    membershipAlerts: true,
+                    membershipExpiry: true,
+                    orders: true
+                  }
+                }
+              }, { merge: true })).catch(() => {});
+            } catch (err) {
+              console.warn("Could not save FCM token directly to user doc:", err);
+            }
+
+            try {
                const cachedStr = safeStorage.getItem('profile_cache');
                if (cachedStr) {
                  const profileCache = JSON.parse(cachedStr);
                  profileCache.notification = 'yes';
+                 profileCache.fcmToken = token;
+                 profileCache.isFcmDisabled = false;
+                 if (!profileCache.notificationPreferences) profileCache.notificationPreferences = {};
+                 if (!profileCache.notificationPreferences.fcm) profileCache.notificationPreferences.fcm = {};
+                 profileCache.notificationPreferences.fcm.enabled = true;
                  const json = JSON.stringify(profileCache);
                  safeStorage.setItem('profile_cache', json);
                  safeStorage.setItem('profile_cache_timestamp', Date.now().toString());
@@ -287,6 +342,7 @@ export const requestNotificationPermission = async (force: boolean = false): Pro
                    window.localStorage.setItem('profile_cache', json);
                    window.localStorage.setItem('profile_cache_timestamp', Date.now().toString());
                  } catch (e) {}
+                 window.dispatchEvent(new CustomEvent('user_profile_updated', { detail: profileCache }));
                  window.dispatchEvent(new Event('profile_cache_updated'));
                }
             } catch (e) {
@@ -314,10 +370,16 @@ export const requestNotificationPermission = async (force: boolean = false): Pro
 if (messaging) {
   onMessage(messaging, (payload) => {
     console.log('[FCM] Received foreground message:', payload);
-    const title = payload.data?.title || payload.notification?.title || 'New Notification';
-    const body = payload.data?.body || payload.notification?.body;
-    const imageUrl = payload.data?.imageUrl || payload.notification?.image;
-    const rawUrl = payload.data?.url || payload.data?.link || payload.data?.click_action || payload.fcmOptions?.link || '/';
+    const title = payload.data?.title || payload.notification?.title || 'MovizNow Alert';
+    const body = payload.data?.body || payload.notification?.body || '';
+    const imageUrl = payload.data?.imageUrl || payload.data?.posterUrl || payload.data?.poster || payload.notification?.image;
+    
+    let rawUrl = payload.data?.url || payload.data?.link || payload.data?.click_action || (payload as any).fcmOptions?.link;
+    if (!rawUrl && payload.data?.contentId) {
+      const type = payload.data?.contentType || payload.data?.type || 'movie';
+      rawUrl = type === 'series' ? `/series/${payload.data.contentId}` : `/movie/${payload.data.contentId}`;
+    }
+    if (!rawUrl) rawUrl = '/';
     
     if (Notification.permission === 'granted' && (payload.data || payload.notification)) {
       navigator.serviceWorker.getRegistrations().then((registrations) => {
@@ -330,20 +392,24 @@ if (messaging) {
           myReg.showNotification(title, {
             body: body,
             icon: imageUrl || '/launcher.svg',
-            image: imageUrl,
+            image: imageUrl || undefined,
             badge: '/launcher.svg',
-            data: { url: rawUrl },
-            tag: payload.messageId, // Use messageId to avoid duplicates
+            data: { url: rawUrl, posterUrl: imageUrl },
+            actions: [
+              { action: 'watch', title: '▶ Watch Now' },
+              { action: 'download', title: '⬇ Download' }
+            ],
+            tag: payload.messageId || `fcm_${Date.now()}`,
           } as any);
         } else {
           console.log('[FCM] Showing notification via browser Notification API');
           const notif = new Notification(title, {
             body: body,
             icon: imageUrl || '/launcher.svg',
-            image: imageUrl,
+            image: imageUrl || undefined,
             badge: '/launcher.svg',
-            data: { url: rawUrl },
-            tag: payload.messageId,
+            data: { url: rawUrl, posterUrl: imageUrl },
+            tag: payload.messageId || `fcm_${Date.now()}`,
           } as any);
           notif.onclick = (e) => {
             e.preventDefault();
@@ -357,7 +423,7 @@ if (messaging) {
                   if (parsed.origin === window.location.origin) {
                     window.location.href = parsed.pathname + parsed.search + parsed.hash;
                   } else {
-                    window.open(rawUrl, '_blank');
+                    window.location.href = rawUrl;
                   }
                 } catch(err) {
                   window.location.href = rawUrl;
@@ -366,7 +432,7 @@ if (messaging) {
             }
           };
         }
-      });
+      }).catch(() => {});
     } else {
       console.log('[FCM] Notification not shown:', { permission: Notification.permission, hasDataOrNotif: !!(payload.data || payload.notification) });
     }

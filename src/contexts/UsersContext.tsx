@@ -100,13 +100,21 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
     return { ...u, status: 'active', expiryDate: u.expiryDate || 'Lifetime' };
   }
 
-  // If status is empty, null, or undefined, default to 'pending' (unless it has a valid future expiry date)
+  // If status is empty, null, or undefined, default to 'pending' (unless it has a valid future expiry date or Lifetime)
   if (!u.status || (u.status as any) === 'null' || (u.status as any) === 'undefined') {
-    if (u.expiryDate && u.expiryDate !== 'Lifetime' && !isUserExpired(u.expiryDate)) {
+    if (u.expiryDate && (u.expiryDate === 'Lifetime' || !isUserExpired(u.expiryDate))) {
       u = { ...u, status: 'active' };
     } else {
       u = { ...u, status: 'pending' };
     }
+  }
+
+  // Preserve existing Lifetime users
+  if (u.expiryDate === 'Lifetime') {
+    if (u.status !== 'suspended') {
+      return { ...u, status: 'active', expiryDate: 'Lifetime' };
+    }
+    return u;
   }
 
   if (!u.expiryDate || u.expiryDate === 'null' || u.expiryDate === '') {
@@ -115,9 +123,9 @@ export function normalizeUserStatusAndExpiry(u: UserProfile): UserProfile {
     }
     // Never auto-grant 30 days to regular users. If they do not have an admin-approved expiry, status is pending
     if (u.status !== 'suspended' && u.status !== 'pending') {
-      return { ...u, status: 'pending' };
+      return { ...u, status: 'pending', expiryDate: null as any };
     }
-    return u;
+    return { ...u, expiryDate: null as any };
   }
 
   if (u.expiryDate !== 'Lifetime') {

@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for eliminating unnecessary network requests across the application: removing the preloaded Google Identity Services (GSI) script from index.html in favor of dynamic on-demand loading, disabling Firebase Analytics to eliminate webConfig and logging network calls, and suppressing redundant background Firebase Auth token refresh polling.",
-  "updatedAt": "2026-10-14T01:25:47.318270701Z",
+  "summary": "Comprehensive plan to resolve the normal user manual sync failure in the header and profile menu, and solidify user registration expiry policies (keeping new users blank/empty until admin approval while preserving existing Lifetime users).",
+  "updatedAt": "2026-10-14T10:16:28.736191950Z",
   "requestFeedback": true,
   "userFacing": true
 }

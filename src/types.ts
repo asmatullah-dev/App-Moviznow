@@ -103,6 +103,8 @@ export interface UserProfile {
   trialActivated?: boolean;
   provider?: string;
   isGoogleUser?: boolean;
+  fcmToken?: string;
+  fcmTokenUpdatedAt?: string;
   notification?: 'yes' | 'no';
   emailNotificationsEnabled?: boolean;
   emailNotificationsDisabled?: boolean;

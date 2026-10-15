@@ -155,6 +155,85 @@ export default function UserManagement() {
   const [contactsSyncResult, setContactsSyncResult] = useState<{ title: string; message: string } | null>(null);
   const [pendingContactsCount, setPendingContactsCount] = useState<number>(() => getPendingContactsList().length);
 
+  // FCM Registration state for users
+  const [fcmRegisteredUids, setFcmRegisteredUids] = useState<Set<string>>(() => {
+    try {
+      const cached = safeStorage.getItem('cached_fcm_registered_map');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        return new Set(parsed.uids || []);
+      }
+    } catch (e) {}
+    return new Set();
+  });
+  const [fcmRegisteredEmails, setFcmRegisteredEmails] = useState<Set<string>>(() => {
+    try {
+      const cached = safeStorage.getItem('cached_fcm_registered_map');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        return new Set(parsed.emails || []);
+      }
+    } catch (e) {}
+    return new Set();
+  });
+
+  // Fetch FCM tokens registry from Firestore
+  useEffect(() => {
+    let isMounted = true;
+    const loadFcmRegistry = async () => {
+      try {
+        const fcmSnap = await getDocs(collection(db, 'fcm_tokens'));
+        const uids = new Set<string>();
+        const emails = new Set<string>();
+        fcmSnap.docs.forEach(docSnap => {
+          if (!docSnap.id.startsWith('registry')) return;
+          const tokens = docSnap.data()?.tokens || {};
+          Object.values(tokens).forEach((entry: any) => {
+            if (entry?.u && entry.u !== 'guest' && entry.u !== 'anonymous') {
+              uids.add(entry.u);
+            }
+            if (entry?.e && entry.e !== 'n' && typeof entry.e === 'string' && entry.e.includes('@')) {
+              emails.add(entry.e.toLowerCase().trim());
+            }
+          });
+        });
+
+        if (isMounted) {
+          setFcmRegisteredUids(uids);
+          setFcmRegisteredEmails(emails);
+          safeStorage.setItem('cached_fcm_registered_map', JSON.stringify({
+            uids: Array.from(uids),
+            emails: Array.from(emails)
+          }));
+        }
+      } catch (err) {
+        console.warn("Could not load FCM tokens registry:", err);
+      }
+    };
+    loadFcmRegistry();
+    return () => { isMounted = false; };
+  }, []);
+
+  const isUserFcmRegistered = useCallback((u: UserProfile | null) => {
+    if (!u) return false;
+    return Boolean(
+      (u as any).fcmToken ||
+      (u as any).fcm_token ||
+      (u.uid && fcmRegisteredUids.has(u.uid)) ||
+      (u.email && fcmRegisteredEmails.has(u.email.toLowerCase().trim())) ||
+      u.notification === 'yes' ||
+      u.notificationPreferences?.fcm?.enabled === true
+    );
+  }, [fcmRegisteredUids, fcmRegisteredEmails]);
+
+  const isUserFcmActive = useCallback((u: UserProfile | null) => {
+    if (!u) return false;
+    const isReg = isUserFcmRegistered(u);
+    if (!isReg) return false;
+    const isDisabled = u.notification === 'no' || u.isFcmDisabled === true || u.notificationPreferences?.fcm?.enabled === false;
+    return !isDisabled;
+  }, [isUserFcmRegistered]);
+
   // Synchronize Google Contacts local pending count from local event only
   useEffect(() => {
     let isMounted = true;
@@ -2374,12 +2453,47 @@ export default function UserManagement() {
                           {user.status || 'pending'}
                         </span>
                       )}
-                      {user.notification === 'yes' && (
-                        <span title="Notifications Enabled"><Bell className="w-4 h-4 text-emerald-500 dark:text-emerald-400" /></span>
-                      )}
-                      {user.notification === 'no' && (
-                        <span title="Notifications Disabled"><Bell className="w-4 h-4 text-zinc-300 dark:text-zinc-600" /></span>
-                      )}
+                      {(() => {
+                        const isRegistered = isUserFcmRegistered(user);
+                        const isActive = isUserFcmActive(user);
+
+                        if (isRegistered) {
+                          if (isActive) {
+                            return (
+                              <span 
+                                title={`FCM Push Notifications Registered & Active${(user as any).fcmToken ? ' (Token Stored)' : ''}`}
+                                className="inline-flex items-center text-emerald-500 dark:text-emerald-400 drop-shadow-sm cursor-help"
+                              >
+                                <Bell className="w-4 h-4 fill-emerald-500/20" />
+                              </span>
+                            );
+                          } else {
+                            return (
+                              <span 
+                                title="FCM Registered (Disabled in User Settings)"
+                                className="inline-flex items-center text-amber-500 dark:text-amber-400 relative cursor-help"
+                              >
+                                <Bell className="w-4 h-4 opacity-80" />
+                                <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-amber-500 rounded-full" />
+                              </span>
+                            );
+                          }
+                        }
+
+                        if (user.notification === 'no') {
+                          return (
+                            <span title="Notifications Disabled in Settings (Not Registered)" className="inline-flex items-center text-zinc-300 dark:text-zinc-600 cursor-help">
+                              <Bell className="w-4 h-4" />
+                            </span>
+                          );
+                        }
+
+                        return (
+                          <span title="FCM Push Not Registered" className="inline-flex items-center text-zinc-300/40 dark:text-zinc-700/40 hover:opacity-100 transition-opacity cursor-help">
+                            <Bell className="w-3.5 h-3.5" />
+                          </span>
+                        );
+                      })()}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
                         {isUserOnline(user.lastActive) && (
@@ -3015,7 +3129,13 @@ export default function UserManagement() {
                                       {isFcmMasterEnabled ? "ACTIVE" : "DISABLED"}
                                     </span>
                                   </div>
-                                  <p className="text-[10px] text-zinc-500">Real-time mobile & browser device alerts</p>
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <p className="text-[10px] text-zinc-500">Real-time alerts</p>
+                                    <span className="text-zinc-400">•</span>
+                                    <span className={`text-[10px] font-bold ${isUserFcmRegistered(selectedUser) ? "text-emerald-500" : "text-zinc-400"}`}>
+                                      {isUserFcmRegistered(selectedUser) ? "Device Registered" : "Not Registered"}
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
                               <button

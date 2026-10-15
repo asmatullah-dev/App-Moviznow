@@ -198,6 +198,7 @@ export default function Settings() {
         phone: phone,
         city: city,
         notification: fcmEnabled ? 'yes' : 'no',
+        isFcmDisabled: !fcmEnabled,
         emailNotificationsEnabled: emailEnabled && emailNewContent,
         emailNotificationsDisabled: !emailEnabled || !emailNewContent,
         notificationPreferences: notificationPreferences,

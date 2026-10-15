@@ -4183,6 +4183,27 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         // 1. GUARANTEED STORAGE: Save to minified fcm_tokens registry chunk (max 3000 tokens per chunk)
         if (db) {
           await saveFcmTokenToRegistry(db, token, userId, email);
+          if (isUserLoggedIn && userId) {
+            try {
+              await db.collection("users").doc(userId).set({
+                fcmToken: token,
+                fcmTokenUpdatedAt: new Date().toISOString(),
+                notification: 'yes',
+                isFcmDisabled: false,
+                notificationPreferences: {
+                  fcm: {
+                    enabled: true,
+                    newContent: true,
+                    membershipAlerts: true,
+                    membershipExpiry: true,
+                    orders: true
+                  }
+                }
+              }, { merge: true });
+            } catch (userDocErr) {
+              console.warn("Could not update user doc with FCM token:", userDocErr);
+            }
+          }
         }
 
         // 2. TOPIC SUBSCRIPTION: Subscribe to relevant FCM topics if Firebase Admin is available
@@ -4252,8 +4273,22 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     ["/api/notifications/send", "/notifications/send"],
     async (req, res) => {
       try {
-        const { title, body, imageUrl, url, buttonUrl, targetUserIds, targetAudience } = req.body;
-        const targetUrl = buttonUrl || url || "/";
+        const { 
+          title, 
+          body, 
+          imageUrl, 
+          posterUrl, 
+          poster, 
+          url, 
+          buttonUrl, 
+          contentId, 
+          contentType, 
+          targetUserIds, 
+          targetAudience 
+        } = req.body;
+
+        const richPoster = imageUrl || posterUrl || poster || "";
+        const targetUrl = buttonUrl || url || (contentId ? (contentType === 'series' ? `/series/${contentId}` : `/movie/${contentId}`) : "/");
 
         let totalSuccess = 0;
         let totalFailure = 0;
@@ -4268,41 +4303,50 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               targetTopic = "registered_users";
             }
 
+            const notificationPayload = {
+              title,
+              body,
+              imageUrl: richPoster || undefined,
+            };
+
+            const dataPayload = {
+              title: title || "",
+              body: body || "",
+              imageUrl: richPoster || "",
+              posterUrl: richPoster || "",
+              contentId: contentId || "",
+              contentType: contentType || "",
+              url: targetUrl,
+              link: targetUrl,
+              click_action: targetUrl,
+            };
+
+            const webpushPayload = {
+              fcmOptions: {
+                link: targetUrl,
+              },
+              notification: {
+                title,
+                body,
+                icon: richPoster || "/launcher.svg",
+                badge: "/launcher.svg",
+                image: richPoster || undefined,
+                actions: [
+                  { action: "watch", title: "▶ Watch Now" },
+                  { action: "download", title: "⬇ Download" }
+                ],
+                data: dataPayload,
+              },
+            };
+
             if ((targetAudience === 'specific' || (!targetAudience && Array.isArray(targetUserIds))) && targetUserIds && targetUserIds.length > 0) {
               // Direct target user topics: user_${uid} (0 Firestore reads!)
               for (const uid of targetUserIds) {
                 try {
                   const message: any = {
-                    notification: {
-                      title,
-                      body,
-                      imageUrl: imageUrl || undefined,
-                    },
-                    data: {
-                      title,
-                      body,
-                      imageUrl: imageUrl || "",
-                      url: targetUrl,
-                      link: targetUrl,
-                      click_action: targetUrl,
-                    },
-                    webpush: {
-                      fcmOptions: {
-                        link: targetUrl,
-                      },
-                      notification: {
-                        title,
-                        body,
-                        icon: imageUrl || "/launcher.svg",
-                        badge: "/launcher.svg",
-                        image: imageUrl || undefined,
-                        data: {
-                          url: targetUrl,
-                          link: targetUrl,
-                          click_action: targetUrl,
-                        },
-                      },
-                    },
+                    notification: notificationPayload,
+                    data: dataPayload,
+                    webpush: webpushPayload,
                     topic: `user_${uid}`,
                   };
                   await admin.messaging().send(message);
@@ -4314,41 +4358,14 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             } else {
               // Broadcast topic (reaches all devices subscribed to topic with 0 Firestore reads)
               const message: any = {
-                notification: {
-                  title,
-                  body,
-                  imageUrl: imageUrl || undefined,
-                },
-                data: {
-                  title,
-                  body,
-                  imageUrl: imageUrl || "",
-                  url: targetUrl,
-                  link: targetUrl,
-                  click_action: targetUrl,
-                },
-                webpush: {
-                  fcmOptions: {
-                    link: targetUrl,
-                  },
-                  notification: {
-                    title,
-                    body,
-                    icon: imageUrl || "/launcher.svg",
-                    badge: "/launcher.svg",
-                    image: imageUrl || undefined,
-                    data: {
-                      url: targetUrl,
-                      link: targetUrl,
-                      click_action: targetUrl,
-                    },
-                  },
-                },
+                notification: notificationPayload,
+                data: dataPayload,
+                webpush: webpushPayload,
                 topic: targetTopic,
               };
 
               const response = await admin.messaging().send(message);
-              console.log(`[FCM Topic Broadcast] Delivered to topic ${targetTopic}:`, response);
+              console.log(`[FCM Topic Broadcast] Delivered to topic ${targetTopic} with rich poster:`, response);
               totalSuccess++;
             }
           } catch (topicErr: any) {
@@ -5318,7 +5335,10 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         "Get 5 Days of premium membership for free on MovizNow! Watch and download your favorite movies and series.";
     }
 
-    const movieMatch = urlPath.match(/^\/movie\/([^/?]+)/);
+    const movieMatch = urlPath.match(/^\/(?:movie|series|content|poster|m|p)\/([^/?]+)/) ||
+      (!/^\/(?:admin|api|assets|login|maintenance|app|install|unsubscribe|watch-later|favorites|trial|topup|cart|settings|reviews|about|contact|terms|privacy)($|\/|\?)/i.test(urlPath)
+        ? urlPath.match(/^\/([a-zA-Z0-9_-]{12,40})(?:$|\?)/)
+        : null);
     if (movieMatch) {
       const movieId = movieMatch[1];
       try {
