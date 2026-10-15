@@ -19,9 +19,6 @@ import { LanguageProvider, useLanguage } from './contexts/LanguageContext';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { Loader2 } from 'lucide-react';
 import { SystemNotificationWrapper } from './components/SystemNotificationWrapper';
-import { MediaModal } from './components/MediaModal';
-import AlertModal from './components/AlertModal';
-import { useModalBehavior } from './hooks/useModalBehavior';
 import { useGlobalButtonHaptics } from './hooks/useHaptics';
 import { safeStorage } from './utils/safeStorage';
 import { OfflineBanner } from './components/OfflineBanner';
@@ -34,11 +31,12 @@ import { AnalyticsTracker } from './components/AnalyticsTracker';
 
 // Eager Loaded Core User Pages for Instant Client-Side Navigation
 import Home from './pages/user/Home';
-import Login from './pages/Login';
 import MovieDetails from './pages/user/MovieDetails';
-import MaintenancePage from './pages/MaintenancePage';
 
-// Lazy Loaded Secondary User Pages (Loaded on demand to shrink initial startup load)
+// Lazy Loaded Secondary & Auxiliary Pages (Reduces initial startup bundle size)
+const Login = lazy(() => import('./pages/Login'));
+const MaintenancePage = lazy(() => import('./pages/MaintenancePage'));
+const MediaModal = lazy(() => import('./components/MediaModal').then((m) => ({ default: m.MediaModal })));
 const FreeMovies = lazy(() => import('./pages/user/FreeMovies'));
 const Membership = lazy(() => import('./pages/user/Membership'));
 const Reviews = lazy(() => import('./pages/user/Reviews'));
@@ -158,7 +156,13 @@ function MediaModalController({ isOpen, onClose }: { isOpen: boolean; onClose: (
     onClose();
   };
 
-  return <MediaModal isOpen={isOpen} onClose={onClose} onApply={handleApply} />;
+  if (!isOpen) return null;
+
+  return (
+    <Suspense fallback={null}>
+      <MediaModal isOpen={isOpen} onClose={onClose} onApply={handleApply} />
+    </Suspense>
+  );
 }
 
 function AppLanguageEffect() {

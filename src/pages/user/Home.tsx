@@ -171,8 +171,8 @@ export default function Home({
     
     // Idle/deferred loading so home page mounts and transitions immediately in 0ms
     const idleId = typeof window !== 'undefined' && 'requestIdleCallback' in window
-      ? (window as any).requestIdleCallback(loadReviews)
-      : setTimeout(loadReviews, 300);
+      ? (window as any).requestIdleCallback(loadReviews, { timeout: 6000 })
+      : setTimeout(loadReviews, 4500);
 
     return () => {
       isCancelled = true;

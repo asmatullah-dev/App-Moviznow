@@ -272,10 +272,10 @@ export function RefreshAppDataManager() {
       }
     };
 
-    // 1. Check on app open / mount after short 1.5s grace period so initial render settles smoothly
+    // 1. Check on app open / mount after 8.5s grace period so initial render and browsing settle with 0 background lag
     const initialTimer = setTimeout(() => {
       check10HourUnified();
-    }, 1500);
+    }, 8500);
 
     // 2. Periodic background check every 60 seconds (purely local timestamp comparison, 0 Firestore calls until 10h threshold arrives)
     const interval = setInterval(() => {

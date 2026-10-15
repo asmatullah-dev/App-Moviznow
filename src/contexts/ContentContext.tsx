@@ -67,7 +67,7 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         } catch (e) {
           console.error("Error safely merging newer JSON export:", e);
         }
-      }, 300);
+      }, 4500);
     }
     
     setLoading(false);
@@ -76,14 +76,24 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Check upcoming notifications whenever contentList is loaded/updated
+  // Check upcoming notifications in idle time after initial render settles
   useEffect(() => {
     if (contentList && contentList.length > 0) {
-      try {
-        checkUpcomingSubscriptionsAndNotify(contentList);
-      } catch (e) {
-        console.warn('Error checking upcoming subscriptions:', e);
-      }
+      let cancelled = false;
+      const runCheck = () => {
+        if (cancelled) return;
+        try {
+          checkUpcomingSubscriptionsAndNotify(contentList);
+        } catch (e) {
+          console.warn('Error checking upcoming subscriptions:', e);
+        }
+      };
+
+      const timerId = setTimeout(runCheck, 6000);
+      return () => {
+        cancelled = true;
+        clearTimeout(timerId);
+      };
     }
   }, [contentList]);
 

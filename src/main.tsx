@@ -144,10 +144,10 @@ const checkDeploymentVersion = async (trigger: 'open' | 'open_retry' | 'backgrou
 
 // Check version on launch and periodically / on resume
 if (typeof window !== 'undefined') {
-  // 1. Check version immediately on app open (800ms after load)
+  // 1. Check version in background after initial render settles (4.5s after load)
   setTimeout(() => {
     checkDeploymentVersion('open');
-  }, 800);
+  }, 4500);
   
   // 2. Keep checking the version in background every 5 minutes while app stays open
   setInterval(() => {
@@ -226,9 +226,9 @@ if ('serviceWorker' in navigator) {
         };
 
         if ('requestIdleCallback' in window) {
-          (window as any).requestIdleCallback(triggerPrefetch, { timeout: 3000 });
+          (window as any).requestIdleCallback(triggerPrefetch, { timeout: 6000 });
         } else {
-          setTimeout(triggerPrefetch, 2000);
+          setTimeout(triggerPrefetch, 5000);
         }
       })
       .catch((err) => {

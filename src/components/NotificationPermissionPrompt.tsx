@@ -88,32 +88,36 @@ export const NotificationPermissionPrompt: React.FC = () => {
       if (Notification.permission === 'granted') {
         const hasRegistered = safeStorage.getItem(`fcm_auto_registered_${user?.uid || 'guest'}`);
         if (!hasRegistered) {
-          requestNotificationPermission().then(token => {
-            if (token) {
-              safeStorage.setItem(`fcm_auto_registered_${user?.uid || 'guest'}`, 'true');
-              if (user?.uid) {
-                const userRef = doc(db, 'users', user.uid);
-                runWithNetwork(() => setDoc(userRef, {
-                  fcmToken: token,
-                  fcmTokenUpdatedAt: new Date().toISOString(),
-                  notification: 'yes',
-                  isFcmDisabled: false
-                }, { merge: true })).catch(() => {});
+          // Defer background FCM token sync until after initial render settles (7.5s)
+          timer = setTimeout(() => {
+            if (!isMounted) return;
+            requestNotificationPermission().then(token => {
+              if (token) {
+                safeStorage.setItem(`fcm_auto_registered_${user?.uid || 'guest'}`, 'true');
+                if (user?.uid) {
+                  const userRef = doc(db, 'users', user.uid);
+                  runWithNetwork(() => setDoc(userRef, {
+                    fcmToken: token,
+                    fcmTokenUpdatedAt: new Date().toISOString(),
+                    notification: 'yes',
+                    isFcmDisabled: false
+                  }, { merge: true })).catch(() => {});
+                }
               }
-            }
-          }).catch(() => {});
+            }).catch(() => {});
+          }, 7500);
         }
         return;
       }
 
       setIsDenied(Notification.permission === 'denied');
 
-      // Trigger floating reminder prompt after 2 seconds
+      // Trigger floating reminder prompt after 7.5 seconds when user has settled on page
       timer = setTimeout(() => {
         if (isMounted) {
           setIsVisible(true);
         }
-      }, 2000);
+      }, 7500);
     });
 
     return () => {
