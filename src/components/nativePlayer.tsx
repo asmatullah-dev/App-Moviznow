@@ -840,49 +840,83 @@ export function NativePlayer({
 
   // Parse direct stream URL (prioritizing Pixeldrain candidate first, FSL candidate if Pixeldrain missing, decoded meta, activeStreamUrl, or direct watchUrl)
   const fslCandidate = useMemo(() => findFslCandidate(activeCandidates), [activeCandidates]);
-  const pixeldrainCandidate = useMemo(() => findPixeldrainCandidate(activeCandidates), [activeCandidates]);
+  const pixeldrainCandidate = useMemo(() => {
+    const fromCandidates = findPixeldrainCandidate(activeCandidates);
+    if (fromCandidates) return fromCandidates;
+    const fallbackUrl = (activeStreamUrl || propStreamUrl || activeWatchUrl || watchUrl || "").trim();
+    if (
+      fallbackUrl.toLowerCase().includes("pixeldrain") ||
+      fallbackUrl.toLowerCase().includes("pixel.drain") ||
+      fallbackUrl.toLowerCase().includes("pixeldra.in")
+    ) {
+      return {
+        text: "Pixeldrain Server",
+        href: fallbackUrl,
+        streamUrl: normalizePixeldrainUrl(fallbackUrl),
+      };
+    }
+    return null;
+  }, [activeCandidates, activeStreamUrl, propStreamUrl, activeWatchUrl, watchUrl]);
   const decodedMeta = useMemo(() => decodeWatchUrl(activeWatchUrl), [activeWatchUrl]);
 
   // Track server candidates that have failed during this session to eliminate bouncing loops
   const triedServersRef = useRef<Set<string>>(new Set());
 
-  // Active server: default to "fsl" (first priority, fast CDN edge playback) then "pixeldrain", else "default"
+  const isInputPixeldrain = useMemo(() => {
+    const combined = `${propStreamUrl || ""} ${watchUrl || ""} ${activeStreamUrl || ""} ${activeWatchUrl || ""}`.toLowerCase();
+    return (
+      combined.includes("pixeldrain") ||
+      combined.includes("pixel.drain") ||
+      combined.includes("pixeldra.in") ||
+      combined.includes("pdrain")
+    );
+  }, [propStreamUrl, watchUrl, activeStreamUrl, activeWatchUrl]);
+
+  // Active server: prioritize Pixeldrain if input is Pixeldrain or pixeldrain candidate exists, else fsl, else default
   const [activeServer, setActiveServer] = useState<"fsl" | "pixeldrain" | "default">(() => {
+    if (isInputPixeldrain || pixeldrainCandidate) return "pixeldrain";
     if (fslCandidate) return "fsl";
-    if (pixeldrainCandidate) return "pixeldrain";
     return "default";
   });
 
-  // Keep activeServer in sync when modal opens or candidates change (FSL first priority, fallback to Pixeldrain)
+  // Keep activeServer in sync when modal opens or candidates change
   useEffect(() => {
     if (isOpen) {
       triedServersRef.current.clear();
-      if (fslCandidate) {
-        setActiveServer("fsl");
-      } else if (pixeldrainCandidate) {
+      if (isInputPixeldrain || pixeldrainCandidate) {
         setActiveServer("pixeldrain");
+      } else if (fslCandidate) {
+        setActiveServer("fsl");
       } else {
         setActiveServer("default");
       }
     }
-  }, [isOpen, fslCandidate, pixeldrainCandidate]);
+  }, [isOpen, isInputPixeldrain, pixeldrainCandidate, fslCandidate]);
 
   const rawStreamUrl = useMemo(() => {
+    if (activeServer === "pixeldrain") {
+      return (
+        pixeldrainCandidate?.streamUrl ||
+        pixeldrainCandidate?.href ||
+        activeStreamUrl ||
+        propStreamUrl ||
+        activeWatchUrl ||
+        watchUrl ||
+        ""
+      );
+    }
     if (activeServer === "fsl" && fslCandidate) {
       return fslCandidate.href;
     }
-    if (activeServer === "pixeldrain" && pixeldrainCandidate) {
-      return pixeldrainCandidate.streamUrl || pixeldrainCandidate.href;
-    }
     return (
-      fslCandidate?.href ||
       pixeldrainCandidate?.streamUrl ||
       pixeldrainCandidate?.href ||
+      fslCandidate?.href ||
       activeStreamUrl ||
       decodedMeta.streamUrl ||
       (activeWatchUrl && !activeWatchUrl.includes("hbplay.pages.dev") ? activeWatchUrl : "")
     );
-  }, [activeServer, fslCandidate, pixeldrainCandidate, activeStreamUrl, decodedMeta, activeWatchUrl]);
+  }, [activeServer, fslCandidate, pixeldrainCandidate, activeStreamUrl, propStreamUrl, decodedMeta, activeWatchUrl, watchUrl]);
 
   const directStreamUrl = normalizePixeldrainUrl(rawStreamUrl);
 
@@ -980,7 +1014,14 @@ export function NativePlayer({
   }, [directStreamUrl, decodedMeta, title, quality, mediaInfo]);
 
   const [streamAttempt, setStreamAttempt] = useState<number>(0);
-  const [streamMode, setStreamMode] = useState<"proxy" | "transcode">(() => {
+  const [streamMode, setStreamMode] = useState<"direct" | "proxy" | "transcode">(() => {
+    const isPd =
+      (directStreamUrl || "").toLowerCase().includes("pixeldrain") ||
+      (directStreamUrl || "").toLowerCase().includes("pixel.drain") ||
+      (directStreamUrl || "").toLowerCase().includes("pixeldra.in");
+    if (isPd) {
+      return "direct";
+    }
     if (
       decodedMeta.mime?.includes("matroska") ||
       decodedMeta.title?.toLowerCase().includes(".mkv") ||
@@ -990,19 +1031,30 @@ export function NativePlayer({
     ) {
       return "transcode";
     }
-    return "proxy";
+    return "direct";
   });
 
   useEffect(() => {
-    // If running on Vercel or environment where FFmpeg is not installed, always use proxy mode
+    const isPd =
+      activeServer === "pixeldrain" ||
+      isInputPixeldrain ||
+      (directStreamUrl || "").toLowerCase().includes("pixeldrain") ||
+      (directStreamUrl || "").toLowerCase().includes("pixel.drain") ||
+      (directStreamUrl || "").toLowerCase().includes("pixeldra.in") ||
+      (directStreamUrl || "").toLowerCase().includes("pdrain");
+    if (isPd) {
+      setStreamMode("direct");
+      return;
+    }
+    // If running on Vercel or environment where FFmpeg is not installed, use direct mode
     if (mediaInfo?.hasFFmpeg === false) {
-      setStreamMode("proxy");
+      setStreamMode("direct");
       return;
     }
     if (mediaInfo?.hasFFmpeg && (isDirectMkv || mediaInfo?.needsTranscode)) {
       setStreamMode("transcode");
     }
-  }, [isDirectMkv, mediaInfo]);
+  }, [isDirectMkv, mediaInfo, activeServer, directStreamUrl, isInputPixeldrain]);
   const [seekOffset, setSeekOffset] = useState<number>(0);
   const [totalDuration, setTotalDuration] = useState<number>(() => {
     return propDurationSeconds > 60 ? propDurationSeconds : 0;
@@ -1070,6 +1122,23 @@ export function NativePlayer({
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isControlsVisible, setIsControlsVisible] = useState<boolean>(true);
   const [isBuffering, setIsBuffering] = useState<boolean>(true);
+  const bufferingSafetyTimerRef = useRef<any>(null);
+
+  const setBufferingWithSafety = useCallback((buffering: boolean, maxWaitMs = 3500) => {
+    if (bufferingSafetyTimerRef.current) {
+      clearTimeout(bufferingSafetyTimerRef.current);
+      bufferingSafetyTimerRef.current = null;
+    }
+    if (buffering) {
+      setIsBuffering(true);
+      bufferingSafetyTimerRef.current = setTimeout(() => {
+        setIsBuffering(false);
+      }, maxWaitMs);
+    } else {
+      setIsBuffering(false);
+    }
+  }, []);
+
   const [isSwitchingAudio, setIsSwitchingAudio] = useState<boolean>(false);
   const isSwitchingAudioRef = useRef<boolean>(false);
   const audioSwitchResumePosRef = useRef<number>(0);
@@ -1224,7 +1293,7 @@ export function NativePlayer({
 
     setHasPlaybackError(false);
     setStreamAttempt(0);
-    setIsBuffering(true);
+    setBufferingWithSafety(true, 4000);
 
     setMediaInfo(null);
     setSubtitleCues([]);
@@ -1526,7 +1595,12 @@ export function NativePlayer({
         if (data.duration && data.duration > 60) {
           setTotalDuration(Math.round(data.duration));
         }
-        if ((data.isMkv || data.needsTranscode) && data.hasFFmpeg !== false) {
+        const isPd =
+          activeServer === "pixeldrain" ||
+          directStreamUrl.toLowerCase().includes("pixeldrain") ||
+          directStreamUrl.toLowerCase().includes("pixel.drain") ||
+          directStreamUrl.toLowerCase().includes("pixeldra.in");
+        if (!isPd && (data.isMkv || data.needsTranscode) && data.hasFFmpeg !== false) {
           setStreamMode("transcode");
         }
         // Auto-load embedded subtitles if user has enabled subtitles
@@ -1546,7 +1620,7 @@ export function NativePlayer({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, directStreamUrl, displayTitle, title, imdbId, seasonInfo, episodeInfo]);
+  }, [isOpen, directStreamUrl, activeServer, displayTitle, title, imdbId, seasonInfo, episodeInfo]);
 
   // Fetch direct subtitles from open CDN endpoint with 0 Vercel transfer
   useEffect(() => {
@@ -1570,9 +1644,26 @@ export function NativePlayer({
     };
   }, [isOpen, imdbId, seasonInfo, episodeInfo]);
 
+  const isPixeldrain = useMemo(() => {
+    const url = (directStreamUrl || rawStreamUrl || "").toLowerCase();
+    return (
+      activeServer === "pixeldrain" ||
+      isInputPixeldrain ||
+      url.includes("pixeldrain") ||
+      url.includes("pixel.drain") ||
+      url.includes("pixeldra.in") ||
+      url.includes("pdrain")
+    );
+  }, [activeServer, isInputPixeldrain, directStreamUrl, rawStreamUrl]);
+
   // Construct stream URL: direct playback from origin CDN edge (0 Vercel Fast Origin / Data Transfer)
   const currentStreamSrc = useMemo(() => {
     if (!directStreamUrl) return "";
+
+    // Pixeldrain always plays directly from origin CDN edge (0 Vercel Fast Origin / Data Transfer)
+    if (isPixeldrain) {
+      return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
+    }
 
     const apiBase = getStreamingApiBase();
 
@@ -1589,7 +1680,7 @@ export function NativePlayer({
 
     // Direct playback in nativePlayer from origin CDN edge (0 Vercel Fast Origin / Data Transfer)
     return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
-  }, [directStreamUrl, streamMode, seekOffset, selectedAudioTrack, streamAttempt, mediaInfo]);
+  }, [directStreamUrl, isPixeldrain, streamMode, seekOffset, selectedAudioTrack, streamAttempt, mediaInfo]);
 
   // Synchronize stream source to active slot when not performing a background quality switch
   useEffect(() => {
@@ -1601,6 +1692,32 @@ export function NativePlayer({
       }
     }
   }, [currentStreamSrc]);
+
+  // Ensure video element loads and starts playback seamlessly on stream ready
+  useEffect(() => {
+    if (!isOpen || !currentStreamSrc) return;
+    const activeVid = (activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current) || videoRef.current;
+    if (activeVid) {
+      if (activeVid.src !== currentStreamSrc) {
+        activeVid.src = currentStreamSrc;
+      }
+      activeVid.load();
+      setBufferingWithSafety(true, 2500);
+      const playPromise = activeVid.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setIsPlaying(true);
+            hasStartedPlaybackRef.current = true;
+            setIsBuffering(false);
+            setHasPlaybackError(false);
+          })
+          .catch(() => {
+            setIsBuffering(false);
+          });
+      }
+    }
+  }, [isOpen, currentStreamSrc, setBufferingWithSafety]);
 
   const controlsShownAtRef = useRef<number>(Date.now());
   const isInteractingControlsRef = useRef<boolean>(false);
@@ -2053,61 +2170,51 @@ export function NativePlayer({
       return;
     }
 
-    // 1. Pixeldrain Direct (attempt 0) failed: escalate to proxy mode first
-    if (activeServer === "pixeldrain" && streamAttempt === 0) {
-      console.warn("[NativePlayer] Direct Pixeldrain stream encountered error; escalating to native proxy...");
-      const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
-      setStreamMode(needsTc ? "transcode" : "proxy");
-      setStreamAttempt(1);
-      setIsBuffering(true);
-      return;
-    }
-
-    // 2. Pixeldrain Proxy (attempt 1) failed: try transcode ONLY if FFmpeg is available
-    if (activeServer === "pixeldrain" && streamAttempt === 1 && mediaInfo?.hasFFmpeg !== false) {
-      console.warn("[NativePlayer] Pixeldrain proxy failed; escalating to transcode engine...");
-      setStreamMode("transcode");
-      setStreamAttempt(2);
-      setIsBuffering(true);
+    // 1. Pixeldrain Direct: keep native player without any fallback!
+    if (activeServer === "pixeldrain") {
+      if (streamAttempt === 0) {
+        const curUrl = directStreamUrl || "";
+        const altUrl = curUrl.includes("pixeldrain.dev")
+          ? curUrl.replace("pixeldrain.dev", "pixeldrain.com")
+          : curUrl.includes("pixeldrain.com")
+          ? curUrl.replace("pixeldrain.com", "pixeldrain.dev")
+          : "";
+        if (altUrl && altUrl !== curUrl) {
+          console.warn("[NativePlayer] Pixeldrain primary domain notice. Switching to Pixeldrain mirror directly:", altUrl);
+          setStreamAttempt(1);
+          setActiveStreamUrl(altUrl);
+          setBufferingWithSafety(true, 2500);
+          if (vid) {
+            vid.src = altUrl;
+            vid.load();
+            vid.play().catch(() => {});
+          }
+          return;
+        }
+      }
+      // On Pixeldrain, do NOT switch to web player or FSL fallback. Keep native player and retry direct playback
+      console.warn("[NativePlayer] Pixeldrain stream notice. Re-initiating native playback directly...");
+      setIsBuffering(false);
+      setHasPlaybackError(false);
+      if (vid) {
+        vid.load();
+        vid.play().catch(() => {});
+      }
       return;
     }
 
     // Mark current server as failed so we NEVER bounce back to it in this session
     triedServersRef.current.add(activeServer);
 
-    // 1. Fallback from FSL to Pixeldrain (if Pixeldrain hasn't been tried yet)
+    // 2. Fallback from FSL to Pixeldrain (if Pixeldrain hasn't been tried yet)
     if (activeServer === "fsl" && pixeldrainCandidate && !triedServersRef.current.has("pixeldrain") && !hasStartedPlaybackRef.current) {
       console.warn("[NativePlayer] FSL server error encountered before playback. Switching to Pixeldrain Server...");
       showToast(t("FSL stream error. Switching to Pixeldrain..."));
       setActiveServer("pixeldrain");
-      const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
-      setStreamMode(needsTc ? "transcode" : "proxy");
+      setStreamMode("direct");
       setHasPlaybackError(false);
       setStreamAttempt(0);
-      setIsBuffering(true);
-      return;
-    }
-
-    // 2. If Pixeldrain fails (e.g. on Vercel where raw MKV cannot play direct) and watchUrl is available, seamlessly use HubCloud Web Engine
-    if (activeServer === "pixeldrain" && watchUrl) {
-      console.warn("[NativePlayer] Pixeldrain stream cannot be decoded directly on Vercel. Switching to HubCloud Web Player...");
-      showToast(t("Playing via Web Player..."));
-      setEngine("web");
-      setIsBuffering(false);
-      setHasPlaybackError(false);
-      return;
-    }
-
-    // 3. Fallback from Pixeldrain to FSL Server (if FSL hasn't been tried yet)
-    if (activeServer === "pixeldrain" && fslCandidate && !triedServersRef.current.has("fsl") && !hasStartedPlaybackRef.current) {
-      console.warn("[NativePlayer] Pixeldrain server exhausted. Falling back to FSL Server...");
-      showToast(t("Pixeldrain stream error. Falling back to FSL..."));
-      setActiveServer("fsl");
-      const needsTc = mediaInfo?.hasFFmpeg !== false && (isDirectMkv || Boolean(mediaInfo?.needsTranscode));
-      setStreamMode(needsTc ? "transcode" : "proxy");
-      setHasPlaybackError(false);
-      setStreamAttempt(0);
-      setIsBuffering(true);
+      setBufferingWithSafety(true);
       return;
     }
 
@@ -2176,7 +2283,10 @@ export function NativePlayer({
       setActiveSubtitleText("");
       setStreamAttempt(0);
       setHasPlaybackError(false);
-      setIsBuffering(true);
+      if (newServerKey === "pixeldrain") {
+        setStreamMode("direct");
+      }
+      setBufferingWithSafety(true, 4000);
       setEngine("native");
 
       showToast(
@@ -2751,6 +2861,7 @@ export function NativePlayer({
 
   const handleActiveLoadedData = useCallback(() => {
     if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
+      setBufferingWithSafety(false);
       setIsBuffering(false);
     }
     setHasPlaybackError(false);
@@ -2758,8 +2869,24 @@ export function NativePlayer({
     if (activeVid) {
       activeVid.muted = isMuted;
       activeVid.volume = volume;
+      if (!hasStartedPlaybackRef.current) {
+        activeVid.playbackRate = playbackSpeed;
+        const p = activeVid.play();
+        if (p !== undefined) {
+          p.then(() => {
+            setIsPlaying(true);
+            setBufferingWithSafety(false);
+            setIsBuffering(false);
+            hasStartedPlaybackRef.current = true;
+          }).catch(() => {
+            setIsPlaying(false);
+            setBufferingWithSafety(false);
+            setIsBuffering(false);
+          });
+        }
+      }
     }
-  }, [isMuted, volume]);
+  }, [isMuted, volume, playbackSpeed, setBufferingWithSafety]);
 
   const handleActiveCanPlay = useCallback(() => {
     if (isSwitchingQualityRef.current) {
@@ -2768,6 +2895,7 @@ export function NativePlayer({
       setSwitchingQualityLabel(null);
     }
     if (!isSwitchingAudioRef.current) {
+      setBufferingWithSafety(false);
       setIsBuffering(false);
     }
     setHasPlaybackError(false);
@@ -2799,60 +2927,76 @@ export function NativePlayer({
       }
       audioSwitchResumePosRef.current = 0;
     }
-    if (wasPlayingBeforeQualitySwitchRef.current || isPlaying) {
-      activeVid?.play().then(() => setIsPlaying(true)).catch(() => {});
+    if (wasPlayingBeforeQualitySwitchRef.current || isPlaying || !hasStartedPlaybackRef.current) {
+      const p = activeVid?.play();
+      if (p !== undefined) {
+        p.then(() => {
+          setIsPlaying(true);
+          setBufferingWithSafety(false);
+          hasStartedPlaybackRef.current = true;
+        }).catch(() => {
+          setIsPlaying(false);
+          setBufferingWithSafety(false);
+        });
+      }
     }
-  }, [isPlaying, currentPosition, streamMode, seekOffset, isMuted, volume]);
+  }, [isPlaying, currentPosition, streamMode, seekOffset, isMuted, volume, setBufferingWithSafety]);
 
   const handleActiveCanPlayThrough = useCallback(() => {
     if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
-      setIsBuffering(false);
+      setBufferingWithSafety(false);
     }
-  }, []);
+  }, [setBufferingWithSafety]);
 
   const handleActiveWaiting = useCallback(() => {
     if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
       const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current;
-      if (!activeVid || activeVid.paused || activeVid.currentTime === 0) {
-        setIsBuffering(true);
+      // Only show buffering indicator if video is playing (not manually paused)
+      if (activeVid && !activeVid.paused) {
+        setBufferingWithSafety(true, 4000);
       }
     }
-  }, []);
+  }, [setBufferingWithSafety]);
 
   const handleActiveStalled = useCallback(() => {
     if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
       const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current;
-      if (activeVid && (activeVid.paused || activeVid.currentTime === 0)) {
-        setIsBuffering(true);
+      // Only buffer if actively playing and stalled on data (stalling during preload paused is normal)
+      if (activeVid && !activeVid.paused && activeVid.currentTime > 0) {
+        setBufferingWithSafety(true, 4000);
       }
     }
-  }, []);
+  }, [setBufferingWithSafety]);
 
   const handleActiveLoadStart = useCallback(() => {
     if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
       const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current;
-      if (!activeVid || activeVid.currentTime === 0) {
-        setIsBuffering(true);
+      if (!activeVid || !hasStartedPlaybackRef.current) {
+        setBufferingWithSafety(true, 2500);
       }
     }
-  }, []);
+    if (isPixeldrain) {
+      setTimeout(() => {
+        setIsBuffering(false);
+      }, 1200);
+    }
+  }, [setBufferingWithSafety, isPixeldrain]);
 
   const handleActiveSeeking = useCallback(() => {
     if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
       const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current;
-      // Only show buffering indicator if the video is paused during seek
       if (activeVid && activeVid.paused) {
-        setIsBuffering(true);
+        setBufferingWithSafety(true, 2000);
       }
     }
-  }, []);
+  }, [setBufferingWithSafety]);
 
   const handleActiveSeeked = useCallback(() => {
     isSeekingRef.current = false;
     if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
-      setIsBuffering(false);
+      setBufferingWithSafety(false);
     }
-  }, []);
+  }, [setBufferingWithSafety]);
 
   const handleActivePlaying = useCallback(() => {
     isSeekingRef.current = false;
@@ -2914,6 +3058,32 @@ export function NativePlayer({
     handleVideoError();
   }, [streamMode, seekOffset, savePlaybackPosition, handleVideoError]);
 
+  const effectiveWebPlayerUrl = useMemo(() => {
+    if (activeWatchUrl && activeWatchUrl.includes("hbplay.pages.dev")) {
+      return activeWatchUrl;
+    }
+    const streamTarget = directStreamUrl || activeStreamUrl || "";
+    const isPd =
+      activeServer === "pixeldrain" ||
+      streamTarget.includes("pixeldrain.") ||
+      streamTarget.includes("pixel.drain") ||
+      streamTarget.includes("pixeldra.in") ||
+      Boolean(activeWatchUrl && (activeWatchUrl.includes("pixeldrain.") || activeWatchUrl.includes("pixel.drain")));
+    if (isPd) {
+      const cleanStream = normalizePixeldrainUrl(streamTarget) || streamTarget;
+      const cleanTitle = displayTitle || title || "Movie";
+      try {
+        const uB64 = btoa(cleanStream);
+        const mB64 = btoa("video/x-matrosk");
+        const tB64 = btoa(cleanTitle);
+        return `https://hbplay.pages.dev/?u=${encodeURIComponent(uB64)}&m=${encodeURIComponent(mB64)}&t=${encodeURIComponent(tB64)}`;
+      } catch {
+        return cleanStream;
+      }
+    }
+    return activeWatchUrl || watchUrl || "";
+  }, [activeWatchUrl, watchUrl, directStreamUrl, activeStreamUrl, activeServer, displayTitle, title]);
+
   if (!isOpen) return null;
 
   return (
@@ -2968,7 +3138,9 @@ export function NativePlayer({
                   src={(slot0Src || (activeSlot === 0 ? currentStreamSrc : undefined)) || undefined}
                   poster={poster || undefined}
                   playsInline
+                  autoPlay
                   preload="auto"
+                  crossOrigin={isPixeldrain ? undefined : "anonymous"}
                   onClick={(e) => {
                     e.stopPropagation();
                     if (activeMenu) setActiveMenu(null);
@@ -3000,7 +3172,15 @@ export function NativePlayer({
                       ? "object-fill"
                       : "object-contain"
                   }`}
-                />
+                >
+                  {(slot0Src || (activeSlot === 0 ? currentStreamSrc : "")) && (
+                    <>
+                      <source src={slot0Src || (activeSlot === 0 ? currentStreamSrc : "")} type="video/mp4" />
+                      <source src={slot0Src || (activeSlot === 0 ? currentStreamSrc : "")} type="video/webm" />
+                      <source src={slot0Src || (activeSlot === 0 ? currentStreamSrc : "")} />
+                    </>
+                  )}
+                </video>
                 <video
                   ref={(el) => {
                     video1Ref.current = el;
@@ -3011,7 +3191,9 @@ export function NativePlayer({
                   src={(slot1Src || (activeSlot === 1 ? currentStreamSrc : undefined)) || undefined}
                   poster={poster || undefined}
                   playsInline
+                  autoPlay
                   preload="auto"
+                  crossOrigin={isPixeldrain ? undefined : "anonymous"}
                   onClick={(e) => {
                     e.stopPropagation();
                     if (activeMenu) setActiveMenu(null);
@@ -3043,11 +3225,19 @@ export function NativePlayer({
                       ? "object-fill"
                       : "object-contain"
                   }`}
-                />
+                >
+                  {(slot1Src || (activeSlot === 1 ? currentStreamSrc : "")) && (
+                    <>
+                      <source src={slot1Src || (activeSlot === 1 ? currentStreamSrc : "")} type="video/mp4" />
+                      <source src={slot1Src || (activeSlot === 1 ? currentStreamSrc : "")} type="video/webm" />
+                      <source src={slot1Src || (activeSlot === 1 ? currentStreamSrc : "")} />
+                    </>
+                  )}
+                </video>
               </>
             ) : (
               <iframe
-                src={watchUrl || undefined}
+                src={effectiveWebPlayerUrl || undefined}
                 allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
                 className="w-full h-full border-none"
                 title={displayTitle}

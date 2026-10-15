@@ -709,9 +709,11 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
       const result: NativeStreamData = {
         hasWatchOnline: true,
         playable: true,
-        watchUrl: resolvedStreamUrl,
+        watchUrl: isMkv
+          ? `https://hbplay.pages.dev/?u=${Buffer.from(resolvedStreamUrl).toString("base64")}&m=${Buffer.from("video/x-matrosk").toString("base64")}&t=${Buffer.from(streamTitle).toString("base64")}`
+          : resolvedStreamUrl,
         streamUrl: resolvedStreamUrl,
-        directUrl: `/api/native-player/stream?url=${encodeURIComponent(resolvedStreamUrl)}${isMkv ? "&mode=transcode" : ""}`,
+        directUrl: resolvedStreamUrl,
         sourceUrl: resolvedStreamUrl,
         title: streamTitle,
         size: streamSize,
@@ -764,7 +766,7 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
           playable: true,
           watchUrl,
           streamUrl,
-          directUrl: `/api/native-player/stream?url=${encodeURIComponent(streamUrl)}`,
+          directUrl: streamUrl,
           sourceUrl: streamUrl,
           title,
           mime: parsed.mime || (isMkv ? "video/x-matroska" : "video/mp4"),
@@ -823,7 +825,7 @@ nativePlayerRouter.post(["/api/native-player/check", "/native-player/check"], as
             playable: true,
             watchUrl,
             streamUrl,
-            directUrl: `/api/native-player/stream?url=${encodeURIComponent(streamUrl)}`,
+            directUrl: streamUrl,
             sourceUrl: streamUrl,
             title,
             mime: parsed.mime || (isMkv ? "video/x-matroska" : "video/mp4"),
