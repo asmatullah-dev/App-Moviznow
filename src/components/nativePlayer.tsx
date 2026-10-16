@@ -804,6 +804,7 @@ export function NativePlayer({
   const [isSwitchingQuality, setIsSwitchingQuality] = useState<boolean>(false);
   const [switchingQualityLabel, setSwitchingQualityLabel] = useState<string | null>(null);
   const pendingQualitySwitchPosRef = useRef<number | null>(null);
+  const pendingResumePosRef = useRef<number | null>(null);
   const isSwitchingQualityRef = useRef<boolean>(false);
   const wasPlayingBeforeQualitySwitchRef = useRef<boolean>(true);
   const isSeekingRef = useRef<boolean>(false);
@@ -1161,6 +1162,13 @@ export function NativePlayer({
     setCurrentPosition(targetPosition);
     setSeekOffset(0);
     latestPositionRef.current = targetPosition;
+    if (targetPosition > 2) {
+      pendingResumePosRef.current = targetPosition;
+      pendingQualitySwitchPosRef.current = targetPosition;
+    } else {
+      pendingResumePosRef.current = null;
+      pendingQualitySwitchPosRef.current = null;
+    }
     setTotalDuration(propDurationSeconds > 60 ? propDurationSeconds : 0);
     setBufferedPercent(0);
 
@@ -1184,7 +1192,7 @@ export function NativePlayer({
     setToastMessage(null);
     setIsSwitchingQuality(false);
     hasStartedPlaybackRef.current = false;
-  }, []);
+  }, [propDurationSeconds, setBufferingWithSafety]);
 
   // Full reset when player closes (unmounted or closed)
   useEffect(() => {
@@ -1222,6 +1230,13 @@ export function NativePlayer({
       prevContentKeyRef.current = contentKey;
 
       const savedTime = getSavedProgress(storageKey);
+      if (savedTime > 2) {
+        pendingResumePosRef.current = savedTime;
+        pendingQualitySwitchPosRef.current = savedTime;
+      } else {
+        pendingResumePosRef.current = null;
+        pendingQualitySwitchPosRef.current = null;
+      }
       resetPlayerState(savedTime);
 
       setCurrentQuality(quality || getPreferredQuality() || "720p");
@@ -1361,12 +1376,18 @@ export function NativePlayer({
         }
 
         // Capture exact continuous playback position before switching
+        const curVideo = (activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current) || videoRef.current;
         const currentPlaybackPos = curVideo && !isNaN(curVideo.currentTime) && curVideo.currentTime > 0
-          ? curVideo.currentTime
-          : (latestPositionRef.current || currentPosition || 0);
+          ? (streamMode === "transcode" && seekOffset > 0 ? seekOffset + curVideo.currentTime : curVideo.currentTime)
+          : (pendingResumePosRef.current || pendingQualitySwitchPosRef.current || latestPositionRef.current || currentPosition || 0);
 
-        pendingQualitySwitchPosRef.current = currentPlaybackPos;
-        savePlaybackPosition(currentPlaybackPos);
+        if (currentPlaybackPos > 2) {
+          pendingResumePosRef.current = currentPlaybackPos;
+          pendingQualitySwitchPosRef.current = currentPlaybackPos;
+          latestPositionRef.current = Math.floor(currentPlaybackPos);
+          setCurrentPosition(currentPlaybackPos);
+          savePlaybackPosition(currentPlaybackPos);
+        }
 
         // Update state to the new link and server
         setCurrentQuality(opt.name || opt.label);
@@ -1393,10 +1414,12 @@ export function NativePlayer({
         if (videoRef.current) {
           videoRef.current.src = normalizedStream;
           videoRef.current.load();
-          videoRef.current.play().then(() => {
-            setIsPlaying(true);
-            hasStartedPlaybackRef.current = true;
-          }).catch(() => {});
+          if (wasPlayingBeforeQualitySwitchRef.current) {
+            videoRef.current.play().then(() => {
+              setIsPlaying(true);
+              hasStartedPlaybackRef.current = true;
+            }).catch(() => {});
+          }
         }
 
         showToast(`${t("Quality:")} ${opt.label}`);
@@ -1524,11 +1547,19 @@ export function NativePlayer({
     if (!isOpen || !currentStreamSrc) return;
     const activeVid = (activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current) || videoRef.current;
     if (activeVid) {
-      if (activeVid.src !== currentStreamSrc) {
+      if (activeVid.src !== currentStreamSrc && activeVid.currentSrc !== currentStreamSrc) {
         activeVid.src = currentStreamSrc;
+        activeVid.load();
       }
-      activeVid.load();
       setBufferingWithSafety(true, 2500);
+
+      const resumeTarget = pendingResumePosRef.current ?? pendingQualitySwitchPosRef.current;
+      if (resumeTarget !== null && resumeTarget > 2 && (streamMode !== "transcode" || seekOffset === 0) && activeVid.readyState >= 1) {
+        try {
+          activeVid.currentTime = resumeTarget;
+        } catch {}
+      }
+
       const playPromise = activeVid.play();
       if (playPromise !== undefined) {
         playPromise
@@ -1537,13 +1568,19 @@ export function NativePlayer({
             hasStartedPlaybackRef.current = true;
             setIsBuffering(false);
             setHasPlaybackError(false);
+            const target = pendingResumePosRef.current ?? pendingQualitySwitchPosRef.current;
+            if (target !== null && target > 2 && (streamMode !== "transcode" || seekOffset === 0) && activeVid.readyState >= 1 && activeVid.currentTime < 1) {
+              try {
+                activeVid.currentTime = target;
+              } catch {}
+            }
           })
           .catch(() => {
             setIsBuffering(false);
           });
       }
     }
-  }, [isOpen, currentStreamSrc, setBufferingWithSafety]);
+  }, [isOpen, currentStreamSrc, setBufferingWithSafety, streamMode, seekOffset]);
 
   const controlsShownAtRef = useRef<number>(Date.now());
   const isInteractingControlsRef = useRef<boolean>(false);
@@ -1795,15 +1832,34 @@ export function NativePlayer({
       }
     }
 
-    // Guard against temporary 0s during quality transition
-    if (pendingQualitySwitchPosRef.current !== null) {
-      const targetPos = pendingQualitySwitchPosRef.current;
-      const vTime = activeVid.currentTime;
-      if (streamMode === "transcode" && seekOffset > 0) {
-        pendingQualitySwitchPosRef.current = null;
-      } else if (vTime < 1 && targetPos > 2 && activeVid.paused) {
+    // Guard against temporary 0s during initial resume or quality transition
+    const resumeTarget =
+      pendingResumePosRef.current !== null && pendingResumePosRef.current > 2
+        ? pendingResumePosRef.current
+        : (pendingQualitySwitchPosRef.current !== null && pendingQualitySwitchPosRef.current > 2
+            ? pendingQualitySwitchPosRef.current
+            : null);
+
+    if (resumeTarget !== null) {
+      const vTime =
+        streamMode === "transcode" && seekOffset > 0
+          ? seekOffset + activeVid.currentTime
+          : activeVid.currentTime;
+
+      // Video element hasn't reached target yet
+      if (activeVid.currentTime < 2 && Math.abs(vTime - resumeTarget) > 2) {
+        if (activeVid.readyState >= 1 && (streamMode !== "transcode" || seekOffset === 0)) {
+          try {
+            activeVid.currentTime = resumeTarget;
+          } catch {}
+        }
+        // Protect progress: display resumed position and do NOT overwrite with 0!
+        setCurrentPosition(resumeTarget);
+        latestPositionRef.current = Math.floor(resumeTarget);
         return;
-      } else {
+      } else if (Math.abs(vTime - resumeTarget) <= 2.5) {
+        // Successfully reached target position!
+        pendingResumePosRef.current = null;
         pendingQualitySwitchPosRef.current = null;
       }
     }
@@ -1888,12 +1944,17 @@ export function NativePlayer({
 
     // If resuming in proxy or direct mode (where full video duration is preserved), seek to remembered position
     const savedTarget =
-      pendingQualitySwitchPosRef.current !== null
-        ? pendingQualitySwitchPosRef.current
-        : (latestPositionRef.current || currentPosition);
+      pendingResumePosRef.current !== null && pendingResumePosRef.current > 2
+        ? pendingResumePosRef.current
+        : (pendingQualitySwitchPosRef.current !== null && pendingQualitySwitchPosRef.current > 2
+            ? pendingQualitySwitchPosRef.current
+            : (latestPositionRef.current > 2 ? latestPositionRef.current : (currentPosition > 2 ? currentPosition : 0)));
+
     if (savedTarget > 2 && (streamMode !== "transcode" || seekOffset === 0)) {
       try {
         activeVid.currentTime = savedTarget;
+        setCurrentPosition(savedTarget);
+        latestPositionRef.current = Math.floor(savedTarget);
       } catch {}
     }
 
@@ -2110,6 +2171,8 @@ export function NativePlayer({
     setCurrentPosition(clampedTarget);
     latestPositionRef.current = Math.floor(clampedTarget);
     savePlaybackPosition(clampedTarget);
+    pendingResumePosRef.current = null;
+    pendingQualitySwitchPosRef.current = null;
 
     // Instantly preview subtitle cue at new position if subtitles are on
     const currentCues = subtitleCuesRef.current.length > 0 ? subtitleCuesRef.current : subtitleCues;
@@ -2582,6 +2645,24 @@ export function NativePlayer({
     if (activeVid) {
       activeVid.muted = isMuted;
       activeVid.volume = volume;
+
+      const resumeTarget =
+        pendingResumePosRef.current !== null && pendingResumePosRef.current > 2
+          ? pendingResumePosRef.current
+          : (pendingQualitySwitchPosRef.current !== null && pendingQualitySwitchPosRef.current > 2
+              ? pendingQualitySwitchPosRef.current
+              : (latestPositionRef.current > 2 ? latestPositionRef.current : 0));
+
+      if (resumeTarget > 2 && (streamMode !== "transcode" || seekOffset === 0)) {
+        if (Math.abs(activeVid.currentTime - resumeTarget) > 1.5) {
+          try {
+            activeVid.currentTime = resumeTarget;
+            setCurrentPosition(resumeTarget);
+            latestPositionRef.current = Math.floor(resumeTarget);
+          } catch {}
+        }
+      }
+
       if (!hasStartedPlaybackRef.current) {
         activeVid.playbackRate = playbackSpeed;
         const p = activeVid.play();
@@ -2599,7 +2680,7 @@ export function NativePlayer({
         }
       }
     }
-  }, [isMuted, volume, playbackSpeed, setBufferingWithSafety]);
+  }, [isMuted, volume, playbackSpeed, setBufferingWithSafety, streamMode, seekOffset]);
 
   const handleActiveCanPlay = useCallback(() => {
     if (isSwitchingQualityRef.current) {
@@ -2616,20 +2697,25 @@ export function NativePlayer({
       activeVid.volume = volume;
     }
     const savedTarget =
-      pendingQualitySwitchPosRef.current !== null
-        ? pendingQualitySwitchPosRef.current
-        : (latestPositionRef.current || currentPosition);
+      pendingResumePosRef.current !== null && pendingResumePosRef.current > 2
+        ? pendingResumePosRef.current
+        : (pendingQualitySwitchPosRef.current !== null && pendingQualitySwitchPosRef.current > 2
+            ? pendingQualitySwitchPosRef.current
+            : (latestPositionRef.current > 2 ? latestPositionRef.current : (currentPosition > 2 ? currentPosition : 0)));
+
     if (
       savedTarget > 2 &&
       activeVid &&
       (streamMode !== "transcode" || seekOffset === 0) &&
-      activeVid.currentTime < 1
+      Math.abs(activeVid.currentTime - savedTarget) > 1.5
     ) {
       try {
         activeVid.currentTime = savedTarget;
+        setCurrentPosition(savedTarget);
+        latestPositionRef.current = Math.floor(savedTarget);
       } catch {}
     }
-    pendingQualitySwitchPosRef.current = null;
+
     if (audioSwitchResumePosRef.current > 0 && activeVid) {
       if (streamMode !== "transcode") {
         try {
@@ -2699,6 +2785,14 @@ export function NativePlayer({
 
   const handleActiveSeeked = useCallback(() => {
     isSeekingRef.current = false;
+    const activeVid = (activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current) || videoRef.current;
+    const resumeTarget = pendingResumePosRef.current ?? pendingQualitySwitchPosRef.current;
+    if (activeVid && resumeTarget !== null) {
+      if (Math.abs(activeVid.currentTime - resumeTarget) <= 3) {
+        pendingResumePosRef.current = null;
+        pendingQualitySwitchPosRef.current = null;
+      }
+    }
     if (!isSwitchingQualityRef.current) {
       setBufferingWithSafety(false);
     }
