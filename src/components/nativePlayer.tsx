@@ -22,7 +22,6 @@ import {
   Mic,
   Gauge,
   RefreshCw,
-  Server,
 } from "lucide-react";
 import { useLanguage } from "../contexts/LanguageContext";
 import { safeStorage } from "../utils/safeStorage";
@@ -627,55 +626,27 @@ export function findFslCandidate(
 }
 
 /**
- * Helper to find the Pixeldrain candidate from a list of candidates
+ * Pixeldrain playback is removed; returns null.
  */
 export function findPixeldrainCandidate(
-  candidates?: Array<{ text?: string; href?: string }>
-): { text: string; href: string; streamUrl: string } | null {
-  if (!Array.isArray(candidates) || candidates.length === 0) return null;
-  const match = candidates.find((c) => {
-    if (!c || !c.href) return false;
-    const t = (c.text || "").toLowerCase();
-    const h = (c.href || "").toLowerCase();
-    return (
-      t.includes("pixel") ||
-      h.includes("pixeldrain") ||
-      h.includes("pixelserver") ||
-      h.includes("pixel.drain") ||
-      h.includes("pixeldra.in") ||
-      t.includes("pdrain") ||
-      h.includes("pdrain")
-    );
-  });
-  if (match && match.href) {
-    const rawHref = match.href.trim();
-    return {
-      text: match.text || "Pixeldrain Server",
-      href: rawHref,
-      streamUrl: normalizePixeldrainUrl(rawHref),
-    };
-  }
+  _candidates?: Array<{ text?: string; href?: string }>
+): null {
   return null;
 }
 
 /**
- * Helper to find the watch online or FSL candidate from a list of candidates
+ * Helper to find the FSL server candidate or direct watch online candidate
  */
 export function findWatchOnlineCandidate(
   candidates?: Array<{ text?: string; href?: string }>
 ): { text: string; href: string } | null {
   if (!Array.isArray(candidates) || candidates.length === 0) return null;
-  // 1. Always prioritize Pixeldrain Server first
-  const pixel = findPixeldrainCandidate(candidates);
-  if (pixel) {
-    return { text: pixel.text, href: pixel.streamUrl };
-  }
-  // 2. If Pixeldrain Server is missing, fallback to FSL server
+  // Prioritize FSL server
   const fsl = findFslCandidate(candidates);
   if (fsl) {
     return fsl;
   }
-  // 3. Fallback to watch online, stream, or hbplay
+  // Fallback to watch online, stream, or hbplay
   const match = candidates.find((c) => {
     if (!c || !c.href) return false;
     const t = (c.text || "").toLowerCase();
@@ -838,107 +809,29 @@ export function NativePlayer({
   const isSeekingRef = useRef<boolean>(false);
   const seekSafetyTimerRef = useRef<any>(null);
 
-  // Parse direct stream URL (prioritizing Pixeldrain candidate first, FSL candidate if Pixeldrain missing, decoded meta, activeStreamUrl, or direct watchUrl)
+  // Parse direct stream URL (exclusively play using FSL server)
   const fslCandidate = useMemo(() => findFslCandidate(activeCandidates), [activeCandidates]);
-  const pixeldrainCandidate = useMemo(() => {
-    const fromCandidates = findPixeldrainCandidate(activeCandidates);
-    if (fromCandidates) return fromCandidates;
-    const fallbackUrl = (activeStreamUrl || propStreamUrl || activeWatchUrl || watchUrl || "").trim();
-    if (
-      fallbackUrl.toLowerCase().includes("pixeldrain") ||
-      fallbackUrl.toLowerCase().includes("pixel.drain") ||
-      fallbackUrl.toLowerCase().includes("pixeldra.in")
-    ) {
-      return {
-        text: "Pixeldrain Server",
-        href: fallbackUrl,
-        streamUrl: normalizePixeldrainUrl(fallbackUrl),
-      };
-    }
-    return null;
-  }, [activeCandidates, activeStreamUrl, propStreamUrl, activeWatchUrl, watchUrl]);
   const decodedMeta = useMemo(() => decodeWatchUrl(activeWatchUrl), [activeWatchUrl]);
 
-  // Track server candidates that have failed during this session to eliminate bouncing loops
-  const triedServersRef = useRef<Set<string>>(new Set());
-
-  const isInputPixeldrain = useMemo(() => {
-    const combined = `${propStreamUrl || ""} ${watchUrl || ""} ${activeStreamUrl || ""} ${activeWatchUrl || ""}`.toLowerCase();
-    return (
-      combined.includes("pixeldrain") ||
-      combined.includes("pixel.drain") ||
-      combined.includes("pixeldra.in") ||
-      combined.includes("pdrain")
-    );
-  }, [propStreamUrl, watchUrl, activeStreamUrl, activeWatchUrl]);
-
-  // Active server: prioritize Pixeldrain if input is Pixeldrain or pixeldrain candidate exists, else fsl, else default
-  const [activeServer, setActiveServer] = useState<"fsl" | "pixeldrain" | "default">(() => {
-    if (isInputPixeldrain || pixeldrainCandidate) return "pixeldrain";
-    if (fslCandidate) return "fsl";
-    return "default";
-  });
-
-  // Keep activeServer in sync when modal opens or candidates change
-  useEffect(() => {
-    if (isOpen) {
-      triedServersRef.current.clear();
-      if (isInputPixeldrain || pixeldrainCandidate) {
-        setActiveServer("pixeldrain");
-      } else if (fslCandidate) {
-        setActiveServer("fsl");
-      } else {
-        setActiveServer("default");
-      }
-    }
-  }, [isOpen, isInputPixeldrain, pixeldrainCandidate, fslCandidate]);
-
   const rawStreamUrl = useMemo(() => {
-    if (activeServer === "pixeldrain") {
-      return (
-        pixeldrainCandidate?.streamUrl ||
-        pixeldrainCandidate?.href ||
-        activeStreamUrl ||
-        propStreamUrl ||
-        activeWatchUrl ||
-        watchUrl ||
-        ""
-      );
-    }
-    if (activeServer === "fsl" && fslCandidate) {
+    if (fslCandidate?.href) {
       return fslCandidate.href;
     }
     return (
-      pixeldrainCandidate?.streamUrl ||
-      pixeldrainCandidate?.href ||
-      fslCandidate?.href ||
       activeStreamUrl ||
+      propStreamUrl ||
       decodedMeta.streamUrl ||
-      (activeWatchUrl && !activeWatchUrl.includes("hbplay.pages.dev") ? activeWatchUrl : "")
+      (activeWatchUrl && !activeWatchUrl.includes("hbplay.pages.dev") ? activeWatchUrl : "") ||
+      ""
     );
-  }, [activeServer, fslCandidate, pixeldrainCandidate, activeStreamUrl, propStreamUrl, decodedMeta, activeWatchUrl, watchUrl]);
+  }, [fslCandidate, activeStreamUrl, propStreamUrl, decodedMeta, activeWatchUrl]);
 
-  const directStreamUrl = normalizePixeldrainUrl(rawStreamUrl);
+  const directStreamUrl = rawStreamUrl;
 
-  // Computes the download URL: Pixeldrain /u/:id for Pixeldrain, FSL direct URL for FSL server
+  // Computes the download URL: FSL direct stream URL
   const downloadUrl = useMemo(() => {
-    if (activeServer === "fsl") {
-      return fslCandidate?.href || directStreamUrl || rawStreamUrl || "";
-    }
-    if (activeServer === "pixeldrain") {
-      const pdCandidateUrl = pixeldrainCandidate?.href || pixeldrainCandidate?.streamUrl;
-      const target = pdCandidateUrl || directStreamUrl || rawStreamUrl || activeWatchUrl || "";
-      return getPixeldrainDownloadUrl(target) || target;
-    }
-    // Default server:
-    if (directStreamUrl.toLowerCase().includes("pixeldrain") || (pixeldrainCandidate && !fslCandidate)) {
-      return getPixeldrainDownloadUrl(pixeldrainCandidate?.href || directStreamUrl);
-    }
-    if (fslCandidate) {
-      return fslCandidate.href;
-    }
-    return directStreamUrl || rawStreamUrl || activeWatchUrl || "";
-  }, [activeServer, pixeldrainCandidate, fslCandidate, directStreamUrl, rawStreamUrl, activeWatchUrl]);
+    return fslCandidate?.href || directStreamUrl || rawStreamUrl || activeWatchUrl || "";
+  }, [fslCandidate, directStreamUrl, rawStreamUrl, activeWatchUrl]);
 
   // Initial duration in seconds from content metadata/runtime
   const propDurationSeconds = useMemo(() => {
@@ -1015,13 +908,6 @@ export function NativePlayer({
 
   const [streamAttempt, setStreamAttempt] = useState<number>(0);
   const [streamMode, setStreamMode] = useState<"direct" | "proxy" | "transcode">(() => {
-    const isPd =
-      (directStreamUrl || "").toLowerCase().includes("pixeldrain") ||
-      (directStreamUrl || "").toLowerCase().includes("pixel.drain") ||
-      (directStreamUrl || "").toLowerCase().includes("pixeldra.in");
-    if (isPd) {
-      return "direct";
-    }
     if (
       decodedMeta.mime?.includes("matroska") ||
       decodedMeta.title?.toLowerCase().includes(".mkv") ||
@@ -1035,17 +921,6 @@ export function NativePlayer({
   });
 
   useEffect(() => {
-    const isPd =
-      activeServer === "pixeldrain" ||
-      isInputPixeldrain ||
-      (directStreamUrl || "").toLowerCase().includes("pixeldrain") ||
-      (directStreamUrl || "").toLowerCase().includes("pixel.drain") ||
-      (directStreamUrl || "").toLowerCase().includes("pixeldra.in") ||
-      (directStreamUrl || "").toLowerCase().includes("pdrain");
-    if (isPd) {
-      setStreamMode("direct");
-      return;
-    }
     // If running on Vercel or environment where FFmpeg is not installed, use direct mode
     if (mediaInfo?.hasFFmpeg === false) {
       setStreamMode("direct");
@@ -1054,7 +929,7 @@ export function NativePlayer({
     if (mediaInfo?.hasFFmpeg && (isDirectMkv || mediaInfo?.needsTranscode)) {
       setStreamMode("transcode");
     }
-  }, [isDirectMkv, mediaInfo, activeServer, directStreamUrl, isInputPixeldrain]);
+  }, [isDirectMkv, mediaInfo]);
   const [seekOffset, setSeekOffset] = useState<number>(0);
   const [totalDuration, setTotalDuration] = useState<number>(() => {
     return propDurationSeconds > 60 ? propDurationSeconds : 0;
@@ -1139,14 +1014,12 @@ export function NativePlayer({
     }
   }, []);
 
-  const [isSwitchingAudio, setIsSwitchingAudio] = useState<boolean>(false);
-  const isSwitchingAudioRef = useRef<boolean>(false);
   const audioSwitchResumePosRef = useRef<number>(0);
   const [hasPlaybackError, setHasPlaybackError] = useState<boolean>(false);
   const [fitMode, setFitMode] = useState<"contain" | "cover" | "fill">("contain");
 
-  const [activeMenu, setActiveMenu] = useState<"speed" | "audio" | "subtitles" | "quality" | "server" | null>(null);
-  const activeMenuRef = useRef<"speed" | "audio" | "subtitles" | "quality" | "server" | null>(null);
+  const [activeMenu, setActiveMenu] = useState<"speed" | "audio" | "subtitles" | "quality" | null>(null);
+  const activeMenuRef = useRef<"speed" | "audio" | "subtitles" | "quality" | null>(null);
   useEffect(() => {
     activeMenuRef.current = activeMenu;
   }, [activeMenu]);
@@ -1467,27 +1340,18 @@ export function NativePlayer({
           }
 
           newCandidates = Array.isArray(data.candidates) ? data.candidates : [];
-          const pixel = findPixeldrainCandidate(newCandidates);
           const fsl = findFslCandidate(newCandidates);
-          const watch = findWatchOnlineCandidate(newCandidates);
-
-          // Preserve active server preference when switching quality
-          if (activeServer === "fsl" && fsl) {
-            candidateRawStream = fsl.href;
-          } else if (activeServer === "pixeldrain" && pixel) {
-            candidateRawStream = pixel.streamUrl || pixel.href;
-          } else if (pixel) {
-            candidateRawStream = pixel.streamUrl || pixel.href;
-          } else if (fsl) {
+          if (fsl) {
             candidateRawStream = fsl.href;
           } else {
+            const watch = findWatchOnlineCandidate(newCandidates);
             const chosen = watch || (newCandidates.length > 0 ? newCandidates[0] : null);
             candidateRawStream = chosen ? chosen.href : (data.streamUrl || targetUrl);
           }
           newWatchUrl = data.watchUrl || targetUrl;
         }
 
-        const normalizedStream = normalizePixeldrainUrl(candidateRawStream);
+        const normalizedStream = candidateRawStream;
         if (!normalizedStream) {
           showToast(`${t("Unable to play")} ${opt.label}, ${t("keeping")} ${prevQualityLabel}`);
           isSwitchingQualityRef.current = false;
@@ -1495,21 +1359,6 @@ export function NativePlayer({
           setSwitchingQualityLabel(null);
           return;
         }
-
-        const pixelCand = findPixeldrainCandidate(newCandidates);
-        const fslCand = findFslCandidate(newCandidates);
-        const newServer: "pixeldrain" | "fsl" | "default" =
-          activeServer === "fsl" && fslCand
-            ? "fsl"
-            : activeServer === "pixeldrain" && pixelCand
-            ? "pixeldrain"
-            : pixelCand
-            ? "pixeldrain"
-            : fslCand
-            ? "fsl"
-            : normalizedStream.includes("pixeldrain")
-            ? "pixeldrain"
-            : "default";
 
         // Capture exact continuous playback position before switching
         const currentPlaybackPos = curVideo && !isNaN(curVideo.currentTime) && curVideo.currentTime > 0
@@ -1525,10 +1374,9 @@ export function NativePlayer({
         setActiveWatchUrl(newWatchUrl);
         setActiveStreamUrl(normalizedStream);
         setActiveCandidates(
-          newCandidates.length > 0 ? newCandidates : [{ text: "Direct Stream", href: normalizedStream }]
+          newCandidates.length > 0 ? newCandidates : [{ text: "FSL Server", href: normalizedStream }]
         );
-        setActiveServer(newServer);
-        setStreamMode("proxy");
+        setStreamMode("direct");
         setSeekOffset(0);
         setHasPlaybackError(false);
         setIsBuffering(true);
@@ -1595,12 +1443,7 @@ export function NativePlayer({
         if (data.duration && data.duration > 60) {
           setTotalDuration(Math.round(data.duration));
         }
-        const isPd =
-          activeServer === "pixeldrain" ||
-          directStreamUrl.toLowerCase().includes("pixeldrain") ||
-          directStreamUrl.toLowerCase().includes("pixel.drain") ||
-          directStreamUrl.toLowerCase().includes("pixeldra.in");
-        if (!isPd && (data.isMkv || data.needsTranscode) && data.hasFFmpeg !== false) {
+        if ((data.isMkv || data.needsTranscode) && data.hasFFmpeg !== false) {
           setStreamMode("transcode");
         }
         // Auto-load embedded subtitles if user has enabled subtitles
@@ -1620,7 +1463,7 @@ export function NativePlayer({
     return () => {
       isMounted = false;
     };
-  }, [isOpen, directStreamUrl, activeServer, displayTitle, title, imdbId, seasonInfo, episodeInfo]);
+  }, [isOpen, directStreamUrl, displayTitle, title, imdbId, seasonInfo, episodeInfo]);
 
   // Fetch direct subtitles from open CDN endpoint with 0 Vercel transfer
   useEffect(() => {
@@ -1644,26 +1487,9 @@ export function NativePlayer({
     };
   }, [isOpen, imdbId, seasonInfo, episodeInfo]);
 
-  const isPixeldrain = useMemo(() => {
-    const url = (directStreamUrl || rawStreamUrl || "").toLowerCase();
-    return (
-      activeServer === "pixeldrain" ||
-      isInputPixeldrain ||
-      url.includes("pixeldrain") ||
-      url.includes("pixel.drain") ||
-      url.includes("pixeldra.in") ||
-      url.includes("pdrain")
-    );
-  }, [activeServer, isInputPixeldrain, directStreamUrl, rawStreamUrl]);
-
-  // Construct stream URL: direct playback from origin CDN edge (0 Vercel Fast Origin / Data Transfer)
+  // Construct stream URL: direct playback from FSL origin CDN edge (0 Vercel Fast Origin / Data Transfer)
   const currentStreamSrc = useMemo(() => {
     if (!directStreamUrl) return "";
-
-    // Pixeldrain always plays directly from origin CDN edge (0 Vercel Fast Origin / Data Transfer)
-    if (isPixeldrain) {
-      return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
-    }
 
     const apiBase = getStreamingApiBase();
 
@@ -1678,9 +1504,9 @@ export function NativePlayer({
       return `${apiBase}/api/native-player/stream?${params.toString()}`;
     }
 
-    // Direct playback in nativePlayer from origin CDN edge (0 Vercel Fast Origin / Data Transfer)
-    return normalizePixeldrainUrl(directStreamUrl) || directStreamUrl;
-  }, [directStreamUrl, isPixeldrain, streamMode, seekOffset, selectedAudioTrack, streamAttempt, mediaInfo]);
+    // Direct playback in nativePlayer from FSL CDN edge
+    return directStreamUrl;
+  }, [directStreamUrl, streamMode, seekOffset, selectedAudioTrack, streamAttempt, mediaInfo]);
 
   // Synchronize stream source to active slot when not performing a background quality switch
   useEffect(() => {
@@ -2160,65 +1986,17 @@ export function NativePlayer({
     // If playback has successfully started previously and current time is progressing,
     // do not treat transient network hiccups as fatal server error
     if (hasStartedPlaybackRef.current && vid && vid.currentTime > 2) {
-      console.warn("[NativePlayer] Transient glitch during active playback; not switching server.");
+      console.warn("[NativePlayer] Transient glitch during active playback.");
       return;
     }
 
-    // Do not switch servers during seamless quality switching!
+    // Do not handle errors during seamless quality switching!
     if (isSwitchingQualityRef.current) {
-      console.warn("[NativePlayer] Suppressing server switch during active quality change.");
+      console.warn("[NativePlayer] Suppressing error handling during active quality change.");
       return;
     }
 
-    // 1. Pixeldrain Direct: keep native player without any fallback!
-    if (activeServer === "pixeldrain") {
-      if (streamAttempt === 0) {
-        const curUrl = directStreamUrl || "";
-        const altUrl = curUrl.includes("pixeldrain.dev")
-          ? curUrl.replace("pixeldrain.dev", "pixeldrain.com")
-          : curUrl.includes("pixeldrain.com")
-          ? curUrl.replace("pixeldrain.com", "pixeldrain.dev")
-          : "";
-        if (altUrl && altUrl !== curUrl) {
-          console.warn("[NativePlayer] Pixeldrain primary domain notice. Switching to Pixeldrain mirror directly:", altUrl);
-          setStreamAttempt(1);
-          setActiveStreamUrl(altUrl);
-          setBufferingWithSafety(true, 2500);
-          if (vid) {
-            vid.src = altUrl;
-            vid.load();
-            vid.play().catch(() => {});
-          }
-          return;
-        }
-      }
-      // On Pixeldrain, do NOT switch to web player or FSL fallback. Keep native player and retry direct playback
-      console.warn("[NativePlayer] Pixeldrain stream notice. Re-initiating native playback directly...");
-      setIsBuffering(false);
-      setHasPlaybackError(false);
-      if (vid) {
-        vid.load();
-        vid.play().catch(() => {});
-      }
-      return;
-    }
-
-    // Mark current server as failed so we NEVER bounce back to it in this session
-    triedServersRef.current.add(activeServer);
-
-    // 2. Fallback from FSL to Pixeldrain (if Pixeldrain hasn't been tried yet)
-    if (activeServer === "fsl" && pixeldrainCandidate && !triedServersRef.current.has("pixeldrain") && !hasStartedPlaybackRef.current) {
-      console.warn("[NativePlayer] FSL server error encountered before playback. Switching to Pixeldrain Server...");
-      showToast(t("FSL stream error. Switching to Pixeldrain..."));
-      setActiveServer("pixeldrain");
-      setStreamMode("direct");
-      setHasPlaybackError(false);
-      setStreamAttempt(0);
-      setBufferingWithSafety(true);
-      return;
-    }
-
-    // 5. If proxy mode failed on any other stream and FFmpeg is available, escalate to transcode once
+    // 1. If proxy mode failed on stream and FFmpeg is available, escalate to transcode once
     if (streamMode === "proxy" && mediaInfo?.hasFFmpeg !== false && streamAttempt === 0) {
       console.warn("[NativePlayer] Proxy mode failed. Escalating to transcode engine...");
       setStreamMode("transcode");
@@ -2227,7 +2005,7 @@ export function NativePlayer({
       return;
     }
 
-    // 6. If direct streams cannot be decoded natively on this browser and watchUrl is available, seamlessly use HubCloud Web Engine
+    // 2. If direct streams cannot be decoded natively on this browser and watchUrl is available, seamlessly use HubCloud Web Engine
     if (watchUrl && engine === "native") {
       console.warn("[NativePlayer] Direct stream could not be decoded natively on this device. Switching to HubCloud Web Engine...");
       showToast(t("Playing via Web Player..."));
@@ -2237,68 +2015,11 @@ export function NativePlayer({
       return;
     }
 
-    // 7. All viable stream options exhausted. Showing playback notice.
+    // 3. All viable stream options exhausted. Showing playback notice.
     console.warn("[NativePlayer] All available stream servers exhausted. Showing playback notice.");
     setIsBuffering(false);
     setHasPlaybackError(true);
   };
-
-  // Manual server switcher handler: switches stream link, subtitles, audio and download link while remembering position
-  const handleServerSelect = useCallback(
-    (newServerKey: "pixeldrain" | "fsl" | "default") => {
-      if (newServerKey === activeServer) {
-        return;
-      }
-
-      // 1. Capture current playback position to remember position across server switch
-      const curVideo = videoRef.current;
-      const currentPos = curVideo && !isNaN(curVideo.currentTime) && curVideo.currentTime > 0
-        ? curVideo.currentTime
-        : (latestPositionRef.current || currentPosition || 0);
-
-      pendingQualitySwitchPosRef.current = currentPos;
-      savePlaybackPosition(currentPos);
-
-      // 2. Resolve target URL for new server
-      let targetHref = "";
-      if (newServerKey === "pixeldrain" && pixeldrainCandidate) {
-        targetHref = pixeldrainCandidate.streamUrl || pixeldrainCandidate.href;
-      } else if (newServerKey === "fsl" && fslCandidate) {
-        targetHref = fslCandidate.href;
-      }
-
-      if (!targetHref) {
-        showToast(t("Server unavailable"));
-        return;
-      }
-
-      const normalizedHref = normalizePixeldrainUrl(targetHref);
-      setActiveServer(newServerKey);
-      setActiveStreamUrl(normalizedHref);
-
-      // 3. Reset subtitle track & audio track to the new server's streams
-      setSelectedAudioTrack(0);
-      setSelectedSubtitleTrack(null);
-      setSubtitleCues([]);
-      setActiveSubtitleText("");
-      setStreamAttempt(0);
-      setHasPlaybackError(false);
-      if (newServerKey === "pixeldrain") {
-        setStreamMode("direct");
-      }
-      setBufferingWithSafety(true, 4000);
-      setEngine("native");
-
-      showToast(
-        newServerKey === "pixeldrain"
-          ? `${t("Server:")} Pixeldrain Server`
-          : newServerKey === "fsl"
-          ? `${t("Server:")} FSL Server`
-          : `${t("Server:")} Default`
-      );
-    },
-    [activeServer, pixeldrainCandidate, fslCandidate, currentPosition, savePlaybackPosition, showToast, t]
-  );
 
   // Play/Pause: resumes seamlessly from remembered position if stopped/interrupted
   const togglePlay = () => {
@@ -2553,7 +2274,7 @@ export function NativePlayer({
     }
 
     return list;
-  }, [mediaInfo, directSubtitlesList, activeServer, fslCandidate, directStreamUrl]);
+  }, [mediaInfo, directSubtitlesList, fslCandidate, directStreamUrl]);
 
   // If no subtitles are available for this video, guarantee selectedSubtitleTrack is null and text is cleared
   useEffect(() => {
@@ -2604,12 +2325,6 @@ export function NativePlayer({
 
     // 3. For all browsers where native multi-track is not exposed (Chrome, Android, Edge, Firefox)
     // or when backend transcoding is needed: switch stream to transcode mode with the requested audio track
-    setIsSwitchingAudio(true);
-    isSwitchingAudioRef.current = true;
-    setTimeout(() => {
-      setIsSwitchingAudio(false);
-      isSwitchingAudioRef.current = false;
-    }, 2500);
 
     const targetPos = activeVid
       ? Math.floor(
@@ -2860,7 +2575,7 @@ export function NativePlayer({
   };
 
   const handleActiveLoadedData = useCallback(() => {
-    if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
+    if (!isSwitchingQualityRef.current) {
       setBufferingWithSafety(false);
       setIsBuffering(false);
     }
@@ -2894,10 +2609,8 @@ export function NativePlayer({
       setIsSwitchingQuality(false);
       setSwitchingQualityLabel(null);
     }
-    if (!isSwitchingAudioRef.current) {
-      setBufferingWithSafety(false);
-      setIsBuffering(false);
-    }
+    setBufferingWithSafety(false);
+    setIsBuffering(false);
     setHasPlaybackError(false);
     const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current;
     if (activeVid) {
@@ -2943,13 +2656,13 @@ export function NativePlayer({
   }, [isPlaying, currentPosition, streamMode, seekOffset, isMuted, volume, setBufferingWithSafety]);
 
   const handleActiveCanPlayThrough = useCallback(() => {
-    if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
+    if (!isSwitchingQualityRef.current) {
       setBufferingWithSafety(false);
     }
   }, [setBufferingWithSafety]);
 
   const handleActiveWaiting = useCallback(() => {
-    if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
+    if (!isSwitchingQualityRef.current) {
       const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current;
       // Only show buffering indicator if video is playing (not manually paused)
       if (activeVid && !activeVid.paused) {
@@ -2959,7 +2672,7 @@ export function NativePlayer({
   }, [setBufferingWithSafety]);
 
   const handleActiveStalled = useCallback(() => {
-    if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
+    if (!isSwitchingQualityRef.current) {
       const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current;
       // Only buffer if actively playing and stalled on data (stalling during preload paused is normal)
       if (activeVid && !activeVid.paused && activeVid.currentTime > 0) {
@@ -2969,21 +2682,16 @@ export function NativePlayer({
   }, [setBufferingWithSafety]);
 
   const handleActiveLoadStart = useCallback(() => {
-    if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
+    if (!isSwitchingQualityRef.current) {
       const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current;
       if (!activeVid || !hasStartedPlaybackRef.current) {
         setBufferingWithSafety(true, 2500);
       }
     }
-    if (isPixeldrain) {
-      setTimeout(() => {
-        setIsBuffering(false);
-      }, 1200);
-    }
-  }, [setBufferingWithSafety, isPixeldrain]);
+  }, [setBufferingWithSafety]);
 
   const handleActiveSeeking = useCallback(() => {
-    if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
+    if (!isSwitchingQualityRef.current) {
       const activeVid = activeSlotRef.current === 0 ? video0Ref.current : video1Ref.current;
       if (activeVid && activeVid.paused) {
         setBufferingWithSafety(true, 2000);
@@ -2993,7 +2701,7 @@ export function NativePlayer({
 
   const handleActiveSeeked = useCallback(() => {
     isSeekingRef.current = false;
-    if (!isSwitchingAudioRef.current && !isSwitchingQualityRef.current) {
+    if (!isSwitchingQualityRef.current) {
       setBufferingWithSafety(false);
     }
   }, [setBufferingWithSafety]);
@@ -3002,8 +2710,6 @@ export function NativePlayer({
     isSeekingRef.current = false;
     setIsBuffering(false);
     setIsPlaying(true);
-    setIsSwitchingAudio(false);
-    isSwitchingAudioRef.current = false;
     setIsSwitchingQuality(false);
     isSwitchingQualityRef.current = false;
     setSwitchingQualityLabel(null);
@@ -3012,7 +2718,7 @@ export function NativePlayer({
   }, []);
 
   const handleActivePause = useCallback(() => {
-    if (isSwitchingQualityRef.current || isSwitchingAudioRef.current) {
+    if (isSwitchingQualityRef.current) {
       return;
     }
     setIsPlaying(false);
@@ -3062,27 +2768,8 @@ export function NativePlayer({
     if (activeWatchUrl && activeWatchUrl.includes("hbplay.pages.dev")) {
       return activeWatchUrl;
     }
-    const streamTarget = directStreamUrl || activeStreamUrl || "";
-    const isPd =
-      activeServer === "pixeldrain" ||
-      streamTarget.includes("pixeldrain.") ||
-      streamTarget.includes("pixel.drain") ||
-      streamTarget.includes("pixeldra.in") ||
-      Boolean(activeWatchUrl && (activeWatchUrl.includes("pixeldrain.") || activeWatchUrl.includes("pixel.drain")));
-    if (isPd) {
-      const cleanStream = normalizePixeldrainUrl(streamTarget) || streamTarget;
-      const cleanTitle = displayTitle || title || "Movie";
-      try {
-        const uB64 = btoa(cleanStream);
-        const mB64 = btoa("video/x-matrosk");
-        const tB64 = btoa(cleanTitle);
-        return `https://hbplay.pages.dev/?u=${encodeURIComponent(uB64)}&m=${encodeURIComponent(mB64)}&t=${encodeURIComponent(tB64)}`;
-      } catch {
-        return cleanStream;
-      }
-    }
     return activeWatchUrl || watchUrl || "";
-  }, [activeWatchUrl, watchUrl, directStreamUrl, activeStreamUrl, activeServer, displayTitle, title]);
+  }, [activeWatchUrl, watchUrl]);
 
   if (!isOpen) return null;
 
@@ -3140,7 +2827,7 @@ export function NativePlayer({
                   playsInline
                   autoPlay
                   preload="auto"
-                  crossOrigin={isPixeldrain ? undefined : "anonymous"}
+                  crossOrigin="anonymous"
                   onClick={(e) => {
                     e.stopPropagation();
                     if (activeMenu) setActiveMenu(null);
@@ -3193,7 +2880,7 @@ export function NativePlayer({
                   playsInline
                   autoPlay
                   preload="auto"
-                  crossOrigin={isPixeldrain ? undefined : "anonymous"}
+                  crossOrigin="anonymous"
                   onClick={(e) => {
                     e.stopPropagation();
                     if (activeMenu) setActiveMenu(null);
@@ -3306,7 +2993,7 @@ export function NativePlayer({
             </AnimatePresence>
 
             {/* Buffering Indicator - Show each time stream is buffering / loading */}
-            {isBuffering && !isSwitchingAudio && !isSwitchingQuality && engine === "native" && !hasPlaybackError && (
+            {isBuffering && !isSwitchingQuality && engine === "native" && !hasPlaybackError && (
               <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center bg-black/40 backdrop-blur-xs z-20">
                 <Loader2 className="w-14 h-14 text-emerald-500 animate-spin mb-3" />
                 <span className="text-xs font-bold uppercase tracking-widest text-zinc-300">
@@ -3434,25 +3121,18 @@ export function NativePlayer({
             <div className="flex items-center gap-2 shrink-0">
               {downloadUrl && (
                 <a
-                  href={activeServer === "pixeldrain" ? getPixeldrainDownloadUrl(downloadUrl) : downloadUrl}
+                  href={downloadUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => {
                     e.stopPropagation();
-                    const targetUrl = activeServer === "pixeldrain" ? getPixeldrainDownloadUrl(downloadUrl) : downloadUrl;
-                    if (targetUrl) {
-                      window.open(targetUrl, "_blank", "noopener,noreferrer");
+                    if (downloadUrl) {
+                      window.open(downloadUrl, "_blank", "noopener,noreferrer");
                     }
                   }}
                   onTouchEnd={(e) => e.stopPropagation()}
                   className="w-9 h-9 rounded-full bg-black/60 hover:bg-black/90 text-white/80 hover:text-white transition-all backdrop-blur-md border border-white/20 shadow-xl flex items-center justify-center cursor-pointer"
-                  title={
-                    activeServer === "pixeldrain"
-                      ? t("Download on Pixeldrain")
-                      : activeServer === "fsl"
-                      ? t("Download on FSL Server")
-                      : t("Download File")
-                  }
+                  title={t("Download File")}
                 >
                   <Download className="w-4 h-4" />
                 </a>
@@ -3801,27 +3481,7 @@ export function NativePlayer({
                     </button>
                   )}
 
-                  {/* Priority 2: Stream Server Button (btnServer - Icon Only) */}
-                  {((pixeldrainCandidate && fslCandidate) || (activeCandidates.length > 1 && (pixeldrainCandidate || fslCandidate))) && (
-                    <button
-                      type="button"
-                      data-player-control="true"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActiveMenu(activeMenu === "server" ? null : "server");
-                      }}
-                      onTouchEnd={(e) => e.stopPropagation()}
-                      className={`h-8 w-8 rounded-lg border text-xs font-semibold flex items-center justify-center transition-all cursor-pointer shrink-0 ${
-                        activeMenu === "server"
-                          ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-400"
-                          : "border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white"
-                      }`}
-                      title={activeServer === "pixeldrain" ? t("Server: Pixeldrain") : activeServer === "fsl" ? t("Server: FSL") : t("Stream Server")}
-                      aria-label={t("Stream Server")}
-                    >
-                      <Server className="w-3.5 h-3.5 text-emerald-400" />
-                    </button>
-                  )}
+
 
                   {/* Priority 1: Quality Button (btnQuality) */}
                   <button
@@ -3888,13 +3548,11 @@ export function NativePlayer({
                   className={`popup-menu pointer-events-auto w-auto min-w-[210px] sm:min-w-[230px] max-w-[calc(100%-1rem)] max-h-full bg-[#141414]/95 border border-zinc-700/80 rounded-2xl shadow-2xl backdrop-blur-2xl flex flex-col p-2 sm:p-2.5 overflow-hidden ring-1 ring-white/10 animate-in fade-in zoom-in-95 duration-150 ${
                     activeMenu === "quality"
                       ? "mr-0 sm:mr-1 md:mr-3"
-                      : activeMenu === "server"
-                      ? "mr-0 sm:mr-4 md:mr-8"
                       : activeMenu === "subtitles"
-                      ? "mr-0 sm:mr-6 md:mr-14"
+                      ? "mr-0 sm:mr-4 md:mr-8"
                       : activeMenu === "audio"
-                      ? "mr-0 sm:mr-10 md:mr-24"
-                      : "mr-0 sm:mr-14 md:mr-36"
+                      ? "mr-0 sm:mr-8 md:mr-16"
+                      : "mr-0 sm:mr-12 md:mr-28"
                   }`}
                 >
                   {/* Header with section title, icon & quick close 'X' button */}
@@ -3904,13 +3562,11 @@ export function NativePlayer({
                       {activeMenu === "audio" && <Mic className="w-3.5 h-3.5 text-emerald-400" />}
                       {activeMenu === "subtitles" && <Subtitles className="w-3.5 h-3.5 text-emerald-400" />}
                       {activeMenu === "quality" && <Tv className="w-3.5 h-3.5 text-emerald-400" />}
-                      {activeMenu === "server" && <Server className="w-3.5 h-3.5 text-emerald-400" />}
                       <span>
                         {activeMenu === "speed" && t("Playback speed")}
                         {activeMenu === "audio" && t("Audio Language")}
                         {activeMenu === "subtitles" && t("Subtitles")}
                         {activeMenu === "quality" && t("Quality")}
-                        {activeMenu === "server" && t("Stream Server")}
                       </span>
                       {activeMenu === "quality" && (
                         <span className="text-[10px] text-zinc-500 font-normal ml-1">
@@ -4132,43 +3788,7 @@ export function NativePlayer({
                       </>
                     )}
 
-                    {/* Server Menu Content */}
-                    {activeMenu === "server" && (
-                      <>
-                        {fslCandidate && (
-                          <button
-                            type="button"
-                            onClick={() => handleServerSelect("fsl")}
-                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between gap-3 cursor-pointer ${
-                              activeServer === "fsl"
-                                ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
-                                : "text-zinc-300 hover:bg-white/10 hover:text-white"
-                            }`}
-                          >
-                            <span className="font-bold truncate">FSL Server</span>
-                            {activeServer === "fsl" && (
-                              <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />
-                            )}
-                          </button>
-                        )}
-                        {pixeldrainCandidate && (
-                          <button
-                            type="button"
-                            onClick={() => handleServerSelect("pixeldrain")}
-                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center justify-between gap-3 cursor-pointer ${
-                              activeServer === "pixeldrain"
-                                ? "bg-emerald-500/20 text-emerald-400 font-bold border border-emerald-500/30"
-                                : "text-zinc-300 hover:bg-white/10 hover:text-white"
-                            }`}
-                          >
-                            <span className="font-bold truncate">Pixeldrain Server</span>
-                            {activeServer === "pixeldrain" && (
-                              <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0 ml-auto" />
-                            )}
-                          </button>
-                        )}
-                      </>
-                    )}
+
                   </div>
                 </div>
               </div>

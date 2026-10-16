@@ -92,8 +92,6 @@ import PlayerFU, { PlayerFUButton, usePlayerFU } from "../../components/PlayerFU
 import NativePlayer, {
   findWatchOnlineCandidate,
   findFslCandidate,
-  findPixeldrainCandidate,
-  normalizePixeldrainUrl,
   getStreamingApiBase,
 } from "../../components/nativePlayer";
 import { clsx } from "clsx";
@@ -844,43 +842,154 @@ export default function MovieDetails() {
   const { isAvailable: isStreamAvailable, currentImdbId } = usePlayerFU(mergedContent);
 
   // Native Player Play Movie states and extraction handler
+  const [nativeMovieFslData, setNativeMovieFslData] = useState<{
+    streamUrl: string;
+    watchUrl: string;
+    quality: string;
+    candidates: any[];
+    chosenLink: any;
+  } | null>(null);
   const [isExtractingNativeMovie, setIsExtractingNativeMovie] = useState<boolean>(false);
 
-  const movieQualityBadge = useMemo(() => {
-    if (!mergedContent || mergedContent.type === "series") return "720p";
-    const links = getLinksArray(mergedContent.movieLinks || (mergedContent as any).links);
-    const isHc = (u: string) => {
-      if (!u) return false;
-      const l = u.toLowerCase();
-      return (
-        l.includes("hubcloud") ||
-        l.includes("hubcould") ||
-        l.includes("vcloud") ||
-        l.includes("hubdrive") ||
-        l.includes("moviesdrive") ||
-        l.includes("drivehub")
-      );
-    };
-    const isPd = (u: string) => {
-      if (!u) return false;
-      const l = u.toLowerCase();
-      return (
-        l.includes("pixeldrain") ||
-        l.includes("pixel.drain") ||
-        l.includes("pixeldra.in")
-      );
-    };
+  // On mount of movies details page with new content id:
+  // Wait for 0.5 sec -> Find 720p (if missing then 720p HEVC) and if both missing find 1080p or 480p
+  // Extract if HubCloud using link extracter -> if extraction links has correctly FSL server show Play Movie button, otherwise keep hidden
+  useEffect(() => {
+    // Reset state on new content id / mount: keep hidden by default
+    setNativeMovieFslData(null);
+    setIsExtractingNativeMovie(false);
 
-    const hc720 = links.find((l) => isHc(l.url) && (/720p?/i.test(l.name || "") || /720/i.test(l.name || "")));
-    const hc1080 = links.find((l) => isHc(l.url) && (/1080p?/i.test(l.name || "") || /1080/i.test(l.name || "")));
-    const hcAny = links.find((l) => isHc(l.url));
-    const targetLink = hc720 || hc1080 || hcAny || links.find((l) => isPd(l.url));
-
-    if (targetLink?.name) {
-      return extractQualityLabel(targetLink.name);
+    if (!id || !mergedContent || mergedContent.type === "series") {
+      return;
     }
-    return "720p";
-  }, [mergedContent]);
+
+    let isMounted = true;
+
+    // Wait for 0.5 sec (500ms)
+    const timer = setTimeout(async () => {
+      try {
+        const rawLinks = getLinksArray(mergedContent.movieLinks || (mergedContent as any).links);
+        if (!rawLinks || rawLinks.length === 0) return;
+
+        const isHc = (u?: string) => {
+          if (!u || typeof u !== "string") return false;
+          const l = u.toLowerCase();
+          return (
+            l.includes("hubcloud") ||
+            l.includes("hubcould") ||
+            l.includes("vcloud") ||
+            l.includes("hubdrive") ||
+            l.includes("moviesdrive") ||
+            l.includes("drivehub")
+          );
+        };
+
+        const is720Regex = /720p?/i;
+        const isHevcRegex = /hevc|x265|10\s*bit/i;
+        const is1080Regex = /1080p?/i;
+        const is480Regex = /480p?/i;
+
+        // 1. Find 720p (standard non-HEVC)
+        let targetLink = rawLinks.find(
+          (l) => isHc(l.url) && is720Regex.test(l.name || "") && !isHevcRegex.test(l.name || "")
+        );
+
+        // 2. If missing, find 720p HEVC
+        if (!targetLink) {
+          targetLink = rawLinks.find(
+            (l) => isHc(l.url) && is720Regex.test(l.name || "") && isHevcRegex.test(l.name || "")
+          );
+        }
+
+        // 3. If both missing, find 1080p
+        if (!targetLink) {
+          targetLink = rawLinks.find(
+            (l) => isHc(l.url) && is1080Regex.test(l.name || "")
+          );
+        }
+
+        // 4. If 1080p missing, find 480p
+        if (!targetLink) {
+          targetLink = rawLinks.find(
+            (l) => isHc(l.url) && is480Regex.test(l.name || "")
+          );
+        }
+
+        // Fallback across all links if no named hc link matched
+        if (!targetLink) {
+          const nonHc720 = rawLinks.find((l) => is720Regex.test(l.name || "") && !isHevcRegex.test(l.name || ""));
+          const nonHc720Hevc = rawLinks.find((l) => is720Regex.test(l.name || "") && isHevcRegex.test(l.name || ""));
+          const nonHc1080 = rawLinks.find((l) => is1080Regex.test(l.name || ""));
+          const nonHc480 = rawLinks.find((l) => is480Regex.test(l.name || ""));
+          targetLink = nonHc720 || nonHc720Hevc || nonHc1080 || nonHc480 || rawLinks[0];
+        }
+
+        if (!targetLink || !targetLink.url) {
+          return;
+        }
+
+        // Extract if HubCloud using link extracter
+        let extracted: CachedExtractionResult | null = null;
+        if (isHc(targetLink.url)) {
+          extracted = await unifiedExtractStream(targetLink.url);
+        } else {
+          extracted = await unifiedExtractStream(targetLink.url);
+        }
+
+        if (!isMounted) return;
+
+        if (extracted) {
+          const candidates = extracted.candidates || [];
+          const fsl = findFslCandidate(candidates);
+
+          // Check if candidate is fsl OR if streamUrl/url is an FSL server directly
+          const isFslUrl = (u?: string) => {
+            if (!u || typeof u !== "string") return false;
+            const lu = u.toLowerCase();
+            return (
+              lu.includes("fsl") ||
+              lu.includes("fastserver") ||
+              lu.includes("cloudflarestorage") ||
+              lu.includes(".r2.")
+            );
+          };
+
+          const validFslHref =
+            fsl?.href ||
+            (isFslUrl(extracted.streamUrl)
+              ? extracted.streamUrl
+              : isFslUrl(extracted.url)
+              ? extracted.url
+              : null);
+
+          // If extraction links has correctly FSL server then show nativePlayer Play Movie button otherwise keep hidden
+          if (validFslHref) {
+            setNativeMovieFslData({
+              streamUrl: validFslHref,
+              watchUrl: extracted.watchUrl || targetLink.url,
+              quality: targetLink.name || extracted.quality || "720p",
+              candidates: candidates.length > 0 ? candidates : [{ text: "FSL Server", href: validFslHref }],
+              chosenLink: targetLink,
+            });
+          } else {
+            setNativeMovieFslData(null);
+          }
+        } else {
+          setNativeMovieFslData(null);
+        }
+      } catch (err) {
+        console.warn("[MovieDetails] FSL extraction check failed:", err);
+        if (isMounted) {
+          setNativeMovieFslData(null);
+        }
+      }
+    }, 500);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [id, mergedContent?.id, Boolean(mergedContent?.movieLinks || (mergedContent as any)?.links)]);
 
   const handleNativePlayMovieClick = async () => {
     if (!profile) {
@@ -918,189 +1027,32 @@ export default function MovieDetails() {
       return;
     }
 
-    if (!mergedContent) return;
+    if (!mergedContent || !nativeMovieFslData) return;
 
     const links = getLinksArray(mergedContent.movieLinks || (mergedContent as any).links);
-    if (!links || links.length === 0) {
-      setAlertConfig({
-        isOpen: true,
-        title: t("No Links Available"),
-        message: t("No stream links are available for this content."),
-      });
-      return;
-    }
 
-    const isHc = (u: string) => {
-      if (!u) return false;
-      const l = u.toLowerCase();
-      return (
-        l.includes("hubcloud") ||
-        l.includes("hubcould") ||
-        l.includes("vcloud") ||
-        l.includes("hubdrive") ||
-        l.includes("moviesdrive") ||
-        l.includes("drivehub")
-      );
-    };
-
-    const isPd = (u: string) => {
-      if (!u) return false;
-      const l = u.toLowerCase();
-      return (
-        l.includes("pixeldrain") ||
-        l.includes("pixel.drain") ||
-        l.includes("pixeldra.in")
-      );
-    };
-
-    // User requirement:
-    // Extract matching link for user's saved quality preference (e.g. 480p, 720p, 1080p)
-    // If a movie has only Pixeldrain links not hubcloud links then simply play using Pixeldrain server
-    const savedQuality = getPreferredQuality();
-    const hcLinks = links.filter((l) => isHc(l.url));
-    const pdLinks = links.filter((l) => isPd(l.url));
-
-    const targetHcLink = findBestQualityLink(hcLinks, savedQuality);
-    const pdOnlyLink = findBestQualityLink(pdLinks, savedQuality);
-
-    // If a movie has only Pixeldrain links not hubcloud links then simply play using Pixeldrain server
-    if (!targetHcLink && pdOnlyLink) {
-      const streamUrl = normalizePixeldrainUrl(pdOnlyLink.url);
-      setActiveNativePlayerConfig({
-        watchUrl: pdOnlyLink.url,
-        streamUrl: streamUrl,
-        title: mergedContent.title,
-        imdbId: (mergedContent as any)?.imdbId || currentImdbId,
-        quality: pdOnlyLink.name || "HD",
+    setActiveNativePlayerConfig({
+      watchUrl: nativeMovieFslData.watchUrl,
+      streamUrl: nativeMovieFslData.streamUrl,
+      title: mergedContent.title,
+      imdbId: (mergedContent as any)?.imdbId || currentImdbId,
+      quality: nativeMovieFslData.quality,
+      contentId: mergedContent.id,
+      poster: mergedContent.posterUrl || mergedContent.backdropUrl,
+      year: mergedContent.year,
+      runtime: mergedContent.runtime || (mergedContent as any)?.duration,
+      duration: (mergedContent as any)?.duration || mergedContent.runtime,
+      candidates: nativeMovieFslData.candidates,
+      availableQualities: links,
+    });
+    setIsNativePlayerOpen(true);
+    trackStreamAndCheckRate();
+    if (profile?.uid && mergedContent) {
+      logEvent("link_click", profile.uid, {
         contentId: mergedContent.id,
-        poster: mergedContent.posterUrl || mergedContent.backdropUrl,
-        year: mergedContent.year,
-        runtime: mergedContent.runtime || (mergedContent as any)?.duration,
-        duration: (mergedContent as any)?.duration || mergedContent.runtime,
-        candidates: [
-          { text: "Pixeldrain Server", href: streamUrl }
-        ],
-        availableQualities: links,
+        contentTitle: mergedContent.title,
+        linkName: `Native Player - FSL Server - ${nativeMovieFslData.quality}`,
       });
-      setIsNativePlayerOpen(true);
-      trackStreamAndCheckRate();
-      if (profile?.uid && mergedContent) {
-        logEvent("link_click", profile.uid, {
-          contentId: mergedContent.id,
-          contentTitle: mergedContent.title,
-          linkName: `Native Player - Pixeldrain Server - ${pdOnlyLink.name || "HD"}`,
-        });
-      }
-      return;
-    }
-
-    // Sort links: user's preferred quality first, then remaining hcLinks
-    const sortedHc = targetHcLink
-      ? [targetHcLink, ...hcLinks.filter((l) => l.url !== targetHcLink.url)]
-      : hcLinks;
-
-    // Spin loader and show "Loading" on button
-    setIsExtractingNativeMovie(true);
-    try {
-      let extractedResult: CachedExtractionResult | null = null;
-      let chosenLink: any = null;
-
-      // Try HubCloud links in order of quality; if one extraction fails, immediately try the other links!
-      for (const link of sortedHc) {
-        try {
-          const res = await unifiedExtractStream(link.url);
-          if (res && (res.streamUrl || res.url || (res.candidates && res.candidates.length > 0))) {
-            extractedResult = res;
-            chosenLink = link;
-            break;
-          }
-        } catch (e) {
-          console.warn(`Extraction failed for ${link.name || link.url}, trying next link...`, e);
-        }
-      }
-
-      // If all HubCloud links failed or none existed, try Pixeldrain links
-      if (!extractedResult && pdLinks.length > 0) {
-        const preferredPd = findBestQualityLink(pdLinks, savedQuality) || pdLinks[0];
-        const sortedPd = [preferredPd, ...pdLinks.filter((l) => l.url !== preferredPd.url)];
-        for (const link of sortedPd) {
-          try {
-            const res = await unifiedExtractStream(link.url);
-            if (res) {
-              extractedResult = res;
-              chosenLink = link;
-              break;
-            }
-          } catch (e) {
-            console.warn(`Pixeldrain fallback failed for ${link.url}`, e);
-          }
-        }
-      }
-
-      // If still no extracted result, check direct video links (.mp4, .mkv, workers.dev)
-      if (!extractedResult) {
-        const directVideoLinks = links.filter(
-          (l) => l.url && (l.url.includes(".mp4") || l.url.includes(".mkv") || l.url.includes("workers.dev"))
-        );
-        for (const link of directVideoLinks) {
-          try {
-            const res = await unifiedExtractStream(link.url);
-            if (res) {
-              extractedResult = res;
-              chosenLink = link;
-              break;
-            }
-          } catch {}
-        }
-      }
-
-      if (extractedResult && chosenLink) {
-        const candidates = extractedResult.candidates || [];
-        const pixel = findPixeldrainCandidate(candidates);
-        const fsl = findFslCandidate(candidates);
-        const watch = findWatchOnlineCandidate(candidates);
-        const rawTargetStream = pixel ? pixel.streamUrl : fsl ? fsl.href : (extractedResult.streamUrl || extractedResult.url);
-        const streamUrl = normalizePixeldrainUrl(rawTargetStream);
-
-        setActiveNativePlayerConfig({
-          watchUrl: extractedResult.watchUrl || chosenLink.url,
-          streamUrl: streamUrl,
-          title: mergedContent.title,
-          imdbId: (mergedContent as any)?.imdbId || currentImdbId,
-          quality: chosenLink.name || extractedResult.quality || "720p",
-          contentId: mergedContent.id,
-          poster: mergedContent.posterUrl || mergedContent.backdropUrl,
-          year: mergedContent.year,
-          runtime: mergedContent.runtime || (mergedContent as any)?.duration,
-          duration: (mergedContent as any)?.duration || mergedContent.runtime,
-          candidates: candidates.length > 0 ? candidates : (pixel ? [{ text: pixel.text, href: pixel.streamUrl }] : []),
-          availableQualities: links,
-        });
-        setIsNativePlayerOpen(true);
-        trackStreamAndCheckRate();
-        if (profile?.uid && mergedContent) {
-          logEvent("link_click", profile.uid, {
-            contentId: mergedContent.id,
-            contentTitle: mergedContent.title,
-            linkName: `Native Player - ${pixel ? "Pixeldrain Server" : fsl ? "FSL Server" : "Watch Online"} - ${chosenLink.name || "720p"}`,
-          });
-        }
-      } else {
-        setAlertConfig({
-          isOpen: true,
-          title: t("Playback Error"),
-          message: t("Failed to extract video stream. Please try selecting a link from the links section below."),
-        });
-      }
-    } catch (err: any) {
-      console.error("[Native Movie Play extraction failed]:", err);
-      setAlertConfig({
-        isOpen: true,
-        title: t("Playback Error"),
-        message: t("Failed to extract video stream. Please try selecting a link from the links section below."),
-      });
-    } finally {
-      setIsExtractingNativeMovie(false);
     }
   };
 
@@ -3388,27 +3340,16 @@ export default function MovieDetails() {
                   );
                 })()}
 
-                {/* 1st Place: Native Player Play Movie Button - Always shown for movies */}
-                {mergedContent?.type !== "series" && (
+                {/* 1st Place: Native Player Play Movie Button - Shown only when FSL server is extracted & available, otherwise kept hidden */}
+                {mergedContent?.type !== "series" && Boolean(nativeMovieFslData) && (
                   <button
                     type="button"
                     onClick={handleNativePlayMovieClick}
                     disabled={isExtractingNativeMovie}
-                    className={`bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:via-teal-400 hover:to-cyan-400 text-white px-6 py-3.5 text-sm sm:text-base rounded-2xl font-black flex items-center gap-2.5 transition-all duration-300 active:scale-95 border border-white/20 shadow-xl shadow-emerald-500/25 cursor-pointer ${
-                      isExtractingNativeMovie ? "opacity-85 cursor-wait" : ""
-                    }`}
+                    className="bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 hover:from-emerald-400 hover:via-teal-400 hover:to-cyan-400 text-white px-6 py-3.5 text-sm sm:text-base rounded-2xl font-black flex items-center gap-2.5 transition-all duration-300 active:scale-95 border border-white/20 shadow-xl shadow-emerald-500/25 cursor-pointer"
                   >
-                    {isExtractingNativeMovie ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin text-white" />
-                        <span>{t('Loading')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-5 h-5 fill-current" />
-                        <span>{t('Play Movie')}</span>
-                      </>
-                    )}
+                    <Play className="w-5 h-5 fill-current" />
+                    <span>{t('Play Movie')}</span>
                   </button>
                 )}
 
@@ -4984,14 +4925,13 @@ export default function MovieDetails() {
                       !linkPopup.url.toLowerCase().includes("vcloud.zip"))
                   ) ? (
                     <>
-                      {/* Place 2: Above Play in Video Player, if extraction found Pixeldrain/FSL server or watch online, add Play Movie/Season/Episode */}
+                      {/* Place 2: Above Play in Video Player, if extraction found FSL server or watch online, add Play Movie/Season/Episode */}
                       {(() => {
-                        const pixelCandidate = findPixeldrainCandidate(linkPopup.candidates);
                         const fslCandidate = findFslCandidate(linkPopup.candidates);
                         const watchCandidate = findWatchOnlineCandidate(linkPopup.candidates);
-                        // If linkPopup.url matches an extracted candidate, prioritize it, else Pixeldrain or FSL
+                        // If linkPopup.url matches an extracted candidate, prioritize it, else FSL or watch online
                         const matchedCandidate = linkPopup.candidates?.find((c: any) => c && c.href && c.href === linkPopup.url);
-                        const chosenCandidate = matchedCandidate || pixelCandidate || fslCandidate || watchCandidate;
+                        const chosenCandidate = matchedCandidate || fslCandidate || watchCandidate;
                         const chosenHref = chosenCandidate ? ((chosenCandidate as any).streamUrl || chosenCandidate.href) : linkPopup.url;
                         if (!chosenHref) return null;
 
@@ -5010,7 +4950,7 @@ export default function MovieDetails() {
                           ? t("Play Season")
                           : t("Play Movie");
 
-                        const streamUrl = normalizePixeldrainUrl(chosenHref);
+                        const streamUrl = chosenHref;
 
                         // Find all other qualities for same episode, full season MKV, or movie
                         let availableQualities: any[] = [];
