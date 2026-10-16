@@ -1996,26 +1996,25 @@ export function NativePlayer({
       return;
     }
 
-    // 1. If proxy mode failed on stream and FFmpeg is available, escalate to transcode once
+    // 1. If direct stream failed and transcode engine is available, escalate to universal transcode mode natively
+    if (streamMode === "direct" && mediaInfo?.hasFFmpeg !== false && streamAttempt === 0) {
+      console.warn("[NativePlayer] Direct playback not decoded natively. Escalating to native transcode engine...");
+      setStreamMode("transcode");
+      setStreamAttempt(1);
+      setBufferingWithSafety(true, 4000);
+      return;
+    }
+
+    // 2. If proxy mode failed on stream and FFmpeg is available, escalate to transcode once
     if (streamMode === "proxy" && mediaInfo?.hasFFmpeg !== false && streamAttempt === 0) {
       console.warn("[NativePlayer] Proxy mode failed. Escalating to transcode engine...");
       setStreamMode("transcode");
       setStreamAttempt(1);
-      setIsBuffering(true);
+      setBufferingWithSafety(true, 4000);
       return;
     }
 
-    // 2. If direct streams cannot be decoded natively on this browser and watchUrl is available, seamlessly use HubCloud Web Engine
-    if (watchUrl && engine === "native") {
-      console.warn("[NativePlayer] Direct stream could not be decoded natively on this device. Switching to HubCloud Web Engine...");
-      showToast(t("Playing via Web Player..."));
-      setEngine("web");
-      setIsBuffering(false);
-      setHasPlaybackError(false);
-      return;
-    }
-
-    // 3. All viable stream options exhausted. Showing playback notice.
+    // 3. All viable stream options exhausted. Showing playback notice in native player (never switch to web engine or trigger download).
     console.warn("[NativePlayer] All available stream servers exhausted. Showing playback notice.");
     setIsBuffering(false);
     setHasPlaybackError(true);
@@ -2023,7 +2022,6 @@ export function NativePlayer({
 
   // Play/Pause: resumes seamlessly from remembered position if stopped/interrupted
   const togglePlay = () => {
-    if (engine === "web") return;
     if (!videoRef.current) return;
     if (videoRef.current.paused) {
       // Resuming playback after video was stopped/paused
@@ -2764,13 +2762,6 @@ export function NativePlayer({
     handleVideoError();
   }, [streamMode, seekOffset, savePlaybackPosition, handleVideoError]);
 
-  const effectiveWebPlayerUrl = useMemo(() => {
-    if (activeWatchUrl && activeWatchUrl.includes("hbplay.pages.dev")) {
-      return activeWatchUrl;
-    }
-    return activeWatchUrl || watchUrl || "";
-  }, [activeWatchUrl, watchUrl]);
-
   if (!isOpen) return null;
 
   return (
@@ -2813,123 +2804,94 @@ export function NativePlayer({
             }}
             className="relative w-full h-full flex items-center justify-center overflow-hidden bg-black"
           >
-            {engine === "native" && (slot0Src || slot1Src || currentStreamSrc) ? (
-              <>
-                <video
-                  ref={(el) => {
-                    video0Ref.current = el;
-                    if (activeSlotRef.current === 0 && el) {
-                      videoRef.current = el;
-                    }
-                  }}
-                  src={(slot0Src || (activeSlot === 0 ? currentStreamSrc : undefined)) || undefined}
-                  poster={poster || undefined}
-                  playsInline
-                  autoPlay
-                  preload="auto"
-                  crossOrigin="anonymous"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (activeMenu) setActiveMenu(null);
-                    resetControlsTimeout();
-                  }}
-                  onProgress={() => activeSlotRef.current === 0 && handleProgress()}
-                  onTimeUpdate={() => activeSlotRef.current === 0 && handleTimeUpdate()}
-                  onLoadedMetadata={() => activeSlotRef.current === 0 && handleLoadedMetadata()}
-                  onLoadedData={() => activeSlotRef.current === 0 && handleActiveLoadedData()}
-                  onCanPlay={() => activeSlotRef.current === 0 && handleActiveCanPlay()}
-                  onCanPlayThrough={() => activeSlotRef.current === 0 && handleActiveCanPlayThrough()}
-                  onWaiting={() => activeSlotRef.current === 0 && handleActiveWaiting()}
-                  onStalled={() => activeSlotRef.current === 0 && handleActiveStalled()}
-                  onLoadStart={() => activeSlotRef.current === 0 && handleActiveLoadStart()}
-                  onSeeking={() => activeSlotRef.current === 0 && handleActiveSeeking()}
-                  onSeeked={() => activeSlotRef.current === 0 && handleActiveSeeked()}
-                  onPlaying={() => activeSlotRef.current === 0 && handleActivePlaying()}
-                  onPause={() => activeSlotRef.current === 0 && handleActivePause()}
-                  onEnded={() => activeSlotRef.current === 0 && handleActiveEnded()}
-                  onError={() => activeSlotRef.current === 0 && handleActiveError()}
-                  className={`w-full h-full cursor-default transition-opacity duration-300 ${
-                    activeSlot === 0
-                      ? "opacity-100 relative z-10 pointer-events-auto"
-                      : "opacity-0 absolute inset-0 z-0 pointer-events-none"
-                  } ${
-                    fitMode === "cover"
-                      ? "object-cover"
-                      : fitMode === "fill"
-                      ? "object-fill"
-                      : "object-contain"
-                  }`}
-                >
-                  {(slot0Src || (activeSlot === 0 ? currentStreamSrc : "")) && (
-                    <>
-                      <source src={slot0Src || (activeSlot === 0 ? currentStreamSrc : "")} type="video/mp4" />
-                      <source src={slot0Src || (activeSlot === 0 ? currentStreamSrc : "")} type="video/webm" />
-                      <source src={slot0Src || (activeSlot === 0 ? currentStreamSrc : "")} />
-                    </>
-                  )}
-                </video>
-                <video
-                  ref={(el) => {
-                    video1Ref.current = el;
-                    if (activeSlotRef.current === 1 && el) {
-                      videoRef.current = el;
-                    }
-                  }}
-                  src={(slot1Src || (activeSlot === 1 ? currentStreamSrc : undefined)) || undefined}
-                  poster={poster || undefined}
-                  playsInline
-                  autoPlay
-                  preload="auto"
-                  crossOrigin="anonymous"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (activeMenu) setActiveMenu(null);
-                    resetControlsTimeout();
-                  }}
-                  onProgress={() => activeSlotRef.current === 1 && handleProgress()}
-                  onTimeUpdate={() => activeSlotRef.current === 1 && handleTimeUpdate()}
-                  onLoadedMetadata={() => activeSlotRef.current === 1 && handleLoadedMetadata()}
-                  onLoadedData={() => activeSlotRef.current === 1 && handleActiveLoadedData()}
-                  onCanPlay={() => activeSlotRef.current === 1 && handleActiveCanPlay()}
-                  onCanPlayThrough={() => activeSlotRef.current === 1 && handleActiveCanPlayThrough()}
-                  onWaiting={() => activeSlotRef.current === 1 && handleActiveWaiting()}
-                  onStalled={() => activeSlotRef.current === 1 && handleActiveStalled()}
-                  onLoadStart={() => activeSlotRef.current === 1 && handleActiveLoadStart()}
-                  onSeeking={() => activeSlotRef.current === 1 && handleActiveSeeking()}
-                  onSeeked={() => activeSlotRef.current === 1 && handleActiveSeeked()}
-                  onPlaying={() => activeSlotRef.current === 1 && handleActivePlaying()}
-                  onPause={() => activeSlotRef.current === 1 && handleActivePause()}
-                  onEnded={() => activeSlotRef.current === 1 && handleActiveEnded()}
-                  onError={() => activeSlotRef.current === 1 && handleActiveError()}
-                  className={`w-full h-full cursor-default transition-opacity duration-300 ${
-                    activeSlot === 1
-                      ? "opacity-100 relative z-10 pointer-events-auto"
-                      : "opacity-0 absolute inset-0 z-0 pointer-events-none"
-                  } ${
-                    fitMode === "cover"
-                      ? "object-cover"
-                      : fitMode === "fill"
-                      ? "object-fill"
-                      : "object-contain"
-                  }`}
-                >
-                  {(slot1Src || (activeSlot === 1 ? currentStreamSrc : "")) && (
-                    <>
-                      <source src={slot1Src || (activeSlot === 1 ? currentStreamSrc : "")} type="video/mp4" />
-                      <source src={slot1Src || (activeSlot === 1 ? currentStreamSrc : "")} type="video/webm" />
-                      <source src={slot1Src || (activeSlot === 1 ? currentStreamSrc : "")} />
-                    </>
-                  )}
-                </video>
-              </>
-            ) : (
-              <iframe
-                src={effectiveWebPlayerUrl || undefined}
-                allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
-                className="w-full h-full border-none"
-                title={displayTitle}
-              />
-            )}
+            <video
+              ref={(el) => {
+                video0Ref.current = el;
+                if (activeSlotRef.current === 0 && el) {
+                  videoRef.current = el;
+                }
+              }}
+              src={(slot0Src || (activeSlot === 0 ? currentStreamSrc : undefined)) || undefined}
+              poster={poster || undefined}
+              playsInline
+              autoPlay
+              preload="auto"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (activeMenu) setActiveMenu(null);
+                resetControlsTimeout();
+              }}
+              onProgress={() => activeSlotRef.current === 0 && handleProgress()}
+              onTimeUpdate={() => activeSlotRef.current === 0 && handleTimeUpdate()}
+              onLoadedMetadata={() => activeSlotRef.current === 0 && handleLoadedMetadata()}
+              onLoadedData={() => activeSlotRef.current === 0 && handleActiveLoadedData()}
+              onCanPlay={() => activeSlotRef.current === 0 && handleActiveCanPlay()}
+              onCanPlayThrough={() => activeSlotRef.current === 0 && handleActiveCanPlayThrough()}
+              onWaiting={() => activeSlotRef.current === 0 && handleActiveWaiting()}
+              onStalled={() => activeSlotRef.current === 0 && handleActiveStalled()}
+              onLoadStart={() => activeSlotRef.current === 0 && handleActiveLoadStart()}
+              onSeeking={() => activeSlotRef.current === 0 && handleActiveSeeking()}
+              onSeeked={() => activeSlotRef.current === 0 && handleActiveSeeked()}
+              onPlaying={() => activeSlotRef.current === 0 && handleActivePlaying()}
+              onPause={() => activeSlotRef.current === 0 && handleActivePause()}
+              onEnded={() => activeSlotRef.current === 0 && handleActiveEnded()}
+              onError={() => activeSlotRef.current === 0 && handleActiveError()}
+              className={`w-full h-full cursor-default transition-opacity duration-300 ${
+                activeSlot === 0
+                  ? "opacity-100 relative z-10 pointer-events-auto"
+                  : "opacity-0 absolute inset-0 z-0 pointer-events-none"
+              } ${
+                fitMode === "cover"
+                  ? "object-cover"
+                  : fitMode === "fill"
+                  ? "object-fill"
+                  : "object-contain"
+              }`}
+            />
+            <video
+              ref={(el) => {
+                video1Ref.current = el;
+                if (activeSlotRef.current === 1 && el) {
+                  videoRef.current = el;
+                }
+              }}
+              src={(slot1Src || (activeSlot === 1 ? currentStreamSrc : undefined)) || undefined}
+              poster={poster || undefined}
+              playsInline
+              autoPlay
+              preload="auto"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (activeMenu) setActiveMenu(null);
+                resetControlsTimeout();
+              }}
+              onProgress={() => activeSlotRef.current === 1 && handleProgress()}
+              onTimeUpdate={() => activeSlotRef.current === 1 && handleTimeUpdate()}
+              onLoadedMetadata={() => activeSlotRef.current === 1 && handleLoadedMetadata()}
+              onLoadedData={() => activeSlotRef.current === 1 && handleActiveLoadedData()}
+              onCanPlay={() => activeSlotRef.current === 1 && handleActiveCanPlay()}
+              onCanPlayThrough={() => activeSlotRef.current === 1 && handleActiveCanPlayThrough()}
+              onWaiting={() => activeSlotRef.current === 1 && handleActiveWaiting()}
+              onStalled={() => activeSlotRef.current === 1 && handleActiveStalled()}
+              onLoadStart={() => activeSlotRef.current === 1 && handleActiveLoadStart()}
+              onSeeking={() => activeSlotRef.current === 1 && handleActiveSeeking()}
+              onSeeked={() => activeSlotRef.current === 1 && handleActiveSeeked()}
+              onPlaying={() => activeSlotRef.current === 1 && handleActivePlaying()}
+              onPause={() => activeSlotRef.current === 1 && handleActivePause()}
+              onEnded={() => activeSlotRef.current === 1 && handleActiveEnded()}
+              onError={() => activeSlotRef.current === 1 && handleActiveError()}
+              className={`w-full h-full cursor-default transition-opacity duration-300 ${
+                activeSlot === 1
+                  ? "opacity-100 relative z-10 pointer-events-auto"
+                  : "opacity-0 absolute inset-0 z-0 pointer-events-none"
+              } ${
+                fitMode === "cover"
+                  ? "object-cover"
+                  : fitMode === "fill"
+                  ? "object-fill"
+                  : "object-contain"
+              }`}
+            />
 
             {/* Custom High-Definition Subtitle Cue Overlay in Background Overlay Layer */}
             {selectedSubtitleTrack !== null && activeSubtitleText && (
