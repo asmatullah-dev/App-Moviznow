@@ -28,6 +28,8 @@ import { RefreshAppDataManager } from './components/RefreshAppDataManager';
 import { NotificationPermissionPrompt } from './components/NotificationPermissionPrompt';
 import { PWAInstallReminder } from './components/PWAInstallReminder';
 import { AnalyticsTracker } from './components/AnalyticsTracker';
+import { MembershipReminderBanner } from './components/MembershipReminderBanner';
+import { LoginReminderBanner } from './components/LoginReminderBanner';
 
 // Eager Loaded Core User Pages for Instant Client-Side Navigation
 import Home from './pages/user/Home';
@@ -314,6 +316,8 @@ export default function App() {
                     <GlobalNavigationLoader />
                     <ScrollToTopOrRestore />
                     <AnalyticsTracker />
+                    <MembershipReminderBanner />
+                    <LoginReminderBanner />
                     <MediaModalController isOpen={isMediaModalOpen} onClose={() => setIsMediaModalOpen(false)} />
                     <Suspense fallback={<LoadingFallback />}>
                       <Routes>

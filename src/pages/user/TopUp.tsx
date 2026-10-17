@@ -17,24 +17,7 @@ import PaymentMethods from '../../components/PaymentMethods';
 
 import { useSettings } from '../../contexts/SettingsContext';
 
-import { Role } from '../../types';
-
-const VIP_PLANS = [
-  { id: '1m', name: '1 Month VIP', months: 1, price: 300, perMonth: 300, planRole: 'vip' as Role, headerBadge: '', saveBadge: '', popular: false, icon: Zap },
-  { id: '3m', name: '3 Months VIP', months: 3, price: 750, perMonth: 250, planRole: 'vip' as Role, headerBadge: '', saveBadge: 'Save 17%', popular: false, icon: Sparkles },
-  { id: '6m', name: '6 Months VIP', months: 6, price: 1400, perMonth: 233, planRole: 'vip' as Role, headerBadge: '', saveBadge: 'Save 22%', popular: false, icon: ShieldCheck },
-  { id: '1y', name: '1 Year VIP', months: 12, price: 2600, perMonth: 216, planRole: 'vip' as Role, headerBadge: '🔥 Most Popular', saveBadge: 'Save 28%', popular: true, icon: Crown },
-  { id: '2y', name: '2 Years VIP', months: 24, price: 4000, perMonth: 166, planRole: 'vip' as Role, headerBadge: '👑 Mega VIP', saveBadge: 'Save 44%', popular: false, icon: Gem },
-];
-
-const BASIC_PLANS = [
-  { id: 'basic_1m', name: '1 Month Basic', months: 1, price: 100, perMonth: 100, planRole: 'basic' as Role, headerBadge: '📺 Rs 100/mo', saveBadge: '', popular: true, icon: Zap },
-  { id: 'basic_3m', name: '3 Months Basic', months: 3, price: 280, perMonth: 93, planRole: 'basic' as Role, headerBadge: '', saveBadge: 'Save 7%', popular: false, icon: Sparkles },
-  { id: 'basic_6m', name: '6 Months Basic', months: 6, price: 520, perMonth: 86, planRole: 'basic' as Role, headerBadge: '', saveBadge: 'Save 13%', popular: false, icon: ShieldCheck },
-  { id: 'basic_1y', name: '1 Year Basic', months: 12, price: 1000, perMonth: 83, planRole: 'basic' as Role, headerBadge: '🔥 Best Value', saveBadge: 'Save 17%', popular: false, icon: Crown },
-];
-
-const ALL_MEMBERSHIP_PLANS = [...VIP_PLANS, ...BASIC_PLANS];
+import { VIP_PLANS, BASIC_PLANS, ALL_MEMBERSHIP_PLANS } from '../../data/membershipPlans';
 
 export default function TopUp() {
   const { profile, updateUserProfileData, refreshProfile } = useAuth();
