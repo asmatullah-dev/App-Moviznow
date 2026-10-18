@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { requestNotificationPermission } from "../firebase";
 import { UserProfile } from "../types";
 import { useNotifications } from "../contexts/NotificationContext";
+import { safeStorage } from "../utils/safeStorage";
 
 export function useSystemNotifications(profile: UserProfile | null) {
   const { notifications } = useNotifications();
@@ -14,10 +15,17 @@ export function useSystemNotifications(profile: UserProfile | null) {
     if (!profile) return;
     if (!("Notification" in window)) return;
 
-    // Request permission / register FCM token once per session
-    if (!tokenRequestedRef.current && (Notification.permission === "default" || Notification.permission === "granted")) {
-      tokenRequestedRef.current = true;
-      requestNotificationPermission().catch(console.error);
+    // Avoid unsolicited FCM network registrations if token already exists locally or device is offline
+    const hasLocalToken = Boolean(
+      safeStorage.getItem('active_fcm_token') ||
+      safeStorage.getItem(`fcm_token_v4_last_update_${profile.uid}`)
+    );
+
+    if (!tokenRequestedRef.current && Notification.permission === "granted" && !hasLocalToken) {
+      if (typeof navigator !== 'undefined' && navigator.onLine) {
+        tokenRequestedRef.current = true;
+        requestNotificationPermission().catch(() => {});
+      }
     }
   }, [profile?.uid]);
 

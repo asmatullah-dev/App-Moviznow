@@ -86,17 +86,16 @@ const handleVersionFailure = (trigger: 'open' | 'open_retry' | 'background', err
     console.warn(`[Auto-Update] Version check (${trigger}) timed out`);
   }
 
-  if (trigger === 'open') {
-    // If the initial check fails on open: retry after 15 seconds
+  if (trigger === 'open' && typeof navigator !== 'undefined' && navigator.onLine) {
+    // If the initial check fails on open and online: retry once after 15 seconds
     if (!initialOpenRetryAttempted) {
       initialOpenRetryAttempted = true;
-      console.log('[Auto-Update] Open version check failed. Retrying in 15 seconds...');
       setTimeout(() => {
-        checkDeploymentVersion('open_retry');
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          checkDeploymentVersion('open_retry');
+        }
       }, 15000);
     }
-  } else if (trigger === 'open_retry') {
-    console.log('[Auto-Update] Retry failed. Will check again on 5-min interval or tab resume.');
   }
 };
 
@@ -142,35 +141,14 @@ const checkDeploymentVersion = async (trigger: 'open' | 'open_retry' | 'backgrou
   }
 };
 
-// Check version on launch and periodically / on resume
+// Check version once on launch if online, avoiding background polling intervals and visibility spam
 if (typeof window !== 'undefined') {
-  // 1. Check version in background after initial render settles (4.5s after load)
+  // Check version once after initial render settles (5s after load) if online
   setTimeout(() => {
-    checkDeploymentVersion('open');
-  }, 4500);
-  
-  // 2. Keep checking the version in background every 5 minutes while app stays open
-  setInterval(() => {
-    checkDeploymentVersion('background');
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistration().then((reg) => {
-        if (reg) reg.update().catch(() => {});
-      }).catch(() => {});
-    }
-  }, 5 * 60 * 1000);
-  
-  // 3. Background check whenever user re-opens / resumes the tab
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
+    if (typeof navigator !== 'undefined' && navigator.onLine) {
       checkDeploymentVersion('open');
     }
-  });
-
-  // 4. Background check when connection is restored
-  window.addEventListener('online', () => {
-    console.log('[Auto-Update] Online event received, checking version...');
-    checkDeploymentVersion('open');
-  });
+  }, 5000);
 }
 
 // Service Worker registration & Catalog Export Prefetching

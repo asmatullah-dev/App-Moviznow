@@ -119,63 +119,23 @@ export const getSavedChunkMeta = (): Record<string, any> | null => {
 
 const shouldFetchMeta = () => {
   const saved = getSavedChunkMeta();
-  if (!saved) {
+  if (!saved || Object.keys(saved).length === 0) {
     return true;
   }
-  const contentCache = safeStorage.getItem('content_cache');
-  if (!contentCache || contentCache === '[]') {
-    return true;
-  }
-
-  const now = Date.now();
-  const lastFetchTimeStr = safeStorage.getItem('last_chunk_meta_fetch_time');
-  const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
-  const effectiveLastFetch = Math.max(lastFetchTimeMs, lastFetchTime);
-  
-  // If fetched within 15 seconds, return false (cooldown)
-  if (effectiveLastFetch > 0 && (now - effectiveLastFetch < FIFTEEN_SECONDS_MS)) {
-    return false;
-  }
-
-  // If older than 6 hours, fetch latest chunk meta
-  if (now - effectiveLastFetch > SIX_HOURS_MS) {
-    return true;
-  }
-
-  // PKT is UTC+5. Shift back by 7 hours to align the daily update cycle with 7 AM PKT.
-  const shiftedTime = new Date(now + (5 - 7) * 60 * 60 * 1000);
-  const checkPeriod = `${shiftedTime.getUTCFullYear()}-${shiftedTime.getUTCMonth() + 1}-${shiftedTime.getUTCDate()}`;
-
-  const lastCheckPeriod = safeStorage.getItem('last_chunk_meta_period');
-  if (lastCheckPeriod !== checkPeriod) {
-     return true;
-  }
-  
+  // Offline-first: When saved meta exists, avoid unsolicited network calls unless forceRefresh is requested
   return false;
 };
 
 /**
  * Gets chunk_meta versions.
  * If forceRefresh is requested, bypasses all cooldowns and fetches directly from server.
- * If not forcing refresh, checks if 15 seconds have passed since the last get chunk meta.
+ * When not forcing refresh and savedMeta exists, returns savedMeta directly (0 Firestore calls).
  */
 export const getChunkMeta = async (forceRefresh = false): Promise<Record<string, any>> => {
-  const nowMs = Date.now();
-  const lastFetchTimeStr = safeStorage.getItem('last_chunk_meta_fetch_time');
-  const storedFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
-  const effectiveLastFetch = Math.max(lastFetchTimeMs, storedFetchTime);
-
   const savedMeta = getSavedChunkMeta();
-  const timeSinceLastFetch = nowMs - effectiveLastFetch;
-  const isWithin15Sec = effectiveLastFetch > 0 && timeSinceLastFetch < FIFTEEN_SECONDS_MS;
 
-  // RULE: 15 sec cooldown for background checks. If forceRefresh is explicitly requested, bypass all cooldowns.
-  if (!forceRefresh && savedMeta && isWithin15Sec) {
-    return savedMeta;
-  }
-
-  // If not forcing refresh, check if savedMeta is still valid under standard policy (within 15s / 6 hours / daily check)
-  if (!forceRefresh && savedMeta && !shouldFetchMeta()) {
+  // Offline-first: If not forcing refresh, always return saved cache instantly without network calls
+  if (!forceRefresh && savedMeta && Object.keys(savedMeta).length > 0) {
     return savedMeta;
   }
 

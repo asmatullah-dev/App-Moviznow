@@ -111,7 +111,7 @@ export function RefreshAppDataManager() {
         const localUserTime = parseVersionTime(localUserVer);
         
         const isExplicitlyDeleted = serverUserVer === -1 || (typeof serverUserVer === 'object' && (serverUserVer as any)?.deleted === true) || (versions as any)?.[`users.${user.uid}`] === -1;
-        const isUserMismatch = isExplicitlyDeleted || isManualTrigger || isAutoTrigger || (serverUserTime > 0 && serverUserTime !== localUserTime) || !safeStorage.getItem('profile_cache');
+        const isUserMismatch = isExplicitlyDeleted || isManualTrigger || (serverUserTime > 0 && serverUserTime !== localUserTime) || !safeStorage.getItem('profile_cache');
 
         if (isUserMismatch) {
           const profileFetched = await refreshProfile(true, isManualTrigger ? 'manual' : 'auto').catch((err) => {
@@ -272,32 +272,13 @@ export function RefreshAppDataManager() {
       }
     };
 
-    // 1. Check on app open / mount after 8.5s grace period so initial render and browsing settle with 0 background lag
+    // Check once after initial startup grace period (10s) if online and 10 hours have elapsed
     const initialTimer = setTimeout(() => {
       check10HourUnified();
-    }, 8500);
-
-    // 2. Periodic background check every 60 seconds (purely local timestamp comparison, 0 Firestore calls until 10h threshold arrives)
-    const interval = setInterval(() => {
-      check10HourUnified();
-    }, 60 * 1000);
-
-    // 3. Check on tab visibility resume, window focus, or device back online
-    const handleActivity = () => {
-      if (document.visibilityState === 'visible') {
-        check10HourUnified();
-      }
-    };
-    document.addEventListener('visibilitychange', handleActivity);
-    window.addEventListener('focus', handleActivity);
-    window.addEventListener('online', check10HourUnified);
+    }, 10000);
 
     return () => {
       clearTimeout(initialTimer);
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleActivity);
-      window.removeEventListener('focus', handleActivity);
-      window.removeEventListener('online', check10HourUnified);
     };
   }, [user?.uid]);
 
