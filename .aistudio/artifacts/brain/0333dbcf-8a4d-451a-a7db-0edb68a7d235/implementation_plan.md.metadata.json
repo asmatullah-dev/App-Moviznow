@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan to remove custom title overlay in PlayerFU, expand mobile viewport space to show Play4U's native fullscreen button, and provide a fallback dedicated fullscreen control in the header.",
-  "updatedAt":  "2026-10-12T11:29:27.870784543Z",
-  "requestFeedback":  true,
-  "userFacing":  true
+  "summary": "Implementation plan to decouple app versioning from daily catalog exports, transitioning the application version schema from Major.Minor.Catalog to standard Semantic Versioning (Major.Minor.Patch) starting at 5.4.0, while updating the GitHub workflow to refresh update timestamps without modifying the version number.",
+  "updatedAt": "2026-10-18T01:26:41.995264971Z",
+  "requestFeedback": true,
+  "userFacing": true
 }

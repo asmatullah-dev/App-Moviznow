@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Info, Sparkles, Layers, Database, Clock } from 'lucide-react';
+import { X, Info, Sparkles, Layers, Wrench, Clock } from 'lucide-react';
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { useLanguage } from '../contexts/LanguageContext';
 import { useHaptics } from '../hooks/useHaptics';
@@ -21,11 +21,11 @@ export default function VersionInfoModal({ isOpen, onClose }: VersionInfoModalPr
   const { vibrate } = useHaptics();
   useModalBehavior(isOpen, onClose);
 
-  // Parse version parts (Major.Minor.Content)
+  // Parse version parts (Major.Minor.Patch)
   const parts = APP_VERSION.split('.');
-  const majorVersion = parts[0] || '4';
-  const minorVersion = parts[1] || '1';
-  const contentVersion = parts[2] || '10';
+  const majorVersion = parts[0] || '5';
+  const minorVersion = parts[1] || '4';
+  const patchVersion = parts[2] || '0';
 
   // Format updated timestamp cleanly by removing redundant PKT suffix since the PKT badge is already present
   const formattedUpdatedAt = VERSION_UPDATED_AT.replace(/\s*\(PKT\)\s*/gi, '').trim();
@@ -71,7 +71,7 @@ export default function VersionInfoModal({ isOpen, onClose }: VersionInfoModalPr
                       </span>
                     </h2>
                     <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 font-mono">
-                      Major.Minor.Content
+                      Major.Minor.Patch
                     </p>
                   </div>
                 </div>
@@ -114,8 +114,8 @@ export default function VersionInfoModal({ isOpen, onClose }: VersionInfoModalPr
                 </div>
                 <span className="text-zinc-400 dark:text-zinc-600 font-black text-xl select-none">.</span>
                 <div className="flex flex-col items-center">
-                  <span className="text-[10px] uppercase font-extrabold text-amber-600 dark:text-amber-400 tracking-wider">{t("Content")}</span>
-                  <span className="text-2xl font-black font-mono text-amber-700 dark:text-amber-300 mt-0.5">{contentVersion}</span>
+                  <span className="text-[10px] uppercase font-extrabold text-amber-600 dark:text-amber-400 tracking-wider">{t("Patch")}</span>
+                  <span className="text-2xl font-black font-mono text-amber-700 dark:text-amber-300 mt-0.5">{patchVersion}</span>
                 </div>
               </div>
 
@@ -157,25 +157,25 @@ export default function VersionInfoModal({ isOpen, onClose }: VersionInfoModalPr
                   </div>
                 </div>
 
-                {/* Content */}
+                {/* Patch */}
                 <div className="bg-zinc-50 dark:bg-zinc-900/60 border border-amber-200/80 dark:border-amber-500/20 rounded-2xl p-4 flex items-start gap-3.5 hover:border-amber-500/40 transition-colors">
                   <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-600 dark:text-amber-400 shrink-0 mt-0.5">
-                    <Database className="w-4 h-4" />
+                    <Wrench className="w-4 h-4" />
                   </div>
                   <div className="space-y-1.5 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-black text-amber-600 dark:text-amber-300">{t("Content")}</span>
+                        <span className="text-sm font-black text-amber-600 dark:text-amber-300">{t("Patch")}</span>
                         <span className="text-[11px] font-mono font-bold text-zinc-600 dark:text-zinc-400 bg-zinc-200/70 dark:bg-zinc-800 px-2 py-0.5 rounded border border-zinc-300/60 dark:border-zinc-700/60">
-                          {contentVersion}
+                          {patchVersion}
                         </span>
                       </div>
                       <span className="text-[10px] font-mono font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
-                        {t("Catalog Export")}
+                        {t("Bug Fixes & Patches")}
                       </span>
                     </div>
                     <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">
-                      {t("For updates in content (Movie & Series Catalog updates, collections, trending, newly added updates).")}
+                      {t("For bug fixes, performance improvements, system patches, and stability updates.")}
                     </p>
                   </div>
                 </div>

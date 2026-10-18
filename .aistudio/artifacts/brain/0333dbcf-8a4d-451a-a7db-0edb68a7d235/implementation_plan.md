@@ -1,44 +1,49 @@
-# Implementation Plan - Optimize PlayerFU Controls & Fullscreen Experience
+# Implementation Plan: Decouple Versioning from Catalog Exports & Standardize SemVer (5.4.0)
 
-Eliminate redundant overlay title from PlayerFU, maximize horizontal room on mobile screens to restore Play4U's native fullscreen button, and provide a backup dedicated fullscreen control.
+## Problem & Objectives
+Previously, the application version followed a `Major.Minor.Catalog` format (e.g., `5.4.30`), where every run of the GitHub Actions daily content export workflow bumped the patch number using `scripts/bumpVersion.cjs`.
 
----
-
-## 1. User Alignment & Problem Analysis
-
-1. **Title Redundancy**: Play4U already renders the media title and metadata natively inside its player iframe. Our custom text overlay in `PlayerFU.tsx` duplicates this and clutters the interface.
-2. **Missing/Clipped Fullscreen Button**: On mobile devices, container padding (`p-2`) and rounded corner clipping (`rounded-2xl overflow-hidden`) squeeze the iframe width below ~350px. When horizontal space is restricted, Play4U's responsive control bar collapses or hides the fullscreen button.
-3. **User Preference**:
-   - Remove the custom movie title completely from `PlayerFU.tsx`.
-   - Maximize space so Play4U's native fullscreen button can render without clipping.
-   - Add a fallback dedicated fullscreen toggle button in the player header next to the close button so full screen is guaranteed on all screen sizes.
+The user wants to:
+1. Stop bumping the application version via the GitHub workflow.
+2. Remove the catalog export counter from the application version.
+3. Transition to standard Semantic Versioning (`Major.Minor.Patch`) with clean baseline `5.4.0`.
+4. Keep updating timestamps (`versionUpdatedAt` / `versionTimestamp`) during catalog exports without altering the version number.
+5. Update the UI in `VersionInfoModal.tsx` and throughout the app so the 3-part breakdown reflects `Major.Minor.Patch`.
 
 ---
 
-## 2. Proposed Changes
+## Proposed Changes
 
-### Component: `src/components/PlayerFU.tsx`
+### 1. `package.json`
+- Set `"version": "5.4.0"`.
+- Keep `"versionUpdatedAt"` and `"versionTimestamp"`.
 
-1. **Remove Title Overlay**:
-   - Remove the title element and container (`<span className="text-white font-bold ...">{content.title}</span>`) from the header bar.
-   - Clean up any unused title wrapper divs.
+### 2. Version Script (`scripts/bumpVersion.cjs`)
+- Refactor the script (or rename to update timestamp only):
+  - Do **NOT** bump `pkg.version` (preserves `5.4.0` or whatever SemVer is set).
+  - Update `pkg.versionUpdatedAt` with current PKT formatted time (`Oct 17, 2026, ... (PKT)`).
+  - Update `pkg.versionTimestamp` with `Date.now()`.
+  - Save `package.json`.
 
-2. **Mobile Viewport Optimization (Zero Margin/Radius on Mobile)**:
-   - Change backdrop padding from `p-2 sm:p-4` to `p-0 sm:p-4` to give the iframe full viewport width on mobile phones.
-   - Change card rounded corners from `rounded-2xl` to `rounded-none sm:rounded-2xl` so corner radii do not mask or clip bottom-right controls in portrait mode.
-   - Ensure the iframe has explicit `allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"` and `allowFullScreen`.
+### 3. GitHub Workflow (`.github/workflows/daily-export.yml`)
+- Update step name from `Bump Version (+0.0.01)` to `Update Catalog Export Timestamp`.
+- Keep git commit message clean: `chore: update content catalog export and timestamp [skip ci]`.
 
-3. **Dedicated Fullscreen Button in Header**:
-   - Add a fullscreen toggle button (`Maximize` / `Minimize` from `lucide-react`) alongside the close (`X`) button in the top-right control cluster.
-   - Connect it to standard Fullscreen API with vendor prefix support (`requestFullscreen`, `webkitRequestFullscreen`, `exitFullscreen`).
-   - Listen for `fullscreenchange` events to keep icon state in sync.
+### 4. Version Display Modal (`src/components/VersionInfoModal.tsx`)
+- Update version format label from `Major.Minor.Content` to `Major.Minor.Patch`.
+- Update breakdown items:
+  - **Major (`5`)**: Core architecture, major redesigns, and breaking platform updates.
+  - **Minor (`4`)**: New features, interface enhancements, and section updates.
+  - **Patch (`0`)**: Bug fixes, performance optimizations, and stability patches.
+- Remove references to "Catalog Export" from the 3rd version digit badge, replacing with "Patch / Fixes".
+
+### 5. `src/version.ts`
+- Verify comment and fallback values reflect the new `5.4.0` standard.
 
 ---
 
-## 3. Verification & Testing
-
-1. **Compilation Check**: Run `compile_applet` and `lint_applet` to verify clean build and no TypeScript or lint issues.
-2. **Visual & Responsive Testing**:
-   - Verify top bar only contains the control buttons (Fullscreen & Close).
-   - Verify on mobile viewports (<640px) that the player spans edge-to-edge without corner clipping.
-   - Test fullscreen button toggles full screen cleanly.
+## Verification Plan
+1. **Compilation Check**: Run `compile_applet` to ensure TypeScript compilation passes.
+2. **Lint Check**: Run `lint_applet` to confirm zero lint errors.
+3. **Script Verification**: Run `node scripts/bumpVersion.cjs` to confirm `package.json` version remains `5.4.0` while `versionUpdatedAt` is updated accurately.
+4. **Build & Dev Server**: Verify dev server and bundle build with the clean `v5.4.0` display.

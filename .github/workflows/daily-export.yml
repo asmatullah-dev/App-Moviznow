@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: npm install --no-package-lock
 
-      - name: Bump Version (+0.0.01)
+      - name: Update Catalog Export Timestamp
         run: node scripts/bumpVersion.cjs
 
       - name: Export Content Catalog from Firestore
@@ -29,9 +29,9 @@ jobs:
           FIREBASE_CONFIG: ${{ secrets.FIREBASE_CONFIG }}
         run: node scripts/exportContent.cjs
 
-      - name: Commit and Push Updated Catalog, Reviews, and Version
+      - name: Commit and Push Updated Catalog, Reviews, and Timestamp
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add package.json src/data/moviznow_catalog_export.json src/data/moviznow_reviews_export.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: bump version and update content catalog export [skip ci]" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update content catalog export and timestamp [skip ci]" && git push)
