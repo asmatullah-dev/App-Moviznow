@@ -928,9 +928,11 @@ export default function MovieDetails() {
           return;
         }
 
-        // Extract if HubCloud using link extracter (check offline/cached extraction first)
-        let extracted: CachedExtractionResult | null = getCachedLinkExtraction(targetLink.url);
-        if (!extracted && navigator.onLine && !isOffline) {
+        // Extract if HubCloud using link extracter
+        let extracted: CachedExtractionResult | null = null;
+        if (isHc(targetLink.url)) {
+          extracted = await unifiedExtractStream(targetLink.url);
+        } else {
           extracted = await unifiedExtractStream(targetLink.url);
         }
 
@@ -1205,7 +1207,41 @@ export default function MovieDetails() {
     }
   }, [mergedContent]);
 
+  const hasPrefetched = useRef<Set<string>>(new Set());
 
+  // Prefetch translations for all content in one go (VIP / Admin only)
+  useEffect(() => {
+    if (language === 'en' || !mergedContent || isOffline || !canAiTranslate) return;
+    
+    // For series, wait until seasons are loaded to translate everything in one batch
+    if (mergedContent.type === 'series' && seasons.length === 0) return;
+
+    const prefetchKey = `all_pref_${id}_${language}_${seasons.length}`;
+    if (hasPrefetched.current.has(prefetchKey)) return;
+    
+    const stringsToTranslate = new Set<string>();
+    
+    if (mergedContent.description) stringsToTranslate.add(mergedContent.description);
+    
+    if (mergedContent.type === 'series') {
+      seasons.forEach(season => {
+        if (season.title) stringsToTranslate.add(season.title);
+        if (season.episodes) {
+          season.episodes.forEach(ep => {
+            if (ep.title && !/^episode\s+\d+$/i.test(ep.title.trim())) {
+              stringsToTranslate.add(ep.title);
+            }
+            // Removed episode description from prefetch to translate on open only
+          });
+        }
+      });
+    }
+    
+    if (stringsToTranslate.size > 0) {
+      hasPrefetched.current.add(prefetchKey);
+      translateMany(Array.from(stringsToTranslate));
+    }
+  }, [mergedContent, language, seasons, id, translateMany, isOffline, canAiTranslate]);
 
   const allTrailers = useMemo(() => {
     const list: Trailer[] = [];
@@ -1520,17 +1556,17 @@ export default function MovieDetails() {
             return { ...prev, data: newCache };
           });
         }
-        return;
-      }
-
-      // If static content already has a valid rating from catalog export, use it and do NOT hit the network
-      if (mergedContent.imdbRating && mergedContent.imdbRating !== "N/A" && mergedContent.imdbRating !== "0" && mergedContent.imdbRating !== "0/10") {
-        setLiveRating(mergedContent.imdbRating);
-        return;
       }
 
       let imdbId = mergedContent.imdbLink?.match(/tt\d+/)?.[0];
       if (!imdbId) {
+        // If no IMDb ID, attempt live reload helper which uses TMDB to discover IMDb ID
+        reloadLiveImdbRating(mergedContent).then((res) => {
+          if (res?.rawRating || res?.rating) {
+            const resRating = res.rawRating || `${res.rating}/10`;
+            setLiveRating(resRating);
+          }
+        }).catch(() => {});
         return;
       }
 
@@ -2025,7 +2061,13 @@ export default function MovieDetails() {
     }
   };
 
-
+  useEffect(() => {
+    if (!id || isOffline) return;
+    const timer = setTimeout(() => {
+      fetchMissingData();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [id, isOffline]);
 
   const getYouTubeEmbedUrl = (url?: string) => {
     if (!url) return null;

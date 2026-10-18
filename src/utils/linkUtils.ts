@@ -261,11 +261,6 @@ export async function unifiedExtractStream(
     }
   }
 
-  // If offline, do not attempt network extraction
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    return getCachedLinkExtraction(url) || null;
-  }
-
   // 3. Deduplicate in-flight extraction requests
   const requestKey = `${url}_${Boolean(options?.force)}`;
   if (inFlightUnifiedRequests.has(requestKey)) {

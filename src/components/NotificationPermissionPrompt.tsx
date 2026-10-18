@@ -87,16 +87,10 @@ export const NotificationPermissionPrompt: React.FC = () => {
       // If browser permission is already granted but FCM token not yet synced locally or to user profile:
       if (Notification.permission === 'granted') {
         const hasRegistered = safeStorage.getItem(`fcm_auto_registered_${user?.uid || 'guest'}`);
-        const existingToken = safeStorage.getItem('active_fcm_token') || profile?.fcmToken;
-        if (existingToken) {
-          safeStorage.setItem(`fcm_auto_registered_${user?.uid || 'guest'}`, 'true');
-          return;
-        }
-
-        if (!hasRegistered && typeof navigator !== 'undefined' && navigator.onLine) {
-          // Defer background FCM token sync until after initial render settles (7.5s) if online
+        if (!hasRegistered) {
+          // Defer background FCM token sync until after initial render settles (7.5s)
           timer = setTimeout(() => {
-            if (!isMounted || !navigator.onLine) return;
+            if (!isMounted) return;
             requestNotificationPermission().then(token => {
               if (token) {
                 safeStorage.setItem(`fcm_auto_registered_${user?.uid || 'guest'}`, 'true');

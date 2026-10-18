@@ -55,8 +55,9 @@ export interface PlayerFUButtonProps {
   label?: string;
 }
 
+// In-memory cache for stream availability checks to prevent redundant network fetches
 const streamCheckCache = new Map<string, { exists: boolean; meta: StreamMetadata | null; timestamp: number }>();
-const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour in-memory cache
+const CACHE_TTL_MS = 5 * 60 * 1000;
 
 /**
  * Custom hook encapsulating all Play4U stream discovery, metadata, and progress logic.
@@ -154,13 +155,6 @@ export function usePlayerFU(
     if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
       setIsAvailable(cached.exists);
       setStreamMeta(cached.meta);
-      return;
-    }
-
-    // If offline, do not attempt stream check network calls
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      setIsAvailable(false);
-      setStreamMeta(null);
       return;
     }
 
