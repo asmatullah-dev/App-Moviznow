@@ -122,19 +122,20 @@ const shouldFetchMeta = () => {
   if (!saved) {
     return true;
   }
-  const contentCache = safeStorage.getItem('content_cache');
-  if (!contentCache || contentCache === '[]') {
-    return true;
-  }
 
   const now = Date.now();
   const lastFetchTimeStr = safeStorage.getItem('last_chunk_meta_fetch_time');
   const lastFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
   const effectiveLastFetch = Math.max(lastFetchTimeMs, lastFetchTime);
   
-  // If fetched within 15 seconds, return false (cooldown)
+  // If fetched within 15 seconds, return false (cooldown) to prevent redundant background queries
   if (effectiveLastFetch > 0 && (now - effectiveLastFetch < FIFTEEN_SECONDS_MS)) {
     return false;
+  }
+
+  const contentCache = safeStorage.getItem('content_cache');
+  if (!contentCache || contentCache === '[]') {
+    return true;
   }
 
   // If older than 6 hours, fetch latest chunk meta
@@ -157,22 +158,10 @@ const shouldFetchMeta = () => {
 /**
  * Gets chunk_meta versions.
  * If forceRefresh is requested, bypasses all cooldowns and fetches directly from server.
- * If not forcing refresh, checks if 15 seconds have passed since the last get chunk meta.
+ * If not forcing refresh, checks if savedMeta is still valid under caching policy.
  */
 export const getChunkMeta = async (forceRefresh = false): Promise<Record<string, any>> => {
-  const nowMs = Date.now();
-  const lastFetchTimeStr = safeStorage.getItem('last_chunk_meta_fetch_time');
-  const storedFetchTime = lastFetchTimeStr ? parseInt(lastFetchTimeStr, 10) : 0;
-  const effectiveLastFetch = Math.max(lastFetchTimeMs, storedFetchTime);
-
   const savedMeta = getSavedChunkMeta();
-  const timeSinceLastFetch = nowMs - effectiveLastFetch;
-  const isWithin15Sec = effectiveLastFetch > 0 && timeSinceLastFetch < FIFTEEN_SECONDS_MS;
-
-  // RULE: 15 sec cooldown for background checks. If forceRefresh is explicitly requested, bypass all cooldowns.
-  if (!forceRefresh && savedMeta && isWithin15Sec) {
-    return savedMeta;
-  }
 
   // If not forcing refresh, check if savedMeta is still valid under standard policy (within 15s / 6 hours / daily check)
   if (!forceRefresh && savedMeta && !shouldFetchMeta()) {
@@ -189,7 +178,7 @@ export const getChunkMeta = async (forceRefresh = false): Promise<Record<string,
     return chunkMetaPromise;
   }
 
-  // Fetch from server: either first load (no saved meta) or 15s cooldown has expired or forceRefresh requested
+  // Fetch from server: either first load (no saved meta) or cooldown expired or forceRefresh requested
   // Race with 6000ms timeout so slow internet or Firestore stalls never block startup
   const networkDocPromise = runWithNetwork(() => getDoc(doc(db, 'chunk_meta', 'versions')))
     .then(snap => snap.exists() ? (snap.data() || {}) : {});
@@ -232,6 +221,7 @@ export const getChunkMeta = async (forceRefresh = false): Promise<Record<string,
         }
       })
       .finally(() => {
+        clearTimeout(timer);
         if (chunkMetaPromise === fetchPromise) {
           chunkMetaPromise = null;
         }
@@ -264,6 +254,8 @@ export const updateChunkMetaLocalCache = (updates: Record<string, any>) => {
 export const clearChunkMetaCache = () => {
   chunkMetaPromise = null;
   memoryCache = null;
+  lastFetchTimeMs = 0;
   safeStorage.removeItem('cached_chunk_meta_doc');
+  safeStorage.removeItem('last_chunk_meta_fetch_time');
   safeStorage.removeItem('last_chunk_meta_period');
 };

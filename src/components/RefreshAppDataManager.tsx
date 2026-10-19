@@ -111,7 +111,9 @@ export function RefreshAppDataManager() {
         const localUserTime = parseVersionTime(localUserVer);
         
         const isExplicitlyDeleted = serverUserVer === -1 || (typeof serverUserVer === 'object' && (serverUserVer as any)?.deleted === true) || (versions as any)?.[`users.${user.uid}`] === -1;
-        const isUserMismatch = isExplicitlyDeleted || isManualTrigger || isAutoTrigger || (serverUserTime > 0 && serverUserTime !== localUserTime) || !safeStorage.getItem('profile_cache');
+        // In background auto-sync, only fetch profile when version mismatch indicates changes, account was deleted, or cache is missing.
+        // User manual triggers continue to force-refresh.
+        const isUserMismatch = isExplicitlyDeleted || isManualTrigger || (serverUserTime > 0 && serverUserTime !== localUserTime) || !safeStorage.getItem('profile_cache');
 
         if (isUserMismatch) {
           const profileFetched = await refreshProfile(true, isManualTrigger ? 'manual' : 'auto').catch((err) => {
@@ -251,53 +253,84 @@ export function RefreshAppDataManager() {
   }, []);
 
   // 10-Hour Unified Refresh & Sync Checker:
-  // Auto refresh & sync user data every 10 hours, trigger auto refresh sync if last refresh was more than 10 hours in the background
+  // Auto refresh & sync user data every 10 hours.
+  // Dynamically schedules a single setTimeout for the exact remaining duration until 10 hours,
+  // eliminating unnecessary 60-second polling intervals in the background.
   useEffect(() => {
     if (!user?.uid) return;
 
     const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
+    let scheduledTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastCheckedTime = 0;
 
-    const check10HourUnified = () => {
+    const scheduleNext = (delayMs: number) => {
+      if (scheduledTimer) {
+        clearTimeout(scheduledTimer);
+        scheduledTimer = null;
+      }
+      // Cap maximum setTimeout delay to 24 hours to prevent 32-bit integer overflow in JS timers
+      const safeDelay = Math.min(delayMs, 24 * 60 * 60 * 1000);
+      scheduledTimer = setTimeout(() => {
+        checkAndSchedule();
+      }, safeDelay);
+    };
+
+    const checkAndSchedule = () => {
       if (!navigator.onLine || !user?.uid) return;
+
+      const now = Date.now();
+      // Throttle rapid consecutive checks (e.g. from quick tab switches or network toggles)
+      if (now - lastCheckedTime < 15000) {
+        return;
+      }
+      lastCheckedTime = now;
+
       const storageKey = `last_user_refresh_and_sync_time_${user.uid}`;
       const legacyStorageKey = `last_unified_10h_refresh_sync_time_v2_${user.uid}`;
       const lastUnifiedStr = localStorage.getItem(storageKey) || localStorage.getItem(legacyStorageKey);
       const lastUnifiedTime = lastUnifiedStr ? parseInt(lastUnifiedStr, 10) : 0;
-      const now = Date.now();
+      const elapsed = lastUnifiedTime ? now - lastUnifiedTime : TEN_HOURS_MS;
 
       // Trigger auto refresh & sync if last refresh was more than 10 hours ago (or never synced)
-      if (!lastUnifiedTime || now - lastUnifiedTime >= TEN_HOURS_MS) {
-        console.log(`[RefreshAppDataManager] Background 10-hour Auto Refresh & Sync triggered (last sync: ${lastUnifiedTime ? Math.round((now - lastUnifiedTime) / 3600000) + 'h ago' : 'never'}).`);
-        executeUnifiedRef.current('10_hour_sync');
+      if (!lastUnifiedTime || elapsed >= TEN_HOURS_MS) {
+        console.log(`[RefreshAppDataManager] Background 10-hour Auto Refresh & Sync triggered (last sync: ${lastUnifiedTime ? Math.round(elapsed / 3600000) + 'h ago' : 'never'}).`);
+        executeUnifiedRef.current('10_hour_sync').finally(() => {
+          scheduleNext(TEN_HOURS_MS);
+        });
+      } else {
+        // Schedule next check when remaining duration expires (min 5 seconds)
+        const remaining = Math.max(5000, TEN_HOURS_MS - elapsed);
+        scheduleNext(remaining);
       }
     };
 
-    // 1. Check on app open / mount after 8.5s grace period so initial render and browsing settle with 0 background lag
-    const initialTimer = setTimeout(() => {
-      check10HourUnified();
+    // 1. Initial startup grace period (8.5s) so initial render and browsing settle with 0 background lag
+    const initialGraceTimer = setTimeout(() => {
+      checkAndSchedule();
     }, 8500);
 
-    // 2. Periodic background check every 60 seconds (purely local timestamp comparison, 0 Firestore calls until 10h threshold arrives)
-    const interval = setInterval(() => {
-      check10HourUnified();
-    }, 60 * 1000);
-
-    // 3. Check on tab visibility resume, window focus, or device back online
-    const handleActivity = () => {
+    // 2. Check when tab visibility resumes or device comes back online
+    // (Note: redundant 'focus' listener removed to prevent duplicate triggers on every window click)
+    const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        check10HourUnified();
+        checkAndSchedule();
       }
     };
-    document.addEventListener('visibilitychange', handleActivity);
-    window.addEventListener('focus', handleActivity);
-    window.addEventListener('online', check10HourUnified);
+
+    const handleOnline = () => {
+      checkAndSchedule();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('online', handleOnline);
 
     return () => {
-      clearTimeout(initialTimer);
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleActivity);
-      window.removeEventListener('focus', handleActivity);
-      window.removeEventListener('online', check10HourUnified);
+      clearTimeout(initialGraceTimer);
+      if (scheduledTimer) {
+        clearTimeout(scheduledTimer);
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('online', handleOnline);
     };
   }, [user?.uid]);
 
