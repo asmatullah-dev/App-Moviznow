@@ -400,6 +400,63 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
           opacity: 0 !important;
           pointer-events: none !important;
         }
+
+        /* CRITICAL: Never hide menu/controls while seeking preview on duration bar */
+        .player.is-seeking-preview .controls,
+        .player.is-seeking-preview .crow,
+        .player.is-scrubbing .controls,
+        .player:has(.progress-wrap:hover) .controls,
+        .player:has(.progress-wrap.scrubbing) .controls,
+        .player:has(.thumb-preview.visible) .controls,
+        .player:has(#thumbPreview:hover) .controls,
+        body.is-seeking-preview .controls,
+        body:has(.progress-wrap:hover) .controls,
+        body:has(.thumb-preview.visible) .controls {
+          opacity: 1 !important;
+          pointer-events: auto !important;
+          transform: translateY(0) !important;
+          visibility: visible !important;
+        }
+
+        /* Keep controls buttons and icons fully visible & active during seeking preview */
+        .player.is-seeking-preview #controls,
+        .player.is-seeking-preview .cbtn,
+        .player:has(.progress-wrap:hover) #controls,
+        .player:has(.progress-wrap:hover) .cbtn,
+        .player:has(.thumb-preview.visible) #controls,
+        .player:has(.thumb-preview.visible) .cbtn {
+          opacity: 1 !important;
+          pointer-events: auto !important;
+          visibility: visible !important;
+        }
+
+        /* Keep open sheets/menus visible */
+        .player.is-seeking-preview .ps-sheet.open,
+        .player:has(.progress-wrap:hover) .ps-sheet.open,
+        .player:has(.thumb-preview.visible) .ps-sheet.open {
+          display: flex !important;
+          opacity: 1 !important;
+          visibility: visible !important;
+        }
+
+        /* Hide mini progress bar while seeking preview or hovering duration bar */
+        .player.is-seeking-preview #playerMiniProgress,
+        .player:has(.progress-wrap:hover) #playerMiniProgress,
+        .player:has(.progress-wrap.scrubbing) #playerMiniProgress,
+        .player:has(.thumb-preview.visible) #playerMiniProgress,
+        body.is-seeking-preview #playerMiniProgress {
+          opacity: 0 !important;
+          pointer-events: none !important;
+        }
+
+        /* Ensure thumbnail preview sits cleanly above controls and is crisp */
+        .thumb-preview {
+          z-index: 25 !important;
+        }
+        .thumb-preview.visible {
+          opacity: 1 !important;
+          visibility: visible !important;
+        }
       </style>
     `;
 
@@ -563,11 +620,139 @@ play4uRouter.get(["/api/stream/player/:contentId", "/stream/player/:contentId"],
               syncMiniVisibility();
             }
 
+            // Prevent hiding menu/controls while seeking preview on duration bar
+            var seekingPreviewActive = false;
+            var seekingPreviewGraceTimer = null;
+
+            function setSeekingPreviewState(active) {
+              var playerEl = document.getElementById("player") || document.querySelector(".player");
+              var controlsEl = document.getElementById("controls");
+              var thumbPreview = document.getElementById("thumbPreview");
+
+              if (active) {
+                if (seekingPreviewGraceTimer) {
+                  clearTimeout(seekingPreviewGraceTimer);
+                  seekingPreviewGraceTimer = null;
+                }
+                seekingPreviewActive = true;
+                if (playerEl) {
+                  playerEl.classList.remove("idle");
+                  playerEl.classList.add("is-seeking-preview");
+                }
+                document.body.classList.add("is-seeking-preview");
+                if (controlsEl) {
+                  controlsEl.style.setProperty("opacity", "1", "important");
+                  controlsEl.style.setProperty("pointer-events", "auto", "important");
+                  controlsEl.style.setProperty("transform", "translateY(0)", "important");
+                  controlsEl.style.setProperty("visibility", "visible", "important");
+                }
+                if (window.parent && window.parent !== window) {
+                  window.parent.postMessage({
+                    type: "MOVIZNOW_SEEKING_PREVIEW",
+                    active: true,
+                    contentId: contentId
+                  }, "*");
+                }
+              } else {
+                if (seekingPreviewGraceTimer) clearTimeout(seekingPreviewGraceTimer);
+                seekingPreviewGraceTimer = setTimeout(function() {
+                  var curThumb = document.getElementById("thumbPreview");
+                  var prog = document.getElementById("progress");
+                  if (curThumb && curThumb.classList.contains("visible")) return;
+                  if (prog && prog.classList.contains("scrubbing")) return;
+
+                  seekingPreviewActive = false;
+                  if (playerEl) {
+                    playerEl.classList.remove("is-seeking-preview");
+                  }
+                  document.body.classList.remove("is-seeking-preview");
+                  if (window.parent && window.parent !== window) {
+                    window.parent.postMessage({
+                      type: "MOVIZNOW_SEEKING_PREVIEW",
+                      active: false,
+                      contentId: contentId
+                    }, "*");
+                  }
+                }, 600);
+              }
+            }
+
+            function setupSeekingPreviewGuards() {
+              var progressEl = document.getElementById("progress");
+              var thumbPreview = document.getElementById("thumbPreview");
+              if (!progressEl) return;
+
+              var onDurationBarActivity = function() {
+                setSeekingPreviewState(true);
+              };
+
+              var onDurationBarLeave = function(e) {
+                if (e && e.relatedTarget && (e.relatedTarget.id === "thumbPreview" || (e.relatedTarget.closest && e.relatedTarget.closest("#thumbPreview, #progress")))) {
+                  return;
+                }
+                setSeekingPreviewState(false);
+              };
+
+              progressEl.addEventListener("pointerenter", onDurationBarActivity, true);
+              progressEl.addEventListener("pointermove", onDurationBarActivity, true);
+              progressEl.addEventListener("mousemove", onDurationBarActivity, true);
+              progressEl.addEventListener("pointerdown", onDurationBarActivity, true);
+              progressEl.addEventListener("touchstart", onDurationBarActivity, true);
+              progressEl.addEventListener("touchmove", onDurationBarActivity, true);
+              progressEl.addEventListener("pointerleave", onDurationBarLeave, true);
+              progressEl.addEventListener("mouseleave", onDurationBarLeave, true);
+              progressEl.addEventListener("pointerup", function() {
+                setTimeout(function() {
+                  if (!thumbPreview || !thumbPreview.classList.contains("visible")) {
+                    setSeekingPreviewState(false);
+                  }
+                }, 300);
+              }, true);
+
+              if (thumbPreview) {
+                thumbPreview.addEventListener("pointerenter", onDurationBarActivity, true);
+                thumbPreview.addEventListener("pointermove", onDurationBarActivity, true);
+                thumbPreview.addEventListener("pointerleave", onDurationBarLeave, true);
+
+                try {
+                  var obs = new MutationObserver(function() {
+                    if (thumbPreview.classList.contains("visible")) {
+                      setSeekingPreviewState(true);
+                    }
+                  });
+                  obs.observe(thumbPreview, { attributes: true, attributeFilter: ["class", "style"] });
+                } catch(_) {}
+              }
+
+              try {
+                var pObs = new MutationObserver(function() {
+                  if (progressEl.classList.contains("scrubbing")) {
+                    setSeekingPreviewState(true);
+                  }
+                });
+                pObs.observe(progressEl, { attributes: true, attributeFilter: ["class"] });
+              } catch(_) {}
+            }
+
+            setupSeekingPreviewGuards();
+            setInterval(setupSeekingPreviewGuards, 500);
+
             function syncMiniVisibility() {
               var playerEl = document.getElementById("player");
               var controlsEl = document.getElementById("controls");
               var mini = document.getElementById("playerMiniProgress");
               if (!playerEl || !mini) return;
+              if (seekingPreviewActive) {
+                playerEl.classList.remove("idle");
+                if (controlsEl) {
+                  controlsEl.style.setProperty("opacity", "1", "important");
+                  controlsEl.style.setProperty("pointer-events", "auto", "important");
+                  controlsEl.style.setProperty("visibility", "visible", "important");
+                }
+                mini.style.setProperty("opacity", "0", "important");
+                mini.style.setProperty("pointer-events", "none", "important");
+                return;
+              }
               var isIdle = playerEl.classList.contains("idle");
               var controlsHidden = controlsEl && (window.getComputedStyle(controlsEl).opacity === "0" || window.getComputedStyle(controlsEl).visibility === "hidden" || window.getComputedStyle(controlsEl).display === "none");
               var isSheetOpen = !!document.querySelector(".ps-sheet.open");
@@ -1196,6 +1381,61 @@ play4uRouter.get(["/api/stream/player/assets/*", "/stream/player/assets/*"], asy
           }, 3000);
         }
       `;
+
+      // 8. CRITICAL: Never hide menu/controls while seeking preview on duration bar or scrubbing
+      js = js.replace(
+        /function resetIdle\(\)\s*\{[\s\S]*?player\.classList\.remove\("idle"\);[\s\S]*?idleTimer\s*=\s*setTimeout\([\s\S]*?4000,?\s*\);?\s*\}/,
+        `function resetIdle() {
+          player.classList.remove("idle");
+          clearTimeout(idleTimer);
+          if (IS_TOUCH && !video.paused) player.classList.add("show-center");
+          if (video.paused) return;
+          if (currentSheet) return;
+          // CRITICAL: Do NOT hide menu/controls while seeking preview on duration bar or scrubbing!
+          var isPreviewing = Boolean(
+            scrubbing ||
+            (thumbPreview && thumbPreview.classList.contains("visible")) ||
+            (progressEl && (progressEl.matches(":hover") || progressEl.classList.contains("scrubbing")))
+          );
+          if (isPreviewing) {
+            return;
+          }
+          idleTimer = setTimeout(
+            () => {
+              if (currentSheet) return;
+              var stillPreviewing = Boolean(
+                scrubbing ||
+                (thumbPreview && thumbPreview.classList.contains("visible")) ||
+                (progressEl && (progressEl.matches(":hover") || progressEl.classList.contains("scrubbing")))
+              );
+              if (stillPreviewing) {
+                resetIdle();
+                return;
+              }
+              if (player.classList.contains("is-vol-gesture")) {
+                resetIdle();
+                return;
+              }
+              player.classList.add("idle");
+              player.classList.remove("show-center");
+            },
+            4000
+          );
+        }`
+      );
+
+      js = js.replace(
+        'thumbPreview.classList.add("visible");',
+        'thumbPreview.classList.add("visible"); try { player.classList.remove("idle"); resetIdle(); } catch(_) {}'
+      );
+      js = js.replace(
+        'thumbPreview.classList.remove("visible");',
+        'thumbPreview.classList.remove("visible"); try { resetIdle(); } catch(_) {}'
+      );
+      js = js.replace(
+        'progressEl.addEventListener("pointermove", (e) => {',
+        'progressEl.addEventListener("pointermove", (e) => { try { resetIdle(); } catch(_) {}'
+      );
 
       js = js.replace(
         "function populateQualitySheet()",

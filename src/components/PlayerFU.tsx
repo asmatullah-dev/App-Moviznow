@@ -282,9 +282,8 @@ export function PlayerFU({
   const { t } = useLanguage();
   const { streamMeta } = usePlayerFU(content, season, episode);
 
-  // Playback engine mode: "direct" (Direct Edge CDN - 0 Vercel Fast Origin Transfer) vs "proxy" (Backend masked player)
-  // Default to "direct" to completely eliminate Vercel serverless bandwidth and prevent fast origin transfer consumption!
-  const [streamEngine, setStreamEngine] = useState<"direct" | "proxy">("direct");
+  // Playback engine mode: "proxy" (Custom MovizNow player with duration preview guards & speed/audio sync)
+  const [streamEngine, setStreamEngine] = useState<"direct" | "proxy">("proxy");
 
   // Snapshot the iframe URL once when opened so it NEVER changes during active playback
   const [activeIframeSrc, setActiveIframeSrc] = useState<string>("");
@@ -292,14 +291,22 @@ export function PlayerFU({
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showControls, setShowControls] = useState<boolean>(true);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isSeekingPreviewRef = useRef<boolean>(false);
 
   const resetControlsTimeout = useCallback(() => {
     setShowControls(true);
     if (controlsTimeoutRef.current) {
       clearTimeout(controlsTimeoutRef.current);
+      controlsTimeoutRef.current = null;
+    }
+    // Do NOT hide controls while seeking preview on duration bar
+    if (isSeekingPreviewRef.current) {
+      return;
     }
     controlsTimeoutRef.current = setTimeout(() => {
-      setShowControls(false);
+      if (!isSeekingPreviewRef.current) {
+        setShowControls(false);
+      }
     }, 3000);
   }, []);
 
@@ -417,7 +424,19 @@ export function PlayerFU({
       if (!event.data) return;
       resetControlsTimeout();
 
-      if (event.data.type === "MOVIZNOW_PLAYBACK_PROGRESS") {
+      if (event.data.type === "MOVIZNOW_SEEKING_PREVIEW") {
+        const isSeeking = Boolean(event.data.active);
+        isSeekingPreviewRef.current = isSeeking;
+        if (isSeeking) {
+          setShowControls(true);
+          if (controlsTimeoutRef.current) {
+            clearTimeout(controlsTimeoutRef.current);
+            controlsTimeoutRef.current = null;
+          }
+        } else {
+          resetControlsTimeout();
+        }
+      } else if (event.data.type === "MOVIZNOW_PLAYBACK_PROGRESS") {
         const { currentTime } = event.data;
         if (typeof currentTime === "number" && currentTime > 2) {
           saveProgress(progressKey, currentTime);
