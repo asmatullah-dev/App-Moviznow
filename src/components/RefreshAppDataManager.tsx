@@ -4,6 +4,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useNotifications } from '../contexts/NotificationContext';
 import { safeStorage } from '../utils/safeStorage';
 import { getChunkMeta, parseVersionTime } from '../utils/chunkMeta';
+import { isUserExpired } from '../contexts/UsersContext';
 import { executeSyncUserData } from './SyncUserDataManager';
 
 export function RefreshAppDataManager() {
@@ -16,6 +17,7 @@ export function RefreshAppDataManager() {
     if (isRefreshingRef.current) return false;
 
     const isAutoTrigger = reason === '10_hour_sync' || reason === 'auto_10h' || reason === 'auto';
+    const is10HourSync = reason === '10_hour_sync';
     const isManualTrigger = !isAutoTrigger;
 
     // For guest users (unauthenticated), skip sync completely as guests have no Firestore connection
@@ -41,14 +43,21 @@ export function RefreshAppDataManager() {
       return false;
     }
 
-    if (isAutoTrigger) {
+    const isLocalProfileExpired = Boolean(
+      profile?.status === 'expired' ||
+      (profile?.expiryDate && profile?.expiryDate !== 'Lifetime' && isUserExpired(profile.expiryDate))
+    );
+
+    // If auto trigger, skip connecting to Firestore if 10 hours have not passed,
+    // UNLESS it is an explicit 10_hour_sync cycle or the user is locally expired (admin may have renewed membership)
+    if (isAutoTrigger && !is10HourSync && !isLocalProfileExpired) {
       const lastUnifiedStr = localStorage.getItem(storageKey) || localStorage.getItem(legacyStorageKey);
       const lastUnifiedTime = lastUnifiedStr ? parseInt(lastUnifiedStr, 10) : 0;
       const now = Date.now();
       const TEN_HOURS_MS = 10 * 60 * 60 * 1000;
 
       if (lastUnifiedTime && (now - lastUnifiedTime < TEN_HOURS_MS)) {
-        // Skip connecting to Firestore automatically if 10 hours have not passed
+        // Skip connecting to Firestore automatically if 10 hours have not passed and not expired
         return true;
       }
     }
@@ -72,7 +81,7 @@ export function RefreshAppDataManager() {
       // =========================================================================
       // STEP 1: REFRESH APP DATA FIRST (Settings, Notifications, and User Profile)
       // =========================================================================
-      const versions: Record<string, any> = await getChunkMeta(isManualTrigger);
+      const versions: Record<string, any> = await getChunkMeta(true);
 
       // 1. Check settings version: fetch when version mismatch or missing local cache
       const serverSettingsVer = versions.settings || 0;
@@ -102,7 +111,7 @@ export function RefreshAppDataManager() {
         }
       }
 
-      // 3. Check user profile version: fetch when version mismatch or missing local cache
+      // 3. Check user profile version: fetch when version mismatch, 10-hour sync, local expiry, or missing local cache
       if (user?.uid) {
         const chunkUsersMeta = versions.users || {};
         const serverUserVer = chunkUsersMeta[user.uid];
@@ -111,9 +120,22 @@ export function RefreshAppDataManager() {
         const localUserTime = parseVersionTime(localUserVer);
         
         const isExplicitlyDeleted = serverUserVer === -1 || (typeof serverUserVer === 'object' && (serverUserVer as any)?.deleted === true) || (versions as any)?.[`users.${user.uid}`] === -1;
-        // In background auto-sync, only fetch profile when version mismatch indicates changes, account was deleted, or cache is missing.
-        // User manual triggers continue to force-refresh.
-        const isUserMismatch = isExplicitlyDeleted || isManualTrigger || (serverUserTime > 0 && serverUserTime !== localUserTime) || !safeStorage.getItem('profile_cache');
+        
+        const isLocalProfileExpired = Boolean(
+          profile?.status === 'expired' ||
+          (profile?.expiryDate && profile?.expiryDate !== 'Lifetime' && isUserExpired(profile.expiryDate))
+        );
+
+        // Always refresh profile from Firestore on 10h sync, manual refresh, local expiry, or version mismatch
+        const isUserMismatch =
+          isExplicitlyDeleted ||
+          isManualTrigger ||
+          is10HourSync ||
+          isAutoTrigger ||
+          isLocalProfileExpired ||
+          !serverUserVer ||
+          (serverUserTime > 0 && serverUserTime !== localUserTime) ||
+          !safeStorage.getItem('profile_cache');
 
         if (isUserMismatch) {
           const profileFetched = await refreshProfile(true, isManualTrigger ? 'manual' : 'auto').catch((err) => {
@@ -152,7 +174,16 @@ export function RefreshAppDataManager() {
       // STEP 2: SYNC PENDING USER CHANGES SECOND (Favorites, Watch Later, Watched, Orders, Requests)
       // =========================================================================
       if (user?.uid) {
-        const syncSuccess = await executeSyncUserData(user.uid, profile, reason);
+        // Read fresh profile from storage cache to avoid stale React closure profile from caller
+        let latestProfile = profile;
+        try {
+          const cachedStr = safeStorage.getItem('profile_cache');
+          if (cachedStr) {
+            latestProfile = JSON.parse(cachedStr);
+          }
+        } catch (e) {}
+
+        const syncSuccess = await executeSyncUserData(user.uid, latestProfile, reason);
         if (!syncSuccess) {
           console.warn('[RefreshAppDataManager] Step 2 Sync failed or returned false. Aborting without saving timestamp.');
           if (isManualTrigger) {
@@ -291,9 +322,15 @@ export function RefreshAppDataManager() {
       const lastUnifiedTime = lastUnifiedStr ? parseInt(lastUnifiedStr, 10) : 0;
       const elapsed = lastUnifiedTime ? now - lastUnifiedTime : TEN_HOURS_MS;
 
-      // Trigger auto refresh & sync if last refresh was more than 10 hours ago (or never synced)
-      if (!lastUnifiedTime || elapsed >= TEN_HOURS_MS) {
-        console.log(`[RefreshAppDataManager] Background 10-hour Auto Refresh & Sync triggered (last sync: ${lastUnifiedTime ? Math.round(elapsed / 3600000) + 'h ago' : 'never'}).`);
+      // Check if user is expired locally (if admin renewed membership, check immediately without waiting 10h)
+      const isLocalExpired = Boolean(
+        profile?.status === 'expired' ||
+        (profile?.expiryDate && profile?.expiryDate !== 'Lifetime' && isUserExpired(profile.expiryDate))
+      );
+
+      // Trigger auto refresh & sync if last refresh was more than 10 hours ago (or never synced, or locally expired)
+      if (!lastUnifiedTime || elapsed >= TEN_HOURS_MS || isLocalExpired) {
+        console.log(`[RefreshAppDataManager] Background 10-hour Auto Refresh & Sync triggered (last sync: ${lastUnifiedTime ? Math.round(elapsed / 3600000) + 'h ago' : 'never'}, localExpired: ${isLocalExpired}).`);
         executeUnifiedRef.current('10_hour_sync').finally(() => {
           scheduleNext(TEN_HOURS_MS);
         });
@@ -332,7 +369,7 @@ export function RefreshAppDataManager() {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('online', handleOnline);
     };
-  }, [user?.uid]);
+  }, [user?.uid, profile?.status, profile?.expiryDate]);
 
   return null;
 }

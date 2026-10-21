@@ -530,65 +530,84 @@ export function formatNameWithCity(restOfName: string, targetCity: string): stri
 
 /**
  * Formats or updates contact name according to specifications:
+ * For users with Role 'user' and Status 'pending':
+ *   AUPending {Name} ({City}) eg AUPending Ikram Raza (Lahore)
+ *   (A = App, U = User role, Pending = Pending status; no expiry date needed)
+ *
  * For VIP users:
  *   Not expired: AVYY/MM/DD {Name} ({City}) eg AV26/10/13 Ikram Raza (Lahore)
  *   Expired: Exd AVYY/MM/DD {Name} ({City}) eg Exd AV26/10/13 Ikram Raza (Lahore)
+ *
  * For Basic users:
  *   Not expired: ABYY/MM/DD {Name} ({City}) eg AB26/10/13 Ikram Raza (Lahore)
  *   Expired: Exd ABYY/MM/DD {Name} ({City}) eg Exd AB26/10/13 Ikram Raza (Lahore)
  *
+ * For User role (active / expired):
+ *   Not expired: AUYY/MM/DD {Name} ({City}) eg AU26/10/13 Ikram Raza (Lahore)
+ *   Expired: Exd AUYY/MM/DD {Name} ({City}) eg Exd AU26/10/13 Ikram Raza (Lahore)
+ *
  * If city is missing:
- *   Save or update contact in name (city) eg Ahmad Ali (City)
- *   Not expired: AVYY/MM/DD {Name} (City) eg AV26/10/13 Ahmad Ali (City)
- *   Expired: Exd AVYY/MM/DD {Name} (City) eg Exd AV26/10/13 Ahmad Ali (City)
+ *   Save or update contact in name (city) eg AUPending Ahmad Ali (City)
  *
  * If existingContactName is provided:
- *   Replaces the status (Exd ) and prefix date (AVYY/MM/DD / ABYY/MM/DD),
+ *   Replaces the status/prefix (AUPending / Exd / AVYY/MM/DD / ABYY/MM/DD / AUYY/MM/DD),
  *   preserves/cleans {Name}, and updates the parenthesized ({City}) part without duplicating.
  */
 export function formatContactName(user: UserProfile, existingContactName?: string | null): string {
   const roleLower = (user.role || '').toLowerCase();
   const isVip = roleLower === 'vip';
-  const tierLetter = isVip ? 'V' : (roleLower === 'user' ? 'U' : 'B');
-  const prefixCode = `A${tierLetter}`; // AV, AB, or AU
+  const isBasic = roleLower === 'basic';
+  const isUserRole = !isVip && !isBasic; // 'user' or default role
 
-  const expired = user.status === 'expired' || (!!user.expiryDate && user.expiryDate !== 'Lifetime' && isUserExpired(user.expiryDate));
-  const statusPrefix = expired ? 'Exd ' : '';
+  // User (Role) with Pending Status: AUPending [Name] ([City])
+  // A = App, U = User (Role), Pending = Status (no expiry date needed because of pending status)
+  const isPending = isUserRole && (user.status === 'pending' || !user.status);
 
-  // Format expiry date as YY/MM/DD
-  let datePart = '26/12/31';
-  if (user.expiryDate) {
-    if (user.expiryDate === 'Lifetime') {
-      datePart = '99/12/31';
-    } else {
-      const dateOnlyStr = user.expiryDate.split('T')[0].trim();
-      const parts = dateOnlyStr.split('-');
-      if (parts.length === 3) {
-        const yy = parts[0].slice(-2);
-        const mm = parts[1].padStart(2, '0');
-        const dd = parts[2].padStart(2, '0');
-        datePart = `${yy}/${mm}/${dd}`;
+  let newPrefix = '';
+  if (isPending) {
+    newPrefix = 'AUPending';
+  } else {
+    const tierLetter = isVip ? 'V' : (isUserRole ? 'U' : 'B');
+    const prefixCode = `A${tierLetter}`; // AV, AB, or AU
+
+    const expired = user.status === 'expired' || (!!user.expiryDate && user.expiryDate !== 'Lifetime' && isUserExpired(user.expiryDate));
+    const statusPrefix = expired ? 'Exd ' : '';
+
+    // Format expiry date as YY/MM/DD
+    let datePart = '26/12/31';
+    if (user.expiryDate) {
+      if (user.expiryDate === 'Lifetime') {
+        datePart = '99/12/31';
       } else {
-        const d = new Date(user.expiryDate);
-        if (!isNaN(d.getTime())) {
-          const yy = String(d.getUTCFullYear()).slice(-2);
-          const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
-          const dd = String(d.getUTCDate()).padStart(2, '0');
+        const dateOnlyStr = user.expiryDate.split('T')[0].trim();
+        const parts = dateOnlyStr.split('-');
+        if (parts.length === 3) {
+          const yy = parts[0].slice(-2);
+          const mm = parts[1].padStart(2, '0');
+          const dd = parts[2].padStart(2, '0');
           datePart = `${yy}/${mm}/${dd}`;
+        } else {
+          const d = new Date(user.expiryDate);
+          if (!isNaN(d.getTime())) {
+            const yy = String(d.getUTCFullYear()).slice(-2);
+            const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+            const dd = String(d.getUTCDate()).padStart(2, '0');
+            datePart = `${yy}/${mm}/${dd}`;
+          }
         }
       }
+    } else {
+      // Default to 30 days from now
+      const d = new Date();
+      d.setDate(d.getDate() + 30);
+      const yy = String(d.getFullYear()).slice(-2);
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      datePart = `${yy}/${mm}/${dd}`;
     }
-  } else {
-    // Default to 30 days from now
-    const d = new Date();
-    d.setDate(d.getDate() + 30);
-    const yy = String(d.getFullYear()).slice(-2);
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    datePart = `${yy}/${mm}/${dd}`;
-  }
 
-  const newPrefix = `${statusPrefix}${prefixCode}${datePart}`;
+    newPrefix = `${statusPrefix}${prefixCode}${datePart}`;
+  }
 
   // Recognize city:
   // 1. From user profile
@@ -613,8 +632,8 @@ export function formatContactName(user: UserProfile, existingContactName?: strin
 
   const targetCity = validCity || 'City';
 
-  // Matches status prefix (Exd ), tier code (AV/AB/AU), and date (YY/MM/DD or YYYY-MM-DD)
-  const prefixRegex = /^(?:(?:Exd|EXD|exd)\s+)?(?:[A-Za-z]{2,3})?\s*\d{2,4}[\/\.-]\d{2}[\/\.-]\d{2,4}\s*/i;
+  // Matches status prefix (Exd ), tier code (AV/AB/AU), date (YY/MM/DD), or AUPending / Pending keywords
+  const prefixRegex = /^(?:(?:Exd|EXD|exd)\s+)?(?:AUPending|ABPending|AVPending|(?:[A-Za-z]{2,3})?\s*(?:\d{2,4}[\/\.-]\d{2}[\/\.-]\d{2,4}|Pending))\s*/i;
 
   let baseName = '';
   if (existingContactName && existingContactName.trim()) {
