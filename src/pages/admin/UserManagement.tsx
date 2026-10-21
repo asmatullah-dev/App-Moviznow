@@ -764,6 +764,43 @@ export default function UserManagement() {
     return allUsers;
   }, [allUsers, profile, managedByFilter]);
 
+  // Auto-detect any status, role, or expiry date changes on users in User Management tab
+  // Automatically saves to Google Contacts (if authorized) or moves to Pending Contacts queue
+  const prevUserSigsRef = useRef<Map<string, string>>(new Map());
+  const isInitialSigLoadRef = useRef(true);
+
+  useEffect(() => {
+    if (!allUsers || allUsers.length === 0) return;
+
+    const nextSigs = new Map<string, string>();
+    const usersWithChanges: UserProfile[] = [];
+
+    allUsers.forEach(u => {
+      if (!u.uid || (!u.phone && !u.email)) return;
+      const isExp = u.status === 'expired' || (!!u.expiryDate && u.expiryDate !== 'Lifetime' && isUserExpired(u.expiryDate));
+      const effStatus = u.role === 'owner' ? 'active' : (isExp ? 'expired' : (u.status || 'pending'));
+      const sig = `${u.role || 'user'}|${effStatus}|${u.expiryDate || ''}|${u.displayName || ''}|${u.city || ''}`;
+      nextSigs.set(u.uid, sig);
+
+      if (!isInitialSigLoadRef.current) {
+        const prevSig = prevUserSigsRef.current.get(u.uid);
+        if (prevSig && prevSig !== sig) {
+          usersWithChanges.push(u);
+        }
+      }
+    });
+
+    prevUserSigsRef.current = nextSigs;
+    isInitialSigLoadRef.current = false;
+
+    if (usersWithChanges.length > 0) {
+      console.log(`[UserManagement Contacts Auto-Detect] Detected status/role/expiry change on ${usersWithChanges.length} user(s). Syncing or queuing to pending contacts.`);
+      usersWithChanges.forEach(u => {
+        autoSyncUserToContacts(u, false);
+      });
+    }
+  }, [allUsers, autoSyncUserToContacts]);
+
   useEffect(() => {
     setLoading(usersLoading);
   }, [usersLoading]);
@@ -1119,6 +1156,8 @@ export default function UserManagement() {
         updatedFields.status !== undefined ||
         updatedFields.role !== undefined ||
         updatedFields.phone !== undefined ||
+        updatedFields.city !== undefined ||
+        updatedFields.email !== undefined ||
         updatedFields.displayName !== undefined
       ) {
         autoSyncUserToContacts(nextUser as UserProfile, false);
@@ -1550,8 +1589,8 @@ export default function UserManagement() {
       const batchUpdates: Record<string, Partial<UserProfile>> = {};
 
       currentSelected.forEach(uid => {
-        const user = users.find(u => u.uid === uid);
-        if (user?.role !== 'owner' && user?.role !== 'admin') {
+        const user = allUsers.find(u => u.uid === uid) || users.find(u => u.uid === uid);
+        if (user && user.role !== 'owner' && user.role !== 'admin') {
           const userUpdates: Partial<UserProfile> = { status };
           if (status === 'active') {
             userUpdates.expiryNoticeSent = false;
@@ -1561,6 +1600,7 @@ export default function UserManagement() {
             clearNoticeRecord(uid);
           }
           batchUpdates[uid] = userUpdates;
+          autoSyncUserToContacts({ ...user, ...userUpdates }, false);
         }
       });
 
@@ -1590,9 +1630,10 @@ export default function UserManagement() {
     try {
       const batchUpdates: Record<string, Partial<UserProfile>> = {};
       currentSelected.forEach(uid => {
-        const user = users.find(u => u.uid === uid);
-        if (user?.role !== 'owner' && uid !== profile?.uid) {
+        const user = allUsers.find(u => u.uid === uid) || users.find(u => u.uid === uid);
+        if (user && user.role !== 'owner' && uid !== profile?.uid) {
           batchUpdates[uid] = { role };
+          autoSyncUserToContacts({ ...user, role }, false);
         }
       });
       if (Object.keys(batchUpdates).length > 0) {
@@ -1789,6 +1830,7 @@ export default function UserManagement() {
         }
         
         updateUserFields((foundUser as any).id || (foundUser as any).uid, updateData);
+        autoSyncUserToContacts({ ...foundUser, ...updateData }, false);
         setAlertConfig({ isOpen: true, title: 'Success', message: 'Pending user claimed locally. Click "Upload Changes" to sync.' });
       } else {
         const standardizedPhone = newUserForm.phone ? standardizePhone(newUserForm.phone) : '';
@@ -1836,6 +1878,7 @@ export default function UserManagement() {
               updateData.managedBy = profile.uid;
             }
             updateUserFields(existingUser.uid, updateData);
+            autoSyncUserToContacts({ ...existingUser, ...updateData }, false);
             setAlertConfig({ isOpen: true, title: 'Success', message: `Existing user account (${existingUser.email || existingUser.phone}) updated locally. Click "Upload Changes" to sync.` });
             setProcessing(prev => ({ ...prev, addUser: false }));
             setIsAddUserModalOpen(false);
@@ -1878,6 +1921,7 @@ export default function UserManagement() {
           }
 
           addUserLocally(newUserData);
+          autoSyncUserToContacts(newUserData, false);
           setAlertConfig({ isOpen: true, title: 'Success', message: 'User added locally. Click "Upload Changes" to sync to Firestore.' });
         }
       }

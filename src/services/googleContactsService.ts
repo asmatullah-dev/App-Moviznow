@@ -530,34 +530,55 @@ export function formatNameWithCity(restOfName: string, targetCity: string): stri
 
 /**
  * Formats or updates contact name according to specifications:
- * For users with Role 'user' and Status 'pending':
- *   AUPending {Name} ({City}) eg AUPending Ikram Raza (Lahore)
- *   (A = App, U = User role, Pending = Pending status; no expiry date needed)
- *
- * For VIP users:
- *   Not expired: AVYY/MM/DD {Name} ({City}) eg AV26/10/13 Ikram Raza (Lahore)
- *   Expired: Exd AVYY/MM/DD {Name} ({City}) eg Exd AV26/10/13 Ikram Raza (Lahore)
- *
- * For Basic users:
- *   Not expired: ABYY/MM/DD {Name} ({City}) eg AB26/10/13 Ikram Raza (Lahore)
- *   Expired: Exd ABYY/MM/DD {Name} ({City}) eg Exd AB26/10/13 Ikram Raza (Lahore)
- *
- * For User role (active / expired):
- *   Not expired: AUYY/MM/DD {Name} ({City}) eg AU26/10/13 Ikram Raza (Lahore)
- *   Expired: Exd AUYY/MM/DD {Name} ({City}) eg Exd AU26/10/13 Ikram Raza (Lahore)
+ * 1. User with Pending Status:
+ *    AUPending {Name} ({City}) eg AUPending Ikram Raza (Lahore)
+ *    (A = App, U = User role, Pending = Status; no expiry date needed)
+ * 2. Trial (Active / Expired):
+ *    ATYY/MM/DD {Name} ({City}) eg AT26/10/13 Ikram Raza (Lahore)
+ *    Expired: Exd ATYY/MM/DD {Name} ({City}) eg Exd AT26/10/13 Ikram Raza (Lahore)
+ * 3. Selected Content (Active / Expired):
+ *    ASCYY/MM/DD {Name} ({City}) eg ASC26/10/13 Ikram Raza (Lahore)
+ *    Expired: Exd ASCYY/MM/DD {Name} ({City}) eg Exd ASC26/10/13 Ikram Raza (Lahore)
+ * 4. Content Manager (Active / Expired):
+ *    ACMYY/MM/DD {Name} ({City}) eg ACM26/10/13 Ikram Raza (Lahore)
+ *    Expired: Exd ACMYY/MM/DD {Name} ({City}) eg Exd ACM26/10/13 Ikram Raza (Lahore)
+ * 5. User Manager (Active / Expired):
+ *    AUMYY/MM/DD {Name} ({City}) eg AUM26/10/13 Ikram Raza (Lahore)
+ *    Expired: Exd AUMYY/MM/DD {Name} ({City}) eg Exd AUM26/10/13 Ikram Raza (Lahore)
+ * 6. Manager (Active / Expired):
+ *    AMYY/MM/DD {Name} ({City}) eg AM26/10/13 Ikram Raza (Lahore)
+ *    Expired: Exd AMYY/MM/DD {Name} ({City}) eg Exd AM26/10/13 Ikram Raza (Lahore)
+ * 7. Admin / Owner (Active / Expired):
+ *    AAYY/MM/DD {Name} ({City}) eg AA26/10/13 Ikram Raza (Lahore)
+ *    Expired: Exd AAYY/MM/DD {Name} ({City}) eg Exd AA26/10/13 Ikram Raza (Lahore)
+ * 8. VIP (Active / Expired):
+ *    AVYY/MM/DD {Name} ({City}) eg AV26/10/13 Ikram Raza (Lahore)
+ *    Expired: Exd AVYY/MM/DD {Name} ({City}) eg Exd AV26/10/13 Ikram Raza (Lahore)
+ * 9. Basic (Active / Expired):
+ *    ABYY/MM/DD {Name} ({City}) eg AB26/10/13 Ikram Raza (Lahore)
+ *    Expired: Exd ABYY/MM/DD {Name} ({City}) eg Exd AB26/10/13 Ikram Raza (Lahore)
+ * 10. User Role (Active / Expired):
+ *    AUYY/MM/DD {Name} ({City}) eg AU26/10/13 Ikram Raza (Lahore)
+ *    Expired: Exd AUYY/MM/DD {Name} ({City}) eg Exd AU26/10/13 Ikram Raza (Lahore)
  *
  * If city is missing:
- *   Save or update contact in name (city) eg AUPending Ahmad Ali (City)
+ *    Save or update contact in name (city) eg AUPending Ahmad Ali (City)
  *
  * If existingContactName is provided:
- *   Replaces the status/prefix (AUPending / Exd / AVYY/MM/DD / ABYY/MM/DD / AUYY/MM/DD),
- *   preserves/cleans {Name}, and updates the parenthesized ({City}) part without duplicating.
+ *    Replaces the status/prefix (AUPending / Exd / AT... / ASC... / ACM... / AUM... / AM... / AA... / AV... / AB... / AU...),
+ *    preserves/cleans {Name}, and updates the parenthesized ({City}) part without duplicating.
  */
 export function formatContactName(user: UserProfile, existingContactName?: string | null): string {
-  const roleLower = (user.role || '').toLowerCase();
+  const roleLower = (user.role || '').toLowerCase().replace(/[-\s]/g, '_');
   const isVip = roleLower === 'vip';
   const isBasic = roleLower === 'basic';
-  const isUserRole = !isVip && !isBasic; // 'user' or default role
+  const isTrial = roleLower === 'trial';
+  const isSelectedContent = roleLower === 'selected_content';
+  const isContentManager = roleLower === 'content_manager';
+  const isUserManager = roleLower === 'user_manager';
+  const isManager = roleLower === 'manager';
+  const isAdminOrOwner = roleLower === 'admin' || roleLower === 'owner';
+  const isUserRole = !isVip && !isBasic && !isTrial && !isSelectedContent && !isContentManager && !isUserManager && !isManager && !isAdminOrOwner;
 
   // User (Role) with Pending Status: AUPending [Name] ([City])
   // A = App, U = User (Role), Pending = Status (no expiry date needed because of pending status)
@@ -567,8 +588,24 @@ export function formatContactName(user: UserProfile, existingContactName?: strin
   if (isPending) {
     newPrefix = 'AUPending';
   } else {
-    const tierLetter = isVip ? 'V' : (isUserRole ? 'U' : 'B');
-    const prefixCode = `A${tierLetter}`; // AV, AB, or AU
+    let prefixCode = 'AU';
+    if (isVip) {
+      prefixCode = 'AV';
+    } else if (isBasic) {
+      prefixCode = 'AB';
+    } else if (isTrial) {
+      prefixCode = 'AT';
+    } else if (isSelectedContent) {
+      prefixCode = 'ASC';
+    } else if (isContentManager) {
+      prefixCode = 'ACM';
+    } else if (isUserManager) {
+      prefixCode = 'AUM';
+    } else if (isManager) {
+      prefixCode = 'AM';
+    } else if (isAdminOrOwner) {
+      prefixCode = 'AA';
+    }
 
     const expired = user.status === 'expired' || (!!user.expiryDate && user.expiryDate !== 'Lifetime' && isUserExpired(user.expiryDate));
     const statusPrefix = expired ? 'Exd ' : '';
@@ -632,8 +669,8 @@ export function formatContactName(user: UserProfile, existingContactName?: strin
 
   const targetCity = validCity || 'City';
 
-  // Matches status prefix (Exd ), tier code (AV/AB/AU), date (YY/MM/DD), or AUPending / Pending keywords
-  const prefixRegex = /^(?:(?:Exd|EXD|exd)\s+)?(?:AUPending|ABPending|AVPending|(?:[A-Za-z]{2,3})?\s*(?:\d{2,4}[\/\.-]\d{2}[\/\.-]\d{2,4}|Pending))\s*/i;
+  // Matches status prefix (Exd ), tier code (AT/ASC/ACM/AUM/AM/AA/AV/AB/AU), date (YY/MM/DD), or AUPending / Pending keywords
+  const prefixRegex = /^(?:(?:Exd|EXD|exd)\s+)?(?:AUPending|ABPending|AVPending|ATPending|ASCPending|ACMPending|AUMPending|AMPending|AAPending|(?:[A-Za-z]{2,4})?\s*(?:\d{2,4}[\/\.-]\d{2}[\/\.-]\d{2,4}|Pending))\s*/i;
 
   let baseName = '';
   if (existingContactName && existingContactName.trim()) {
