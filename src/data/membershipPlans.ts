@@ -106,7 +106,7 @@ export const BASIC_PLANS: MembershipPlan[] = [
     price: 150,
     perMonth: 150,
     planRole: 'basic' as Role,
-    headerBadge: '📺 Rs 150/mo',
+    headerBadge: '',
     saveBadge: '',
     popular: true,
     icon: Zap,
