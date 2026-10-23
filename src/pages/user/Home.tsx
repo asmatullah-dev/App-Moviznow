@@ -27,7 +27,6 @@ import {
 
 import { GuestAccessBanner } from "../../components/GuestAccessBanner";
 import { Content, Collection as AppCollection } from "../../types";
-import { isUserExpired } from "../../contexts/UsersContext";
 import { safeStorage } from "../../utils/safeStorage";
 import { smartSearch } from "../../utils/searchUtils";
 import { memoryStore } from "../../utils/memoryStore";
@@ -51,6 +50,7 @@ import ContentCard from "../../components/ContentCard";
 import ConfirmModal from "../../components/ConfirmModal";
 import VersionInfoModal from "../../components/VersionInfoModal";
 
+import { UserWelcomeBanner } from "../../components/home/UserWelcomeBanner";
 import { HomeFilters } from "../../components/home/HomeFilters";
 import { RecentlyViewedSection } from "../../components/home/RecentlyViewedSection";
 import { CollectionRow } from "../../components/home/CollectionRow";
@@ -68,6 +68,7 @@ export default function Home({
 }) {
   const { vibrate } = useHaptics();
   const {
+    user,
     profile,
     logout,
     toggleFavorite,
@@ -974,10 +975,13 @@ export default function Home({
 
       {/* Main Content */}
       <PageTransition className="flex-1 w-full">
-        <main className="relative max-w-7xl mx-auto w-full px-4 pt-4 pb-12 overflow-hidden">
+        <main className="relative max-w-7xl mx-auto w-full px-4 pt-2 sm:pt-3 pb-12 overflow-hidden">
           {/* Ambient Light Effects */}
           <div className="absolute top-0 left-1/4 w-96 h-96 bg-emerald-500/10 blur-[130px] rounded-full pointer-events-none -z-10" />
           <div className="absolute top-1/3 right-1/4 w-96 h-96 bg-purple-500/10 blur-[130px] rounded-full pointer-events-none -z-10" />
+
+          {/* User Welcome & Membership Info */}
+          <UserWelcomeBanner />
 
           {/* Top Search and Filters Dropdown */}
           <AnimatePresence>
