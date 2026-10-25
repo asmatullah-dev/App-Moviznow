@@ -50,6 +50,10 @@ service cloud.firestore {
     }
 
     // Settings (Whitelisted Phones, App Settings)
+    match /settings/whitelisted_phones {
+      allow read: if true;
+      allow write: if isAdmin() || isSignedIn();
+    }
     match /settings/{settingId} {
       allow read: if true;
       allow write: if isAdmin();

@@ -91,11 +91,24 @@ export default function UserManagement() {
   const [filterWhitelist, setFilterWhitelist] = useState<'all' | 'whitelisted' | 'not_whitelisted'>('all');
   const [whitelistedPhones, setWhitelistedPhones] = useState<string[]>(() => {
     try {
-      const stored = safeStorage.getItem('cached_whitelisted_phones');
+      const stored = safeStorage.getItem('cached_whitelisted_phones_doc') || safeStorage.getItem('cached_whitelisted_phones');
       if (stored) return JSON.parse(stored);
     } catch (e) {}
     return [];
   });
+
+  useEffect(() => {
+    let isMounted = true;
+    import('firebase/firestore').then(({ doc, getDoc }) => {
+      getDoc(doc(db, 'settings', 'whitelisted_phones')).then((snap) => {
+        if (!isMounted || !snap.exists()) return;
+        const data = snap.data();
+        const list: string[] = Array.isArray(data.numbers) ? data.numbers : (Array.isArray(data.phones) ? data.phones : []);
+        setWhitelistedPhones(list);
+      }).catch(() => {});
+    });
+    return () => { isMounted = false; };
+  }, []);
   const [hideAnonymousAndInvalid, setHideAnonymousAndInvalid] = useState(() => {
     const cached = sessionStorage.getItem('user_mgmt_hide_anonymous_invalid');
     return cached === null ? true : cached === 'true';
@@ -281,7 +294,7 @@ export default function UserManagement() {
     return false;
   }, []);
 
-  const handleToggleWhitelist = useCallback(async (phone: string, e?: React.MouseEvent) => {
+  const handleToggleWhitelist = useCallback(async (phone: string, e?: React.MouseEvent, userUid?: string) => {
     if (e) e.stopPropagation();
     const std = standardizePhone(phone);
     if (!std) return;
@@ -290,9 +303,11 @@ export default function UserManagement() {
     try {
       if (isCurrentlyWhitelisted) {
         await unwhitelistPhoneNumber(std);
+        setWhitelistedPhones(prev => prev.filter(p => standardizePhone(p) !== std && p !== std));
         setAlertConfig({ isOpen: true, title: 'Whitelist Updated', message: `${std} has been removed from authorized whitelist.` });
       } else {
-        await whitelistPhoneNumber(std);
+        await whitelistPhoneNumber(std, userUid);
+        setWhitelistedPhones(prev => prev.includes(std) ? prev : [...prev, std]);
         setAlertConfig({ isOpen: true, title: 'Whitelist Updated', message: `${std} is now authorized and whitelisted!` });
       }
     } catch (err: any) {
@@ -2423,7 +2438,7 @@ export default function UserManagement() {
                                 return (
                                   <button
                                     type="button"
-                                    onClick={(e) => handleToggleWhitelist(user.phone!, e)}
+                                    onClick={(e) => handleToggleWhitelist(user.phone!, e, user.uid)}
                                     disabled={processing[`whitelist_${standardizePhone(user.phone)}`]}
                                     className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 transition-colors cursor-pointer"
                                     title="Whitelisted WhatsApp Number. Click to revoke."
@@ -2437,7 +2452,7 @@ export default function UserManagement() {
                                 return (
                                   <button
                                     type="button"
-                                    onClick={(e) => handleToggleWhitelist(user.phone!, e)}
+                                    onClick={(e) => handleToggleWhitelist(user.phone!, e, user.uid)}
                                     disabled={processing[`whitelist_${standardizePhone(user.phone)}`]}
                                     className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 transition-colors cursor-pointer"
                                     title="Whitelisted WhatsApp Number. Click to revoke."
@@ -2450,7 +2465,7 @@ export default function UserManagement() {
                               return (
                                 <button
                                   type="button"
-                                  onClick={(e) => handleToggleWhitelist(user.phone!, e)}
+                                  onClick={(e) => handleToggleWhitelist(user.phone!, e, user.uid)}
                                   disabled={processing[`whitelist_${standardizePhone(user.phone)}`]}
                                   className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/10 hover:bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/20 transition-colors cursor-pointer"
                                   title="Phone-only user is blocked without whitelist. Click to authorize."
@@ -2799,7 +2814,7 @@ export default function UserManagement() {
                         return (
                           <button
                             type="button"
-                            onClick={() => handleToggleWhitelist(editForm.phone!)}
+                            onClick={() => handleToggleWhitelist(editForm.phone!, undefined, editForm.uid)}
                             disabled={processing[`whitelist_${standardizePhone(editForm.phone)}`]}
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold border transition-all cursor-pointer ${
                               isWhitelisted
@@ -2988,7 +3003,7 @@ export default function UserManagement() {
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <button
                                 type="button"
-                                onClick={(e) => handleToggleWhitelist(selectedUser.phone!, e)}
+                                onClick={(e) => handleToggleWhitelist(selectedUser.phone!, e, selectedUser.uid)}
                                 disabled={processing[`whitelist_${standardizePhone(selectedUser.phone)}`]}
                                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-semibold border transition-all cursor-pointer ${
                                   isWhitelisted

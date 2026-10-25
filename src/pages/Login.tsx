@@ -10,7 +10,7 @@ import { UserProfile } from '../types';
 import { getUserDisplayName } from '../utils/userUtils';
 import { safeStorage } from '../utils/safeStorage';
 
-type LoginStep = 'social' | 'identifier' | 'password' | 'reset-password' | 'create_password';
+type LoginStep = 'social' | 'identifier' | 'password' | 'reset-password' | 'create_password' | 'verify_otp';
 
 export default function Login() {
   const { 
@@ -22,6 +22,8 @@ export default function Login() {
     findUsersByEmailOrPhone,
     updateUserProfileData,
     isPhoneWhitelisted,
+    getWhitelistedPhoneRecord,
+    linkPhoneToUid,
     clearError,
     authLoading, 
     error 
@@ -33,16 +35,31 @@ export default function Login() {
   const [step, setStep] = useState<LoginStep>('social');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [customError, setCustomError] = useState<React.ReactNode | null>(null);
   const [emailWarningShown, setEmailWarningShown] = useState(false);
   
   const [identifier, setIdentifier] = useState(''); // Email or Phone
   const [password, setPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [optionalEmail, setOptionalEmail] = useState('');
   const [registeredUser, setRegisteredUser] = useState<UserProfile | null>(null);
+  const [otp, setOtp] = useState('');
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [verifyToken, setVerifyToken] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [wrongPasswordCount, setWrongPasswordCount] = useState(0);
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
 
   useEffect(() => {
     if (location.state?.suspended) {
@@ -188,6 +205,65 @@ export default function Login() {
     }
   };
 
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    clearError();
+    setCustomError(null);
+    if (!otp.trim() || otp.trim().length < 6) {
+      setCustomError("Please enter the complete 6-digit verification code.");
+      return;
+    }
+    setOtpVerifying(true);
+    try {
+      const res = await fetch("/api/email/verify-login-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid: registeredUser?.uid,
+          otp: otp.trim(),
+          phone: identifier,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Verification failed");
+
+      setVerifyToken(data.verifyToken);
+      setPassword('');
+      setConfirmPassword('');
+      setStep('create_password');
+    } catch (err: any) {
+      setCustomError(err.message || "Invalid or expired verification code.");
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0 || !registeredUser?.email || !registeredUser?.uid) return;
+    clearError();
+    setCustomError(null);
+    setOtpSending(true);
+    try {
+      const res = await fetch("/api/email/send-login-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: identifier,
+          email: registeredUser.email,
+          uid: registeredUser.uid,
+          displayName: registeredUser.displayName,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to resend code");
+      setResendCooldown(30);
+    } catch (err: any) {
+      setCustomError(err.message || "Failed to resend verification code.");
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
   const handleIdentifierNext = async (e: React.FormEvent) => {
     e.preventDefault();
     clearError();
@@ -197,20 +273,34 @@ export default function Login() {
     try {
       const rawTrimmed = identifier.trim();
       const isEmail = rawTrimmed.includes('@');
-      const formatted = formatIdentifier(rawTrimmed);
-      
-      // If it is a phone number or a @moviznow.com email, ALWAYS enforce whitelist check first
       const isMoviznowEmail = rawTrimmed.toLowerCase().endsWith('@moviznow.com');
-      const phoneFromIdentifier = isMoviznowEmail ? rawTrimmed.split('@')[0] : (!isEmail ? rawTrimmed : '');
+      const isPhone = !isEmail || isMoviznowEmail;
+      const formatted = formatIdentifier(rawTrimmed);
 
-      if (phoneFromIdentifier) {
-        const standardizedPhone = standardizePhone(phoneFromIdentifier);
-        const isWhitelisted = await isPhoneWhitelisted(standardizedPhone, true);
-        
+      // 1. WhatsApp / Phone Number Flow
+      if (isPhone) {
+        const phonePart = isMoviznowEmail ? rawTrimmed.split('@')[0] : rawTrimmed;
+        const standardizedPhone = standardizePhone(phonePart) || phonePart;
+
+        // Perform server-side account lookup
+        let lookupData: any = null;
+        try {
+          const res = await fetch("/api/email/phone-account-lookup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone: standardizedPhone }),
+          });
+          lookupData = await res.json();
+        } catch (e) {
+          console.warn("Backend phone lookup error:", e);
+        }
+
+        const isWhitelisted = lookupData ? Boolean(lookupData.isWhitelisted) : (await isPhoneWhitelisted(standardizedPhone, true));
+
         if (!isWhitelisted) {
           setCustomError(
             <div className="flex flex-col gap-3">
-              <p>This number is not authorized.</p>
+              <p>This WhatsApp number is not authorized.</p>
               <div className="flex flex-col gap-2 mt-2">
                 <button 
                   type="button"
@@ -242,82 +332,84 @@ export default function Login() {
           setIsLoggingIn(false);
           return;
         }
+
+        // WhatsApp number is whitelisted!
+        setIdentifier(standardizedPhone);
+
+        // Check if an existing account was resolved
+        const targetUserDoc = lookupData?.accountFound && lookupData?.user ? lookupData.user : null;
+
+        if (targetUserDoc) {
+          setRegisteredUser(targetUserDoc);
+          setDisplayName(targetUserDoc.displayName || '');
+          setOptionalEmail(targetUserDoc.email || '');
+
+          if (targetUserDoc.hasPassword) {
+            // "If the Google user has already created password by settings or by login page then don't need to confirm with otp because then it will confirm by password"
+            setStep('password');
+            setIsLoggingIn(false);
+            return;
+          } else {
+            // "it will only confirm via otp when situation need to create password and because it is first time login with phone number so it also need to verify that is it original user for that send an otp to their registered email address and confirm via otp"
+            if (targetUserDoc.email && !targetUserDoc.email.endsWith('@moviznow.com')) {
+              try {
+                setOtpSending(true);
+                await fetch("/api/email/send-login-otp", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    phone: standardizedPhone,
+                    email: targetUserDoc.email,
+                    uid: targetUserDoc.uid,
+                    displayName: targetUserDoc.displayName,
+                  }),
+                });
+                setResendCooldown(30);
+              } catch (otpErr) {
+                console.warn("Failed to send initial OTP:", otpErr);
+              } finally {
+                setOtpSending(false);
+              }
+              setOtp('');
+              setStep('verify_otp');
+              setIsLoggingIn(false);
+              return;
+            } else {
+              setPassword('');
+              setConfirmPassword('');
+              setStep('create_password');
+              setIsLoggingIn(false);
+              return;
+            }
+          }
+        }
+
+        // Truly first time user (no existing Google or linked account)
+        setRegisteredUser(null);
+        setDisplayName('');
+        setOptionalEmail('');
+        setPassword('');
+        setConfirmPassword('');
+        setStep('create_password');
+        setIsLoggingIn(false);
+        return;
       }
 
-      // Try finding user with both raw and formatted identifier
+      // 2. Regular Email Flow
       const [foundUsersRaw, foundUsersFormatted] = await Promise.all([
         findUsersByEmailOrPhone(rawTrimmed),
         rawTrimmed !== formatted ? findUsersByEmailOrPhone(formatted) : Promise.resolve([])
       ]);
       
       const allFound = [...foundUsersRaw, ...foundUsersFormatted];
-      // Deduplicate by UID
       const uniqueFound = allFound.filter((v, i, a) => a.findIndex(t => t.uid === v.uid) === i);
-      
       let foundUser = uniqueFound.length > 0 ? uniqueFound[0] : null;
-      
-      // If we found a user with formatted input, update identifier to formatted for consistency
-      if (foundUser) {
-        if (/^[\d+]+$/.test(rawTrimmed)) {
-          setIdentifier(formatted);
-        }
-        
-        // Double check: if found user is associated with a phone number, ensure it is whitelisted (ONLY for non-Google accounts)
-        const isGoogleFoundUser = Boolean(
-          foundUser.provider === 'google.com' ||
-          foundUser.isGoogleUser === true ||
-          foundUser.providerId === 'google.com' ||
-          (Array.isArray(foundUser.providerData) && foundUser.providerData.some((p: any) => p?.providerId === 'google.com'))
-        );
-        if (!isGoogleFoundUser && (foundUser.phone || foundUser.email?.toLowerCase().endsWith('@moviznow.com'))) {
-          const userPhone = foundUser.phone || foundUser.email?.split('@')[0] || '';
-          if (userPhone) {
-            const isWhitelisted = await isPhoneWhitelisted(userPhone, true);
-            if (!isWhitelisted) {
-              setCustomError(
-                <div className="flex flex-col gap-3">
-                  <p>This number is not authorized.</p>
-                  <div className="flex flex-col gap-2 mt-2">
-                    <button 
-                      type="button"
-                      onClick={handleGoogleLogin}
-                      className="w-full bg-emerald-500 text-white py-2.5 rounded-xl font-medium hover:bg-emerald-600 transition-colors flex items-center justify-center gap-2 shadow-sm"
-                    >
-                      Use Google <span className="text-[10px] uppercase tracking-wider opacity-90 bg-white/20 px-1.5 py-0.5 rounded-md">(Recommended)</span>
-                    </button>
-                    {settings?.isAdminContactEnabled !== false && (
-                      <button 
-                        type="button"
-                        onClick={() => {
-                          let supportPhone = settings?.supportNumber || '3416286423';
-                          if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
-                          if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
-                          const adminPhone = `92${supportPhone}`;
-                          const contactName = getUserDisplayName(foundUser || { phone: userPhone });
-                          const message = `${t("Assalam O Alaikum! Admin")},\n\n${t("Name")}: ${contactName}\n${t("Email")}: ${foundUser?.email || 'N/A'}\n${t("Phone")}: ${foundUser?.phone || userPhone}\n${t("Role & Status")}: ${t("Unknown")}, ${t("Unknown")}\n\n${t("Your message/question:")}\n${t("I need help logging in.")}`;
-                          window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
-                        }}
-                        className="w-full bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white border border-zinc-200 dark:border-zinc-700 py-2.5 rounded-xl font-medium hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
-                      >
-                        Contact Admin
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-              setIsLoggingIn(false);
-              return;
-            }
-          }
-        }
-      }
 
       if (foundUser) {
         setRegisteredUser(foundUser);
         if (foundUser.hasPassword) {
           setStep('password');
         } else {
-          // Pre-fill details for create_password step
           const resolvedName = getUserDisplayName(foundUser);
           const isGenericName = resolvedName.startsWith('User (') || resolvedName === 'User';
           setDisplayName(isGenericName ? '' : resolvedName);
@@ -325,12 +417,6 @@ export default function Login() {
           setStep('create_password');
         }
       } else {
-        if (!isEmail) {
-          const standardizedPhone = standardizePhone(rawTrimmed);
-          setIdentifier(standardizedPhone);
-        }
-        
-        // Allow to create account
         setRegisteredUser(null);
         setDisplayName('');
         setOptionalEmail('');
@@ -346,19 +432,21 @@ export default function Login() {
 
   const handlePasswordLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!registeredUser) return;
     clearError();
     setCustomError(null);
     setIsLoggingIn(true);
     try {
       const isGoogleUser = Boolean(
-        registeredUser.provider === 'google.com' ||
-        (registeredUser as any).isGoogleUser === true ||
-        (registeredUser as any).providerId === 'google.com' ||
-        (Array.isArray((registeredUser as any).providerData) && (registeredUser as any).providerData.some((p: any) => p?.providerId === 'google.com'))
+        registeredUser && (
+          registeredUser.provider === 'google.com' ||
+          (registeredUser as any).isGoogleUser === true ||
+          (registeredUser as any).providerId === 'google.com' ||
+          (Array.isArray((registeredUser as any).providerData) && (registeredUser as any).providerData.some((p: any) => p?.providerId === 'google.com'))
+        )
       );
+
       if (!isGoogleUser) {
-        const phoneToCheck = registeredUser.phone || (registeredUser.email?.toLowerCase().endsWith('@moviznow.com') ? registeredUser.email.split('@')[0] : '');
+        const phoneToCheck = registeredUser?.phone || (identifier.includes('@') ? (identifier.toLowerCase().endsWith('@moviznow.com') ? identifier.split('@')[0] : '') : identifier);
         if (phoneToCheck) {
           const isWhitelisted = await isPhoneWhitelisted(phoneToCheck, true);
           if (!isWhitelisted) {
@@ -369,10 +457,34 @@ export default function Login() {
         }
       }
 
-      // If they logged in with phone, we use the dummy email or their real email if linked
-      const loginEmail = registeredUser.email || `${identifier.replace('+', '')}@moviznow.com`;
-      await signInWithEmail(loginEmail, password);
-      setWrongPasswordCount(0);
+      // Use the WhatsApp number / email to authenticate
+      const loginCandidates: string[] = [];
+      if (registeredUser?.email && !registeredUser.email.endsWith('@moviznow.com')) {
+        loginCandidates.push(registeredUser.email);
+      }
+      if (identifier && !loginCandidates.includes(identifier)) {
+        loginCandidates.push(identifier);
+      }
+
+      let loggedIn = false;
+      let lastErr: any = null;
+      for (const cand of loginCandidates) {
+        try {
+          await signInWithEmail(cand, password);
+          loggedIn = true;
+          setWrongPasswordCount(0);
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          if (err?.code === 'auth/wrong-password') {
+            break;
+          }
+        }
+      }
+
+      if (!loggedIn && lastErr) {
+        throw lastErr;
+      }
     } catch (err: any) {
       setIsLoggingIn(false);
       setWrongPasswordCount(prev => prev + 1);
@@ -417,6 +529,27 @@ export default function Login() {
       setIsLoggingIn(false);
     }
   };
+
+  const isExistingAccount = Boolean(
+    registeredUser && !registeredUser.uid.startsWith('pending_')
+  );
+
+  const existingDisplayName = (registeredUser?.displayName || displayName || '').trim();
+  const hasExistingName = isExistingAccount ? true : Boolean(
+    existingDisplayName &&
+    existingDisplayName !== 'Movie Fan' &&
+    existingDisplayName !== 'No Name' &&
+    existingDisplayName !== 'null' &&
+    existingDisplayName !== 'undefined' &&
+    !existingDisplayName.startsWith('User (')
+  );
+
+  const existingEmail = (registeredUser?.email || optionalEmail || '').trim();
+  const hasExistingEmail = isExistingAccount ? true : Boolean(
+    existingEmail &&
+    !existingEmail.endsWith('@moviznow.com') &&
+    existingEmail.includes('@')
+  );
 
   if (authLoading) return null;
 
@@ -707,6 +840,100 @@ export default function Login() {
             </motion.form>
           )}
 
+          {step === 'verify_otp' && (
+            <motion.form
+              key="verify-otp-step"
+              initial={{ opacity: 0, x: 20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -20 }}
+              transition={{ duration: 0.25, ease: 'easeInOut' }}
+              onSubmit={handleVerifyOtp}
+              className="space-y-4"
+            >
+              <button 
+                type="button"
+                onClick={() => { setStep('identifier'); setOtp(''); setCustomError(null); }} 
+                className="flex items-center gap-2 text-xs font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors mb-2 group"
+              >
+                <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Back
+              </button>
+
+              <div className="text-center mb-3">
+                <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-500 mx-auto flex items-center justify-center mb-3">
+                  <ShieldCheck className="w-6 h-6 text-emerald-500" />
+                </div>
+                <h2 className="text-lg font-bold">Verify Your Identity</h2>
+                <p className="text-xs text-zinc-500 mt-1 max-w-xs mx-auto">
+                  To set up a password for WhatsApp login, please enter the 6-digit verification code sent to your registered email:
+                </p>
+                {registeredUser?.email && (
+                  <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-1">
+                    {registeredUser.email}
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5 text-center">
+                  6-Digit Verification Code
+                </label>
+                <div className="relative group">
+                  <input
+                    type="text"
+                    required
+                    maxLength={6}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="one-time-code"
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="w-full bg-white dark:bg-zinc-950/80 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3.5 text-center text-2xl font-mono tracking-[0.5em] text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-bold"
+                    placeholder="••••••"
+                    autoFocus
+                  />
+                </div>
+                <p className="text-[11px] text-zinc-400 mt-1.5 text-center">
+                  The code expires in 10 minutes. Check your spam/junk folder if needed.
+                </p>
+              </div>
+
+              <motion.button
+                whileHover={{ scale: 1.015 }}
+                whileTap={{ scale: 0.985 }}
+                type="submit"
+                disabled={otpVerifying || otp.trim().length < 6}
+                className="w-full bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 font-semibold py-3.5 px-4 rounded-xl hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all duration-200 disabled:opacity-60 shadow-md shadow-zinc-950/10 dark:shadow-none flex items-center justify-center gap-2"
+              >
+                {otpVerifying ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
+                    <span>Verifying Code...</span>
+                  </>
+                ) : (
+                  'Verify Code'
+                )}
+              </motion.button>
+
+              <div className="text-center pt-2">
+                {resendCooldown > 0 ? (
+                  <p className="text-xs text-zinc-400 font-medium">
+                    Resend code in <span className="text-emerald-500 font-mono font-bold">{resendCooldown}s</span>
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleResendOtp}
+                    disabled={otpSending}
+                    className="text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 font-semibold transition-colors disabled:opacity-50 inline-flex items-center gap-1.5"
+                  >
+                    {otpSending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    Didn't receive code? Resend Code
+                  </button>
+                )}
+              </div>
+            </motion.form>
+          )}
+
           {step === 'create_password' && (
             <motion.form 
               key="create-password-step"
@@ -720,34 +947,193 @@ export default function Login() {
                 setCustomError(null);
                 setIsLoggingIn(true);
                 
-                const hasValidRegisteredName = (() => {
-                  const name = registeredUser?.displayName?.trim() || '';
-                  const lower = name.toLowerCase();
-                  return name.length >= 2 && !['no name', 'null', 'undefined', 'anonymous', 'unknown', 'none', 'n/a'].includes(lower) && !lower.startsWith('user (');
-                })();
+                const isExistingAccount = Boolean(
+                  registeredUser && !registeredUser.uid.startsWith('pending_')
+                );
 
-                if (!hasValidRegisteredName && (!displayName.trim() || displayName.trim().length < 2)) {
-                  setCustomError("Please enter your Full Name (minimum 2 characters).");
+                const existingDisplayName = (registeredUser?.displayName || displayName || '').trim();
+                const hasExistingName = isExistingAccount ? true : Boolean(
+                  existingDisplayName &&
+                  existingDisplayName !== 'Movie Fan' &&
+                  existingDisplayName !== 'No Name' &&
+                  existingDisplayName !== 'null' &&
+                  existingDisplayName !== 'undefined' &&
+                  !existingDisplayName.startsWith('User (')
+                );
+
+                const existingEmail = (registeredUser?.email || optionalEmail || '').trim();
+                const hasExistingEmail = isExistingAccount ? true : Boolean(
+                  existingEmail &&
+                  !existingEmail.endsWith('@moviznow.com') &&
+                  existingEmail.includes('@')
+                );
+
+                if (password.length < 6) {
+                  setCustomError("Password must be at least 6 characters.");
                   setIsLoggingIn(false);
                   return;
                 }
 
-                if (!optionalEmail.trim() && !emailWarningShown && (!registeredUser?.email || registeredUser.email.endsWith('@moviznow.com'))) {
-                  setEmailWarningShown(true);
+                if (!confirmPassword) {
+                  setCustomError("Please enter confirm password.");
                   setIsLoggingIn(false);
                   return;
+                }
+
+                if (confirmPassword !== password) {
+                  setCustomError("Passwords do not match.");
+                  setIsLoggingIn(false);
+                  return;
+                }
+
+                // If name does not already exist on account, validate Full Name
+                if (!hasExistingName) {
+                  const hasValidName = displayName.trim().length >= 2;
+                  if (!hasValidName) {
+                    setCustomError("Please enter your Full Name (minimum 2 characters).");
+                    setIsLoggingIn(false);
+                    return;
+                  }
+                }
+
+                // If email does not already exist on account, validate optional email
+                if (!hasExistingEmail) {
+                  if (!optionalEmail.trim() && !emailWarningShown) {
+                    setEmailWarningShown(true);
+                    setIsLoggingIn(false);
+                    return;
+                  }
                 }
 
                 try {
-                  if (!registeredUser || registeredUser.uid.startsWith('pending_')) {
-                    // Pre-validate phone whitelist before proceeding with signup
-                    const cleanId = identifier.trim();
-                    const phonePart = cleanId.toLowerCase().endsWith('@moviznow.com')
-                      ? cleanId.split('@')[0]
-                      : (!cleanId.includes('@') ? cleanId : '');
-                    if (phonePart) {
-                      const std = standardizePhone(phonePart);
-                      const isWhitelisted = await isPhoneWhitelisted(std, true);
+                  const cleanId = identifier.trim();
+                  const phonePart = cleanId.toLowerCase().endsWith('@moviznow.com')
+                    ? cleanId.split('@')[0]
+                    : (!cleanId.includes('@') ? cleanId : '');
+                  const stdPhone = phonePart ? (standardizePhone(phonePart) || phonePart) : '';
+
+                  if (isExistingAccount && registeredUser) {
+                    // 1. If verified via OTP token, complete password setup securely on the server
+                    if (verifyToken && registeredUser.uid) {
+                      const completeRes = await fetch("/api/email/complete-phone-password-setup", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          uid: registeredUser.uid,
+                          phone: stdPhone || identifier,
+                          password,
+                          verifyToken,
+                        }),
+                      });
+                      const completeData = await completeRes.json();
+                      if (!completeRes.ok) {
+                        throw new Error(completeData.error || "Failed to complete password setup.");
+                      }
+
+                      if (completeData.customToken) {
+                        const { getAuth, signInWithCustomToken } = await import('firebase/auth');
+                        await signInWithCustomToken(getAuth(), completeData.customToken);
+                        setIsLoggingIn(false);
+                        return;
+                      }
+                    }
+
+                    // Existing account (e.g. from Google login) setting password for WhatsApp login
+                    const stdDigits = (stdPhone || identifier).replace(/\D/g, '');
+                    const phoneAuthEmail = `${stdDigits}@moviznow.com`;
+                    const googleEmail = (registeredUser.email && !registeredUser.email.endsWith('@moviznow.com')) ? registeredUser.email : null;
+                    
+                    let authUser: any = null;
+                    const { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } = await import('firebase/auth');
+                    const authInst = getAuth();
+
+                    // 1. Try creating phone credential (e.g. 923001234567@moviznow.com)
+                    try {
+                      const cred = await createUserWithEmailAndPassword(authInst, phoneAuthEmail, password);
+                      authUser = cred.user;
+                    } catch (err1: any) {
+                      if (err1.code === 'auth/email-already-in-use') {
+                        try {
+                          const cred = await signInWithEmailAndPassword(authInst, phoneAuthEmail, password);
+                          authUser = cred.user;
+                        } catch (signInErr: any) {}
+                      }
+                    }
+
+                    // 2. If phoneAuthEmail was not used, try googleEmail if available
+                    if (!authUser && googleEmail) {
+                      try {
+                        const cred = await createUserWithEmailAndPassword(authInst, googleEmail, password);
+                        authUser = cred.user;
+                      } catch (err2: any) {
+                        if (err2.code === 'auth/email-already-in-use') {
+                          try {
+                            const cred = await signInWithEmailAndPassword(authInst, googleEmail, password);
+                            authUser = cred.user;
+                          } catch (signInErr: any) {}
+                        }
+                      }
+                    }
+
+                    if (authUser) {
+                      const { doc, writeBatch } = await import('firebase/firestore');
+                      const { db } = await import('../firebase');
+                      const batch = writeBatch(db);
+
+                      // 1. Update the original user doc (the Google user)
+                      batch.set(doc(db, "users", registeredUser.uid), {
+                        hasPassword: true,
+                        phone: stdPhone || registeredUser.phone,
+                        linkedPhoneUid: authUser.uid,
+                        updatedAt: new Date().toISOString(),
+                      }, { merge: true });
+
+                      // 2. If authUser is a separate UID from registeredUser, mirror full profile so they access the SAME account
+                      if (authUser.uid !== registeredUser.uid) {
+                        batch.set(doc(db, "users", authUser.uid), {
+                          ...registeredUser,
+                          uid: authUser.uid,
+                          primaryUid: registeredUser.uid,
+                          hasPassword: true,
+                          phone: stdPhone || registeredUser.phone,
+                          email: googleEmail || phoneAuthEmail,
+                          updatedAt: new Date().toISOString(),
+                        }, { merge: true });
+                      }
+
+                      await batch.commit();
+
+                      // 3. Update whitelisted_phones single doc
+                      await linkPhoneToUid(stdPhone || identifier, registeredUser.uid, {
+                        email: googleEmail || phoneAuthEmail,
+                        displayName: registeredUser.displayName,
+                        hasPassword: true,
+                      });
+
+                      // Auth state change will redirect to home automatically
+                      setIsLoggingIn(false);
+                      return;
+                    } else {
+                      // If automated creation requires Google verification
+                      setCustomError(
+                        <div className="flex flex-col gap-2">
+                          <p>To verify ownership of your Google account ({googleEmail || 'Google'}), click below to confirm:</p>
+                          <button
+                            type="button"
+                            onClick={handleGoogleLogin}
+                            className="w-full bg-emerald-500 text-white py-2.5 rounded-xl font-medium hover:bg-emerald-600 transition-colors mt-1"
+                          >
+                            Verify with Google
+                          </button>
+                        </div>
+                      );
+                      setIsLoggingIn(false);
+                      return;
+                    }
+                  } else {
+                    // Truly new user signup
+                    if (stdPhone) {
+                      const isWhitelisted = await isPhoneWhitelisted(stdPhone, true);
                       if (!isWhitelisted) {
                         setCustomError("This WhatsApp number is not authorized for account creation. Please contact admin.");
                         setIsLoggingIn(false);
@@ -755,15 +1141,31 @@ export default function Login() {
                       }
                     }
 
-                    // New user or pending user
                     const dummyEmail = `${identifier.replace(/[^0-9]/g, '')}@moviznow.com`;
-                    await signUpWithPhoneAndPassword(identifier, password, displayName, optionalEmail.trim().toLowerCase() || dummyEmail);
-                  } else {
-                    // Active user without password (likely Google login)
-                    setCustomError("This account was created with Google. Please log in with Google below.");
-                    setIsLoggingIn(false);
+                    try {
+                      await signUpWithPhoneAndPassword(identifier, password, displayName, optionalEmail.trim().toLowerCase() || dummyEmail);
+                    } catch (signErr: any) {
+                      if (signErr?.code === 'auth/email-already-in-use' || signErr?.message?.includes('already registered')) {
+                        // User already registered! Switch smoothly to password login
+                        setCustomError("This WhatsApp number already has an account. Please enter your password to log in.");
+                        setRegisteredUser({
+                          uid: '',
+                          phone: stdPhone || identifier,
+                          email: optionalEmail.trim().toLowerCase() || dummyEmail,
+                          hasPassword: true,
+                          displayName: displayName || `User (${identifier})`,
+                          role: 'user',
+                          status: 'active',
+                        } as any);
+                        setStep('password');
+                        setIsLoggingIn(false);
+                        return;
+                      }
+                      throw signErr;
+                    }
                   }
-                } catch (err) {
+                } catch (err: any) {
+                  setCustomError(err?.message || "Failed to create account.");
                   setIsLoggingIn(false);
                 }
               }} 
@@ -779,120 +1181,136 @@ export default function Login() {
 
               <div className="text-center mb-2">
                 <h2 className="text-lg font-bold">
-                  {registeredUser && !registeredUser.uid.startsWith('pending_') ? "Can't Login with Number" : "Create Password"}
+                  {registeredUser && !registeredUser.uid.startsWith('pending_') ? "Set Password" : "Create Password"}
                 </h2>
                 <p className="text-xs text-zinc-500">
-                  {registeredUser && !registeredUser.uid.startsWith('pending_') ? `Password set up is not available for ${identifier}` : `Set up a password for ${identifier}`}
+                  {registeredUser && !registeredUser.uid.startsWith('pending_')
+                    ? `Set up a password for ${identifier} to access your account`
+                    : `Set up a password for ${identifier}`}
                 </p>
               </div>
-              
-              {registeredUser && !registeredUser.uid.startsWith('pending_') ? (
-                <div className="space-y-4">
-                  <div className="p-3 bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 rounded-2xl text-blue-600 dark:text-blue-400 text-xs mb-4">
-                    This account was created with Google. You can log in with Google below.
+
+              {registeredUser && !registeredUser.uid.startsWith('pending_') && (
+                <div className="flex items-center gap-3.5 p-3.5 bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/20 rounded-2xl mb-2">
+                  <div className="w-10 h-10 rounded-full bg-emerald-500/15 flex items-center justify-center text-emerald-500 shrink-0">
+                    <UserIcon className="w-5 h-5" />
                   </div>
-                  
-                  <motion.button
-                    whileHover={{ scale: 1.015 }}
-                    whileTap={{ scale: 0.985 }}
-                    type="button"
-                    onClick={handleGoogleLogin}
-                    className="w-full bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 font-semibold py-3.5 px-4 rounded-xl hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all duration-200 flex items-center justify-center gap-3 shadow-md"
-                  >
-                    <svg className="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24">
-                      <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-                    </svg>
-                    <span>Login with Google</span>
-                  </motion.button>
-                </div>
-              ) : (
-                <>
-                  {(() => {
-                    const name = registeredUser?.displayName?.trim() || '';
-                    const lower = name.toLowerCase();
-                    const hasValid = name.length >= 2 && !['no name', 'null', 'undefined', 'anonymous', 'unknown', 'none', 'n/a'].includes(lower) && !lower.startsWith('user (');
-                    return !hasValid ? (
-                      <div>
-                        <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">Full Name</label>
-                        <div className="relative group">
-                          <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
-                          <input
-                            type="text"
-                            required
-                            value={displayName}
-                            onChange={(e) => setDisplayName(e.target.value)}
-                            className="w-full bg-white dark:bg-zinc-950/80 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-11 pr-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                            placeholder="John Doe"
-                          />
-                        </div>
-                      </div>
-                    ) : null;
-                  })()}
-
-                  {(!registeredUser?.email || registeredUser.email.endsWith('@moviznow.com')) && (
-                    <div>
-                      <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">Email (Optional)</label>
-                      <div className="relative group">
-                        <Mail className={`absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 ${emailWarningShown ? 'text-amber-500' : 'text-zinc-400 group-focus-within:text-emerald-500'} transition-colors`} />
-                        <input
-                          type="email"
-                          value={optionalEmail}
-                          onChange={(e) => { setOptionalEmail(e.target.value); setEmailWarningShown(false); }}
-                          className={`w-full bg-white dark:bg-zinc-950/80 border ${emailWarningShown ? 'border-amber-500 focus:ring-amber-500/20' : 'border-zinc-200 dark:border-zinc-800 focus:ring-emerald-500/20 focus:border-emerald-500'} rounded-xl pl-11 pr-4 py-3.5 text-sm focus:outline-none focus:ring-2 transition-all`}
-                          placeholder="you@example.com"
-                        />
-                      </div>
-                      {emailWarningShown && (
-                        <p className="text-xs text-amber-600 dark:text-amber-500 mt-2 font-medium">
-                          It's highly recommended to provide an email for account recovery. Press Create Password again to continue without an email.
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">Password</label>
-                    <div className="relative group">
-                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
-                      <input
-                        type={showPassword ? 'text' : 'password'}
-                        required
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="w-full bg-white dark:bg-zinc-950/80 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-11 pr-11 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-                        placeholder="••••••••"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1"
-                      >
-                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-
-                  <motion.button
-                    whileHover={{ scale: 1.015 }}
-                    whileTap={{ scale: 0.985 }}
-                    type="submit"
-                    disabled={isLoggingIn}
-                    className="w-full bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 font-semibold py-3.5 px-4 rounded-xl hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all duration-200 disabled:opacity-70 shadow-md shadow-zinc-950/10 dark:shadow-none flex items-center justify-center gap-2"
-                  >
-                    {isLoggingIn ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
-                        <span>Creating password...</span>
-                      </>
-                    ) : (
-                      'Create Password'
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">Account Found</p>
+                    <p className="text-sm font-semibold truncate text-zinc-900 dark:text-white">
+                      {getUserDisplayName(registeredUser)}
+                    </p>
+                    {registeredUser.email && !registeredUser.email.endsWith('@moviznow.com') && (
+                      <p className="text-xs text-zinc-400 truncate">{registeredUser.email}</p>
                     )}
-                  </motion.button>
-                </>
+                  </div>
+                </div>
               )}
+
+              {/* Show Full Name ONLY if name does NOT exist on the account */}
+              {!hasExistingName && (
+                <div>
+                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">Full Name</label>
+                  <div className="relative group">
+                    <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
+                    <input
+                      type="text"
+                      required
+                      value={displayName}
+                      onChange={(e) => setDisplayName(e.target.value)}
+                      className="w-full bg-white dark:bg-zinc-950/80 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-11 pr-4 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                      placeholder="John Doe"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Show Optional Email ONLY if email does NOT exist on the account */}
+              {!hasExistingEmail && (
+                <div>
+                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">Email (Optional)</label>
+                  <div className="relative group">
+                    <Mail className={`absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 ${emailWarningShown ? 'text-amber-500' : 'text-zinc-400 group-focus-within:text-emerald-500'} transition-colors`} />
+                    <input
+                      type="email"
+                      value={optionalEmail}
+                      onChange={(e) => { setOptionalEmail(e.target.value); setEmailWarningShown(false); }}
+                      className={`w-full bg-white dark:bg-zinc-950/80 border ${emailWarningShown ? 'border-amber-500 focus:ring-amber-500/20' : 'border-zinc-200 dark:border-zinc-800 focus:ring-emerald-500/20 focus:border-emerald-500'} rounded-xl pl-11 pr-4 py-3.5 text-sm focus:outline-none focus:ring-2 transition-all`}
+                      placeholder="you@example.com"
+                    />
+                  </div>
+                  {emailWarningShown && (
+                    <p className="text-xs text-amber-600 dark:text-amber-500 mt-2 font-medium">
+                      It's highly recommended to provide an email for account recovery. Press Create Password again to continue without an email.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Password field */}
+              <div>
+                <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">
+                  {registeredUser && !registeredUser.uid.startsWith('pending_') ? "Create Password" : "Password"}
+                </label>
+                <div className="relative group">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full bg-white dark:bg-zinc-950/80 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-11 pr-11 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    placeholder="At least 6 characters"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1"
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm Password field (ALWAYS rendered) */}
+              <div>
+                <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">Confirm Password</label>
+                <div className="relative group">
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className="w-full bg-white dark:bg-zinc-950/80 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-11 pr-11 py-3.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                    placeholder="Confirm your password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1"
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <motion.button
+                whileHover={{ scale: 1.015 }}
+                whileTap={{ scale: 0.985 }}
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 font-semibold py-3.5 px-4 rounded-xl hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all duration-200 disabled:opacity-70 shadow-md shadow-zinc-950/10 dark:shadow-none flex items-center justify-center gap-2"
+              >
+                {isLoggingIn ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
+                    <span>Saving password...</span>
+                  </>
+                ) : (
+                  registeredUser && !registeredUser.uid.startsWith('pending_') ? 'Set Password & Log In' : 'Create Password'
+                )}
+              </motion.button>
             </motion.form>
           )}
 

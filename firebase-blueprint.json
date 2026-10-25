@@ -248,12 +248,25 @@
           "description": "Mapping of inviter UID to their total stats."
         }
       }
+    },
+    "WhitelistedPhonesStore": {
+      "title": "WhitelistedPhonesStore",
+      "description": "Stores whitelisted phone numbers with optional UID attached (e.g. +923001234567:UID).",
+      "type": "object",
+      "properties": {
+        "numbers": { "type": "array", "items": { "type": "string" }, "description": "Standard +92 numbers with optional :<uid> when registered" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
     }
   },
   "firestore": {
     "/referral/all": {
       "schema": { "$ref": "#/entities/ReferralStore" },
       "description": "Stores all unified referral records in a single root document."
+    },
+    "/settings/whitelisted_phones": {
+      "schema": { "$ref": "#/entities/WhitelistedPhonesStore" },
+      "description": "Stores whitelisted phone numbers and tracks user UIDs mapped to each number."
     },
     "/settings/app_settings": {
       "schema": { "$ref": "#/entities/AppSettings" },

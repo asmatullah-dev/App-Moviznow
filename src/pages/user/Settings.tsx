@@ -30,13 +30,13 @@ import { clsx } from 'clsx';
 import { requestNotificationPermission } from '../../firebase';
 
 export default function Settings() {
-  const { profile, user, updateUserProfileData } = useAuth();
+  const { profile, user, updateUserProfileData, linkPhoneToUid } = useAuth();
   const { t } = useLanguage();
   const { settings } = useSettings();
   const navigate = useNavigate();
   
   const isGoogleAuth = user?.providerData.some(p => p.providerId === 'google.com');
-  const showPasswordSection = profile?.hasPassword || !isGoogleAuth;
+  const showPasswordSection = true;
   
   const [name, setName] = useState(profile?.displayName || '');
   const [email, setEmail] = useState(profile?.email?.endsWith('@moviznow.com') ? '' : (profile?.email || ''));
@@ -206,6 +206,21 @@ export default function Settings() {
 
       if ((window as any).triggerRefreshAppData) {
         await (window as any).triggerRefreshAppData('settings_changed');
+      }
+
+      if (phone.trim() && user?.uid) {
+        const std = standardizePhone(phone);
+        if (std) {
+          try {
+            await linkPhoneToUid(std, user.uid, {
+              email: user.email || email,
+              displayName: name || user.displayName || undefined,
+              hasPassword: Boolean(newPassword || profile?.hasPassword),
+            });
+          } catch (e) {
+            console.warn("Auto-whitelist on save notice:", e);
+          }
+        }
       }
 
       setSuccess(t('Profile updated successfully'));
@@ -799,10 +814,17 @@ export default function Settings() {
                   <div className="h-px bg-zinc-200/80 dark:bg-zinc-800/80 my-8"></div>
 
                   <div className="space-y-5">
-                    <h3 className="text-base font-extrabold flex items-center gap-2.5 text-zinc-900 dark:text-white">
-                      <Lock className="w-5 h-5 text-emerald-500" />
-                      {profile?.hasPassword ? t('Change Password') : t('Create Password')}
-                    </h3>
+                    <div>
+                      <h3 className="text-base font-extrabold flex items-center gap-2.5 text-zinc-900 dark:text-white">
+                        <Lock className="w-5 h-5 text-emerald-500" />
+                        {profile?.hasPassword ? t('Change Password') : t('Create Password (for WhatsApp & Email Login)')}
+                      </h3>
+                      {!profile?.hasPassword && (
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                          {t('Set a password so you can access your account using your WhatsApp number without Google.')}
+                        </p>
+                      )}
+                    </div>
                     
                     {profile?.hasPassword && (
                       <div>

@@ -3,6 +3,7 @@ import nodemailer from "nodemailer";
 import { Resend } from "resend";
 import admin from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
+import crypto from "crypto";
 import firebaseConfig from "../firebase-applet-config.json" with { type: "json" };
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -86,6 +87,17 @@ export function getDb(): admin.firestore.Firestore | null {
     return firestoreInstance;
   } catch (e) {
     console.warn("Firebase Admin not ready in email router:", e);
+    return null;
+  }
+}
+
+export function getAuthAdmin(): admin.auth.Auth | null {
+  try {
+    getDb();
+    if (!adminApp) return null;
+    return admin.auth(adminApp);
+  } catch (e) {
+    console.warn("Firebase Auth Admin not ready:", e);
     return null;
   }
 }
@@ -954,6 +966,408 @@ emailRouter.post("/test-smtp", async (req, res) => {
       errorMsg = `Connection timed out connecting to ${req.body?.host || 'SMTP server'}. Please check host and port settings (Port 587 for TLS, Port 465 for SSL).`;
     }
     return res.status(500).json({ error: errorMsg });
+  }
+});
+
+// Helper for standardizing PK phone numbers on the server
+function standardizePkPhone(phone: string): string {
+  if (!phone || typeof phone !== "string") return "";
+  let cleaned = phone.trim();
+  if (cleaned.includes(":")) cleaned = cleaned.split(":")[0].trim();
+  if (cleaned.includes("|")) cleaned = cleaned.split("|")[0].trim();
+  let digits = cleaned.replace(/\D/g, "");
+  if (!digits) return "";
+  let base = digits;
+  if (base.startsWith("92") && base.length > 10) base = base.substring(2);
+  if (base.startsWith("0") && base.length === 11) base = base.substring(1);
+  if (base.length === 10 && base.startsWith("3")) return `+92${base}`;
+  if (cleaned.startsWith("+")) return `+${digits}`;
+  if (digits.length === 12 && digits.startsWith("923")) return `+${digits}`;
+  return digits;
+}
+
+// 1. Phone Account Lookup (checks whitelisted_phones & finds existing user by UID or phone)
+emailRouter.post("/phone-account-lookup", async (req, res) => {
+  try {
+    const { phone } = req.body;
+    if (!phone) {
+      return res.status(400).json({ error: "Phone number is required." });
+    }
+
+    const stdPhone = standardizePkPhone(phone);
+    if (!stdPhone) {
+      return res.status(400).json({ error: "Invalid phone number format." });
+    }
+
+    const firestore = getDb();
+    if (!firestore) {
+      return res.status(500).json({ error: "Database not available." });
+    }
+
+    // 1. Check whitelisted_phones in settings
+    const wlRef = firestore.collection("settings").doc("whitelisted_phones");
+    const wlSnap = await wlRef.get();
+    let isWhitelisted = false;
+    let linkedUid: string | null = null;
+    const stdDigits = stdPhone.replace(/\D/g, "");
+    const last10 = stdDigits.slice(-10);
+
+    if (wlSnap.exists) {
+      const wlData = wlSnap.data() || {};
+      const rawNumbers = Array.isArray(wlData.numbers) ? wlData.numbers : (Array.isArray(wlData.phones) ? wlData.phones : []);
+      
+      for (const item of rawNumbers) {
+        if (!item) continue;
+        let p = "";
+        let u: string | null = null;
+        if (typeof item === "string") {
+          const parts = item.split(":");
+          p = standardizePkPhone(parts[0]);
+          u = parts[1] ? parts[1].trim() : null;
+        } else if (typeof item === "object") {
+          p = standardizePkPhone(item.number || item.phone || "");
+          u = item.uid || null;
+        }
+
+        const pDigits = p.replace(/\D/g, "");
+        if (p === stdPhone || (last10.length === 10 && pDigits.slice(-10) === last10)) {
+          isWhitelisted = true;
+          if (u) linkedUid = u;
+          break;
+        }
+      }
+
+      if (!linkedUid && wlData.phoneToUid) {
+        for (const [k, v] of Object.entries(wlData.phoneToUid)) {
+          const kDigits = k.replace(/\D/g, "");
+          if (k === stdPhone || (last10.length === 10 && kDigits.slice(-10) === last10)) {
+            isWhitelisted = true;
+            linkedUid = v as string;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!isWhitelisted) {
+      return res.json({ isWhitelisted: false, accountFound: false });
+    }
+
+    // 2. Check if a user document exists in users collection
+    let userDoc: admin.firestore.DocumentSnapshot | null = null;
+    if (linkedUid && !linkedUid.startsWith("pending_")) {
+      const snap = await firestore.collection("users").doc(linkedUid).get();
+      if (snap.exists) userDoc = snap;
+    }
+
+    if (!userDoc) {
+      const queries = [
+        firestore.collection("users").where("phone", "==", stdPhone).limit(1).get(),
+        firestore.collection("users").where("phone", "==", `0${last10}`).limit(1).get(),
+        firestore.collection("users").where("phone", "==", stdDigits).limit(1).get(),
+      ];
+      const results = await Promise.all(queries);
+      for (const r of results) {
+        if (!r.empty) {
+          userDoc = r.docs[0];
+          break;
+        }
+      }
+    }
+
+    if (!userDoc || !userDoc.exists) {
+      return res.json({ isWhitelisted: true, accountFound: false });
+    }
+
+    const uData = userDoc.data() || {};
+    const uid = userDoc.id;
+    let hasPassword = Boolean(uData.hasPassword);
+
+    const authAdmin = getAuthAdmin();
+    if (authAdmin && !hasPassword) {
+      try {
+        const authUser = await authAdmin.getUser(uid);
+        if (authUser) {
+          if (authUser.passwordHash || (authUser.providerData && authUser.providerData.some((p) => p.providerId === "password"))) {
+            hasPassword = true;
+          }
+        }
+      } catch (e) {}
+
+      if (!hasPassword && uData.email) {
+        try {
+          const authUser = await authAdmin.getUserByEmail(uData.email);
+          if (authUser && (authUser.passwordHash || (authUser.providerData && authUser.providerData.some((p) => p.providerId === "password")))) {
+            hasPassword = true;
+          }
+        } catch (e) {}
+      }
+    }
+
+    const email = uData.email || "";
+    const isGoogleUser = Boolean(
+      uData.isGoogleUser ||
+      uData.provider === "google.com" ||
+      (email && (email.endsWith("@gmail.com") || email.includes("@googlemail.com")))
+    );
+
+    return res.json({
+      isWhitelisted: true,
+      accountFound: true,
+      user: {
+        uid,
+        displayName: uData.displayName || "Movie Fan",
+        email,
+        hasPassword,
+        phone: stdPhone,
+        isGoogleUser,
+      },
+    });
+  } catch (error: any) {
+    console.error("Error in phone-account-lookup:", error);
+    return res.status(500).json({ error: error.message || "Failed to lookup phone account." });
+  }
+});
+
+// 2. Send Login OTP to registered Google email
+emailRouter.post("/send-login-otp", async (req, res) => {
+  try {
+    const { phone, email, uid, displayName } = req.body;
+    if (!phone || !email || !uid) {
+      return res.status(400).json({ error: "Phone, email, and UID are required." });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail.includes("@") || cleanEmail.endsWith("@moviznow.com")) {
+      return res.status(400).json({ error: "No valid registered email address found for this account." });
+    }
+
+    const stdPhone = standardizePkPhone(phone);
+    const firestore = getDb();
+    if (!firestore) {
+      return res.status(500).json({ error: "Database not available." });
+    }
+
+    const otpDocRef = firestore.collection("auth_otps").doc(uid);
+    const existingSnap = await otpDocRef.get();
+    const now = Date.now();
+    if (existingSnap.exists) {
+      const existingData = existingSnap.data() || {};
+      if (existingData.createdAt && (now - existingData.createdAt < 30 * 1000)) {
+        return res.status(429).json({ error: "Please wait 30 seconds before requesting another code." });
+      }
+    }
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    await otpDocRef.set({
+      otp: otpCode,
+      phone: stdPhone,
+      email: cleanEmail,
+      createdAt: now,
+      expiresAt: now + 10 * 60 * 1000,
+      attempts: 0,
+      verified: false,
+    });
+
+    const userName = displayName || "Movie Fan";
+    const config = await getEmailConfig();
+
+    await sendEmailMessage({
+      config,
+      to: cleanEmail,
+      subject: `🔐 MovizNow Login Verification Code: ${otpCode}`,
+      text: `Your MovizNow WhatsApp Login Verification Code is: ${otpCode}. It expires in 10 minutes.`,
+      html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #09090b; color: #f4f4f5; padding: 32px 16px; border-radius: 16px; max-width: 520px; margin: 0 auto;">
+          <div style="text-align: center; margin-bottom: 24px;">
+            <h1 style="color: #10b981; margin: 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">MovizNow</h1>
+            <p style="color: #71717a; font-size: 13px; margin-top: 4px;">Account Security Verification</p>
+          </div>
+          <div style="background-color: #18181b; border: 1px solid #27272a; border-radius: 14px; padding: 24px; text-align: center;">
+            <p style="margin: 0 0 12px 0; font-size: 14px; color: #a1a1aa;">Assalam O Alaikum, <strong style="color: #f4f4f5;">${userName}</strong>!</p>
+            <p style="margin: 0 0 20px 0; font-size: 13px; color: #71717a; line-height: 1.5;">You are verifying WhatsApp login for <strong style="color: #10b981;">${stdPhone}</strong> for your registered Google account. Enter this verification code to confirm ownership and set up your password:</p>
+            <div style="background-color: #09090b; border: 1px dashed #10b981; border-radius: 12px; padding: 16px; margin: 20px 0; display: inline-block;">
+              <span style="font-family: 'SFMono-Regular', Consolas, monospace; font-size: 32px; font-weight: 800; letter-spacing: 8px; color: #10b981; margin-left: 8px;">${otpCode}</span>
+            </div>
+            <p style="margin: 16px 0 0 0; font-size: 12px; color: #a1a1aa;">This code will expire in <strong>10 minutes</strong>. Never share this code with anyone.</p>
+          </div>
+          <p style="text-align: center; font-size: 11px; color: #52525b; margin-top: 24px;">© ${new Date().getFullYear()} MovizNow. All rights reserved.</p>
+        </div>
+      `,
+    });
+
+    return res.json({
+      success: true,
+      message: `Verification code sent to ${cleanEmail}`,
+    });
+  } catch (error: any) {
+    console.error("Error sending login OTP:", error);
+    return res.status(500).json({ error: error.message || "Failed to send verification email." });
+  }
+});
+
+// 3. Verify Login OTP
+emailRouter.post("/verify-login-otp", async (req, res) => {
+  try {
+    const { uid, otp } = req.body;
+    if (!uid || !otp) {
+      return res.status(400).json({ error: "UID and verification code are required." });
+    }
+
+    const firestore = getDb();
+    if (!firestore) {
+      return res.status(500).json({ error: "Database not available." });
+    }
+
+    const otpDocRef = firestore.collection("auth_otps").doc(uid);
+    const snap = await otpDocRef.get();
+    if (!snap.exists) {
+      return res.status(400).json({ error: "No active verification code found. Please request a new code." });
+    }
+
+    const data = snap.data() || {};
+    const now = Date.now();
+    if (data.expiresAt && now > data.expiresAt) {
+      return res.status(400).json({ error: "Verification code has expired. Please request a new one." });
+    }
+
+    const currentAttempts = (data.attempts || 0) + 1;
+    if (currentAttempts > 5) {
+      await otpDocRef.delete();
+      return res.status(429).json({ error: "Too many failed attempts. Please request a new code." });
+    }
+
+    if (data.otp !== otp.toString().trim()) {
+      await otpDocRef.update({ attempts: currentAttempts });
+      return res.status(400).json({ error: "Incorrect verification code. Please check your email and try again." });
+    }
+
+    const verifyToken = crypto.randomBytes(24).toString("hex");
+    await otpDocRef.update({
+      verified: true,
+      verifyToken,
+      verifiedAt: now,
+      expiresAt: now + 15 * 60 * 1000,
+    });
+
+    return res.json({
+      success: true,
+      verified: true,
+      verifyToken,
+    });
+  } catch (error: any) {
+    console.error("Error verifying login OTP:", error);
+    return res.status(500).json({ error: error.message || "Failed to verify code." });
+  }
+});
+
+// 4. Complete Password Setup after OTP verification
+emailRouter.post("/complete-phone-password-setup", async (req, res) => {
+  try {
+    const { uid, phone, password, verifyToken } = req.body;
+    if (!uid || !phone || !password || !verifyToken) {
+      return res.status(400).json({ error: "Missing required parameters." });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters." });
+    }
+
+    const firestore = getDb();
+    if (!firestore) {
+      return res.status(500).json({ error: "Database not available." });
+    }
+
+    const otpDocRef = firestore.collection("auth_otps").doc(uid);
+    const snap = await otpDocRef.get();
+    if (!snap.exists) {
+      return res.status(403).json({ error: "Verification expired or invalid. Please verify via email OTP first." });
+    }
+
+    const data = snap.data() || {};
+    if (!data.verified || data.verifyToken !== verifyToken) {
+      return res.status(403).json({ error: "Invalid verification token. Please verify via email OTP first." });
+    }
+
+    if (data.expiresAt && Date.now() > data.expiresAt) {
+      return res.status(403).json({ error: "Verification window expired. Please request a new code." });
+    }
+
+    const stdPhone = standardizePkPhone(phone);
+    const authAdmin = getAuthAdmin();
+
+    // 1. Update Firebase Auth user's password
+    if (authAdmin) {
+      try {
+        await authAdmin.updateUser(uid, { password });
+      } catch (authErr: any) {
+        console.warn("Auth admin password update notice:", authErr);
+      }
+    }
+
+    // 2. Update user doc in Firestore
+    await firestore.collection("users").doc(uid).set({
+      hasPassword: true,
+      phone: stdPhone,
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+
+    // 3. Ensure whitelisted_phones has standard number with UID
+    const wlRef = firestore.collection("settings").doc("whitelisted_phones");
+    const wlSnap = await wlRef.get();
+    let numbers: string[] = [];
+    const last10 = stdPhone.replace(/\D/g, "").slice(-10);
+
+    if (wlSnap.exists) {
+      const wlData = wlSnap.data() || {};
+      const rawList = Array.isArray(wlData.numbers) ? wlData.numbers : (Array.isArray(wlData.phones) ? wlData.phones : []);
+      let found = false;
+
+      for (const item of rawList) {
+        if (!item) continue;
+        const itemStr = typeof item === "string" ? item : (item.number || item.phone || "");
+        const p = standardizePkPhone(itemStr);
+        const pDigits = p.replace(/\D/g, "");
+        if (p === stdPhone || (last10.length === 10 && pDigits.slice(-10) === last10)) {
+          numbers.push(`${stdPhone}:${uid}`);
+          found = true;
+        } else {
+          numbers.push(typeof item === "string" ? item : p);
+        }
+      }
+
+      if (!found) {
+        numbers.push(`${stdPhone}:${uid}`);
+      }
+
+      await wlRef.set({
+        numbers,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+
+    // 4. Delete the OTP document
+    await otpDocRef.delete().catch(() => {});
+
+    // 5. Generate custom token for instant client sign-in
+    let customToken = null;
+    if (authAdmin) {
+      try {
+        customToken = await authAdmin.createCustomToken(uid);
+      } catch (tokenErr) {
+        console.warn("Could not create custom token:", tokenErr);
+      }
+    }
+
+    return res.json({
+      success: true,
+      customToken,
+      message: "Password created successfully.",
+    });
+  } catch (error: any) {
+    console.error("Error completing password setup:", error);
+    return res.status(500).json({ error: error.message || "Failed to complete password setup." });
   }
 });
 
