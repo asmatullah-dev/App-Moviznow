@@ -30,7 +30,7 @@ import { clsx } from 'clsx';
 import { requestNotificationPermission } from '../../firebase';
 
 export default function Settings() {
-  const { profile, user, updateUserProfileData, linkPhoneToUid } = useAuth();
+  const { profile, user, updateUserProfileData, linkPhoneToUid, removePhoneForUid } = useAuth();
   const { t } = useLanguage();
   const { settings } = useSettings();
   const navigate = useNavigate();
@@ -208,6 +208,7 @@ export default function Settings() {
         await (window as any).triggerRefreshAppData('settings_changed');
       }
 
+      const previousPhone = profile?.phone;
       if (phone.trim() && user?.uid) {
         const std = standardizePhone(phone);
         if (std) {
@@ -216,10 +217,17 @@ export default function Settings() {
               email: user.email || email,
               displayName: name || user.displayName || undefined,
               hasPassword: Boolean(newPassword || profile?.hasPassword),
+              oldPhone: previousPhone || undefined,
             });
           } catch (e) {
             console.warn("Auto-whitelist on save notice:", e);
           }
+        }
+      } else if (!phone.trim() && user?.uid && previousPhone) {
+        try {
+          await removePhoneForUid(user.uid);
+        } catch (e) {
+          console.warn("Could not remove phone for UID on save:", e);
         }
       }
 

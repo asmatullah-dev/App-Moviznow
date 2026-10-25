@@ -16,7 +16,7 @@ import { ChunkMetaDocModal } from '../../components/ChunkMetaDocModal';
 import { handleFirestoreError, OperationType } from '../../utils/firestoreErrorHandler';
 import { formatDateToMonthDDYYYY } from '../../utils/contentUtils';
 import { parseVersionTime } from '../../utils/chunkMeta';
-import { useAuth, standardizePhone } from '../../contexts/AuthContext';
+import { useAuth, standardizePhone, parseWhitelistedEntry } from '../../contexts/AuthContext';
 import { getUserDisplayName } from '../../utils/userUtils';
 import { smartSearch } from '../../utils/searchUtils';
 import { useDebounce } from '../../hooks/useDebounce';
@@ -266,16 +266,20 @@ export default function UserManagement() {
   const isUserPhoneWhitelisted = useCallback((phone?: string | null) => {
     if (!phone) return false;
     const std = standardizePhone(phone);
-    if (!std) return false;
-    const stdDigits = std.replace(/\D/g, "");
-    const last10 = stdDigits.slice(-10);
-    return whitelistedPhones.some((n) => {
-      if (!n || typeof n !== 'string') return false;
-      const stdN = standardizePhone(n);
-      if (stdN && stdN === std) return true;
-      const nDigits = n.replace(/\D/g, "");
-      if (nDigits.slice(-10) === last10 && last10.length === 10) return true;
-      return n.trim() === phone.trim() || n.trim() === std;
+    const rawDigits = phone.replace(/\D/g, "");
+    const stdDigits = std ? std.replace(/\D/g, "") : rawDigits;
+    const last10 = rawDigits.length >= 10 ? rawDigits.slice(-10) : (stdDigits.length >= 10 ? stdDigits.slice(-10) : "");
+    return whitelistedPhones.some((n: any) => {
+      if (!n) return false;
+      const parsed = parseWhitelistedEntry(n);
+      const parsedPhone = parsed.phone || (typeof n === 'string' ? n.trim() : '');
+      if (parsedPhone && (parsedPhone === phone || (std && parsedPhone === std))) return true;
+      const parsedDigits = parsedPhone.replace(/\D/g, "");
+      if (parsedDigits && stdDigits && parsedDigits === stdDigits) return true;
+      if (parsedDigits && rawDigits && parsedDigits === rawDigits) return true;
+      if (last10.length === 10 && parsedDigits.slice(-10) === last10) return true;
+      if (parsedDigits.length >= 9 && stdDigits.length >= 9 && parsedDigits.slice(-9) === stdDigits.slice(-9)) return true;
+      return false;
     });
   }, [whitelistedPhones]);
 

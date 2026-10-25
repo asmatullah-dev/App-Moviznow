@@ -12,6 +12,19 @@ import { safeStorage } from '../utils/safeStorage';
 
 type LoginStep = 'social' | 'identifier' | 'password' | 'reset-password' | 'create_password' | 'verify_otp';
 
+export function maskEmail(email?: string | null): string {
+  if (!email || typeof email !== 'string' || !email.includes('@')) return '';
+  const clean = email.trim().toLowerCase();
+  if (clean.endsWith('@moviznow.com')) return '';
+  const [local, domain] = clean.split('@');
+  if (local.length <= 2) {
+    return `${local[0] || '*'}***@${domain}`;
+  }
+  const first = local.slice(0, 2);
+  const last = local.slice(-2);
+  return `${first}***${last}@${domain}`;
+}
+
 export default function Login() {
   const { 
     user, 
@@ -66,6 +79,14 @@ export default function Login() {
       setCustomError("Your account has been suspended. Please contact admin.");
     }
   }, [location.state]);
+
+  useEffect(() => {
+    if (step === 'create_password' && registeredUser && !registeredUser.hasPassword && !verifyToken) {
+      if (registeredUser.email && !registeredUser.email.endsWith('@moviznow.com')) {
+        setStep('verify_otp');
+      }
+    }
+  }, [step, registeredUser, verifyToken]);
 
   // Persist target redirect in sessionStorage so it survives OAuth popups or page refreshes
   useEffect(() => {
@@ -282,22 +303,16 @@ export default function Login() {
         const phonePart = isMoviznowEmail ? rawTrimmed.split('@')[0] : rawTrimmed;
         const standardizedPhone = standardizePhone(phonePart) || phonePart;
 
-        // Perform server-side account lookup
-        let lookupData: any = null;
-        try {
-          const res = await fetch("/api/email/phone-account-lookup", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ phone: standardizedPhone }),
-          });
-          lookupData = await res.json();
-        } catch (e) {
-          console.warn("Backend phone lookup error:", e);
+        // Step 1: Check the entered phone number in whitelist
+        let phoneRecord = await getWhitelistedPhoneRecord(standardizedPhone, true);
+        if (!phoneRecord.isWhitelisted && phonePart !== standardizedPhone) {
+          const altRecord = await getWhitelistedPhoneRecord(phonePart, true);
+          if (altRecord.isWhitelisted) {
+            phoneRecord = altRecord;
+          }
         }
 
-        const isWhitelisted = lookupData ? Boolean(lookupData.isWhitelisted) : (await isPhoneWhitelisted(standardizedPhone, true));
-
-        if (!isWhitelisted) {
+        if (!phoneRecord.isWhitelisted) {
           setCustomError(
             <div className="flex flex-col gap-3">
               <p>This WhatsApp number is not authorized.</p>
@@ -336,60 +351,162 @@ export default function Login() {
         // WhatsApp number is whitelisted!
         setIdentifier(standardizedPhone);
 
-        // Check if an existing account was resolved
-        const targetUserDoc = lookupData?.accountFound && lookupData?.user ? lookupData.user : null;
+        // Step 2: Check UID (if not found then create account)
+        const accountUid = (phoneRecord.uid && !phoneRecord.uid.startsWith('pending_')) ? phoneRecord.uid : null;
 
-        if (targetUserDoc) {
-          setRegisteredUser(targetUserDoc);
-          setDisplayName(targetUserDoc.displayName || '');
-          setOptionalEmail(targetUserDoc.email || '');
+        if (!accountUid) {
+          // UID is NOT found: proceed to create account
+          setRegisteredUser(null);
+          setDisplayName('');
+          setOptionalEmail('');
+          setPassword('');
+          setConfirmPassword('');
+          setVerifyToken('');
+          setStep('create_password');
+          setIsLoggingIn(false);
+          return;
+        }
 
-          if (targetUserDoc.hasPassword) {
-            // "If the Google user has already created password by settings or by login page then don't need to confirm with otp because then it will confirm by password"
-            setStep('password');
-            setIsLoggingIn(false);
-            return;
-          } else {
-            // "it will only confirm via otp when situation need to create password and because it is first time login with phone number so it also need to verify that is it original user for that send an otp to their registered email address and confirm via otp"
-            if (targetUserDoc.email && !targetUserDoc.email.endsWith('@moviznow.com')) {
-              try {
-                setOtpSending(true);
-                await fetch("/api/email/send-login-otp", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    phone: standardizedPhone,
-                    email: targetUserDoc.email,
-                    uid: targetUserDoc.uid,
-                    displayName: targetUserDoc.displayName,
-                  }),
-                });
-                setResendCooldown(30);
-              } catch (otpErr) {
-                console.warn("Failed to send initial OTP:", otpErr);
-              } finally {
-                setOtpSending(false);
-              }
-              setOtp('');
-              setStep('verify_otp');
-              setIsLoggingIn(false);
-              return;
-            } else {
-              setPassword('');
-              setConfirmPassword('');
-              setStep('create_password');
-              setIsLoggingIn(false);
-              return;
+        // UID IS found: proceed with UID!
+        // Step 3: Check other details by UID (name, Email, has password)
+        let resolvedDisplayName = '';
+        let resolvedEmail = '';
+        let resolvedHasPassword = false;
+        let resolvedRole = 'user';
+        let resolvedStatus = 'active';
+
+        // 3a. Check phoneUser from getWhitelistedPhoneRecord
+        if (phoneRecord.phoneUser) {
+          if (phoneRecord.phoneUser.displayName) resolvedDisplayName = phoneRecord.phoneUser.displayName;
+          if (phoneRecord.phoneUser.email && !phoneRecord.phoneUser.email.endsWith('@moviznow.com')) {
+            resolvedEmail = phoneRecord.phoneUser.email;
+          }
+          if (phoneRecord.phoneUser.hasPassword !== undefined) {
+            resolvedHasPassword = Boolean(phoneRecord.phoneUser.hasPassword);
+          }
+          if (phoneRecord.phoneUser.role) resolvedRole = phoneRecord.phoneUser.role;
+          if (phoneRecord.phoneUser.status) resolvedStatus = phoneRecord.phoneUser.status;
+        }
+
+        // 3b. Safe read from Firestore doc if permissions permit
+        if (!resolvedEmail || !resolvedDisplayName) {
+          try {
+            const { doc, getDoc } = await import('firebase/firestore');
+            const { db } = await import('../firebase');
+            const snap = await getDoc(doc(db, 'users', accountUid));
+            if (snap.exists()) {
+              const uData = snap.data();
+              if (uData.displayName) resolvedDisplayName = uData.displayName;
+              if (uData.email && !uData.email.endsWith('@moviznow.com')) resolvedEmail = uData.email;
+              if (uData.hasPassword !== undefined) resolvedHasPassword = Boolean(uData.hasPassword);
+              if (uData.role) resolvedRole = uData.role;
+              if (uData.status) resolvedStatus = uData.status;
             }
+          } catch (e) {
+            // Permission denied is caught safely and does not break the flow
           }
         }
 
-        // Truly first time user (no existing Google or linked account)
-        setRegisteredUser(null);
-        setDisplayName('');
-        setOptionalEmail('');
+        // 3c. Check client cache (cached_all_users / profile_cache)
+        if (!resolvedEmail || !resolvedDisplayName) {
+          try {
+            const cachedStr = safeStorage.getItem('cached_all_users');
+            if (cachedStr) {
+              const list = JSON.parse(cachedStr);
+              const found = Array.isArray(list) ? list.find((u: any) => u.uid === accountUid) : null;
+              if (found) {
+                if (!resolvedDisplayName && found.displayName) resolvedDisplayName = found.displayName;
+                if (!resolvedEmail && found.email && !found.email.endsWith('@moviznow.com')) resolvedEmail = found.email;
+                if (!resolvedHasPassword && found.hasPassword) resolvedHasPassword = Boolean(found.hasPassword);
+              }
+            }
+          } catch (e) {}
+
+          try {
+            const pStr = safeStorage.getItem('profile_cache');
+            if (pStr) {
+              const p = JSON.parse(pStr);
+              if (p.uid === accountUid) {
+                if (!resolvedDisplayName && p.displayName) resolvedDisplayName = p.displayName;
+                if (!resolvedEmail && p.email && !p.email.endsWith('@moviznow.com')) resolvedEmail = p.email;
+                if (!resolvedHasPassword && p.hasPassword) resolvedHasPassword = Boolean(p.hasPassword);
+              }
+            }
+          } catch (e) {}
+        }
+
+        // 3d. Fallback for known owner UID / phone
+        const stdDigits = standardizedPhone.replace(/\D/g, '');
+        if (accountUid === "H0PFpJilsgPNVt6Cc2Y9czwATCs1" || stdDigits.endsWith("3416286423")) {
+          if (!resolvedDisplayName) resolvedDisplayName = "Asmat Ullah";
+          if (!resolvedEmail) resolvedEmail = "asmatn628@gmail.com";
+          resolvedRole = "owner";
+        }
+
+        // Clean up resolved display name & email
+        const isGenericName = resolvedDisplayName.startsWith('User (') || resolvedDisplayName === 'Movie Fan' || resolvedDisplayName === 'No Name';
+        const cleanName = !isGenericName ? resolvedDisplayName : '';
+        const cleanEmail = (resolvedEmail && !resolvedEmail.endsWith('@moviznow.com') && resolvedEmail.includes('@')) ? resolvedEmail.trim().toLowerCase() : '';
+
+        const activeUserObj: UserProfile = {
+          uid: accountUid,
+          phone: standardizedPhone,
+          displayName: cleanName,
+          email: cleanEmail || `${stdDigits}@moviznow.com`,
+          hasPassword: resolvedHasPassword,
+          role: resolvedRole as any,
+          status: resolvedStatus as any,
+          createdAt: phoneRecord.phoneUser?.createdAt || new Date().toISOString(),
+        };
+
+        setRegisteredUser(activeUserObj);
+        setDisplayName(cleanName);
+        setOptionalEmail(cleanEmail);
+
+        // Step 4: If has password then enter password to login
+        if (resolvedHasPassword) {
+          setStep('password');
+          setIsLoggingIn(false);
+          return;
+        }
+
+        // Step 5: If not has any password then proceed for create password,
+        // BUT has email then verify OTP first!
+        if (cleanEmail) {
+          try {
+            setOtpSending(true);
+            const sendRes = await fetch("/api/email/send-login-otp", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                phone: standardizedPhone,
+                email: cleanEmail,
+                uid: accountUid,
+                displayName: cleanName || "Movie Fan",
+                emailSettings: settings?.emailSettings,
+              }),
+            });
+            const sendData = await sendRes.json();
+            if (!sendRes.ok) throw new Error(sendData.error || "Failed to send verification code");
+            setResendCooldown(30);
+          } catch (otpErr: any) {
+            console.warn("Failed to send initial OTP:", otpErr);
+            setCustomError(otpErr?.message || "Failed to send verification code. Please try again.");
+          } finally {
+            setOtpSending(false);
+          }
+          setOtp('');
+          setVerifyToken('');
+          setStep('verify_otp');
+          setIsLoggingIn(false);
+          return;
+        }
+
+        // Step 6: If email also Missing then ask to enter email address with creating password,
+        // but don't ask for email if exist!
         setPassword('');
         setConfirmPassword('');
+        setVerifyToken('');
         setStep('create_password');
         setIsLoggingIn(false);
         return;
@@ -406,21 +523,66 @@ export default function Login() {
       let foundUser = uniqueFound.length > 0 ? uniqueFound[0] : null;
 
       if (foundUser) {
-        setRegisteredUser(foundUser);
+        const resolvedName = getUserDisplayName(foundUser);
+        const isGenericName = resolvedName.startsWith('User (') || resolvedName === 'Movie Fan' || resolvedName === 'No Name';
+        const cleanName = !isGenericName ? resolvedName : (foundUser.displayName || (foundUser.email ? foundUser.email.split('@')[0] : ''));
+        const cleanEmail = (foundUser.email && !foundUser.email.endsWith('@moviznow.com')) ? foundUser.email : '';
+
+        const fullFoundUser = {
+          ...foundUser,
+          displayName: cleanName || foundUser.displayName || 'Movie Fan',
+          email: foundUser.email || cleanEmail,
+        };
+
+        setRegisteredUser(fullFoundUser);
+        setDisplayName(cleanName);
+        setOptionalEmail(cleanEmail);
+
         if (foundUser.hasPassword) {
           setStep('password');
         } else {
-          const resolvedName = getUserDisplayName(foundUser);
-          const isGenericName = resolvedName.startsWith('User (') || resolvedName === 'User';
-          setDisplayName(isGenericName ? '' : resolvedName);
-          setOptionalEmail(foundUser.email?.endsWith('@moviznow.com') ? '' : (foundUser.email || ''));
-          setStep('create_password');
+          // Google user without password logging in with email: MUST verify OTP first
+          if (cleanEmail) {
+            try {
+              setOtpSending(true);
+              const sendRes = await fetch("/api/email/send-login-otp", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  phone: foundUser.phone || formatIdentifier(rawTrimmed),
+                  email: cleanEmail,
+                  uid: foundUser.uid,
+                  displayName: cleanName || foundUser.displayName,
+                }),
+              });
+              const sendData = await sendRes.json();
+              if (!sendRes.ok) throw new Error(sendData.error || "Failed to send verification code");
+              setResendCooldown(30);
+            } catch (otpErr: any) {
+              console.warn("Failed to send initial OTP:", otpErr);
+              setCustomError(otpErr?.message || "Failed to send verification code. Please try again.");
+            } finally {
+              setOtpSending(false);
+            }
+            setOtp('');
+            setVerifyToken('');
+            setStep('verify_otp');
+            setIsLoggingIn(false);
+            return;
+          } else {
+            setPassword('');
+            setConfirmPassword('');
+            setVerifyToken('');
+            setStep('create_password');
+          }
         }
       } else {
         setRegisteredUser(null);
         setDisplayName('');
         setOptionalEmail('');
         setPassword('');
+        setConfirmPassword('');
+        setVerifyToken('');
         setStep('create_password');
       }
     } catch (err) {
@@ -448,7 +610,13 @@ export default function Login() {
       if (!isGoogleUser) {
         const phoneToCheck = registeredUser?.phone || (identifier.includes('@') ? (identifier.toLowerCase().endsWith('@moviznow.com') ? identifier.split('@')[0] : '') : identifier);
         if (phoneToCheck) {
-          const isWhitelisted = await isPhoneWhitelisted(phoneToCheck, true);
+          let isWhitelisted = await isPhoneWhitelisted(phoneToCheck, true);
+          if (!isWhitelisted) {
+            const std = standardizePhone(phoneToCheck);
+            if (std && std !== phoneToCheck) {
+              isWhitelisted = await isPhoneWhitelisted(std, true);
+            }
+          }
           if (!isWhitelisted) {
             setCustomError("This WhatsApp number is not authorized. Please contact admin.");
             setIsLoggingIn(false);
@@ -531,11 +699,14 @@ export default function Login() {
   };
 
   const isExistingAccount = Boolean(
-    registeredUser && !registeredUser.uid.startsWith('pending_')
+    registeredUser && (
+      (!registeredUser.uid || !registeredUser.uid.startsWith('pending_')) &&
+      Boolean(registeredUser.uid)
+    )
   );
 
   const existingDisplayName = (registeredUser?.displayName || displayName || '').trim();
-  const hasExistingName = isExistingAccount ? true : Boolean(
+  const hasExistingName = Boolean(
     existingDisplayName &&
     existingDisplayName !== 'Movie Fan' &&
     existingDisplayName !== 'No Name' &&
@@ -545,7 +716,7 @@ export default function Login() {
   );
 
   const existingEmail = (registeredUser?.email || optionalEmail || '').trim();
-  const hasExistingEmail = isExistingAccount ? true : Boolean(
+  const hasExistingEmail = Boolean(
     existingEmail &&
     !existingEmail.endsWith('@moviznow.com') &&
     existingEmail.includes('@')
@@ -868,7 +1039,7 @@ export default function Login() {
                 </p>
                 {registeredUser?.email && (
                   <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mt-1">
-                    {registeredUser.email}
+                    {maskEmail(registeredUser.email)}
                   </p>
                 )}
               </div>
@@ -948,11 +1119,14 @@ export default function Login() {
                 setIsLoggingIn(true);
                 
                 const isExistingAccount = Boolean(
-                  registeredUser && !registeredUser.uid.startsWith('pending_')
+                  registeredUser && (
+                    (!registeredUser.uid || !registeredUser.uid.startsWith('pending_')) &&
+                    Boolean(registeredUser.uid)
+                  )
                 );
 
                 const existingDisplayName = (registeredUser?.displayName || displayName || '').trim();
-                const hasExistingName = isExistingAccount ? true : Boolean(
+                const hasExistingName = Boolean(
                   existingDisplayName &&
                   existingDisplayName !== 'Movie Fan' &&
                   existingDisplayName !== 'No Name' &&
@@ -962,7 +1136,7 @@ export default function Login() {
                 );
 
                 const existingEmail = (registeredUser?.email || optionalEmail || '').trim();
-                const hasExistingEmail = isExistingAccount ? true : Boolean(
+                const hasExistingEmail = Boolean(
                   existingEmail &&
                   !existingEmail.endsWith('@moviznow.com') &&
                   existingEmail.includes('@')
@@ -1041,7 +1215,9 @@ export default function Login() {
                     // Existing account (e.g. from Google login) setting password for WhatsApp login
                     const stdDigits = (stdPhone || identifier).replace(/\D/g, '');
                     const phoneAuthEmail = `${stdDigits}@moviznow.com`;
-                    const googleEmail = (registeredUser.email && !registeredUser.email.endsWith('@moviznow.com')) ? registeredUser.email : null;
+                    const googleEmail = (registeredUser.email && !registeredUser.email.endsWith('@moviznow.com'))
+                      ? registeredUser.email
+                      : (optionalEmail.trim() || null);
                     
                     let authUser: any = null;
                     const { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } = await import('firebase/auth');
@@ -1084,6 +1260,8 @@ export default function Login() {
                       batch.set(doc(db, "users", registeredUser.uid), {
                         hasPassword: true,
                         phone: stdPhone || registeredUser.phone,
+                        email: googleEmail || registeredUser.email,
+                        displayName: (registeredUser.displayName && registeredUser.displayName !== 'Movie Fan') ? registeredUser.displayName : (displayName.trim() || undefined),
                         linkedPhoneUid: authUser.uid,
                         updatedAt: new Date().toISOString(),
                       }, { merge: true });
@@ -1133,7 +1311,10 @@ export default function Login() {
                   } else {
                     // Truly new user signup
                     if (stdPhone) {
-                      const isWhitelisted = await isPhoneWhitelisted(stdPhone, true);
+                      let isWhitelisted = await isPhoneWhitelisted(stdPhone, true);
+                      if (!isWhitelisted && identifier !== stdPhone) {
+                        isWhitelisted = await isPhoneWhitelisted(identifier, true);
+                      }
                       if (!isWhitelisted) {
                         setCustomError("This WhatsApp number is not authorized for account creation. Please contact admin.");
                         setIsLoggingIn(false);
@@ -1201,7 +1382,7 @@ export default function Login() {
                       {getUserDisplayName(registeredUser)}
                     </p>
                     {registeredUser.email && !registeredUser.email.endsWith('@moviznow.com') && (
-                      <p className="text-xs text-zinc-400 truncate">{registeredUser.email}</p>
+                      <p className="text-xs text-zinc-400 truncate">{maskEmail(registeredUser.email)}</p>
                     )}
                   </div>
                 </div>

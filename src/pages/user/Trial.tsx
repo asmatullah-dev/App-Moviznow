@@ -79,7 +79,7 @@ export default function Trial() {
 
     // Non-Google (phone-only) users must have a whitelisted WhatsApp number
     if (!isGoogleUser) {
-      isPhoneWhitelisted(profile.phone).then((whitelisted) => {
+      isPhoneWhitelisted(profile.phone, true).then((whitelisted) => {
         if (!whitelisted) {
           setStatus('error');
           setMessage(t('This WhatsApp number is not authorized / whitelisted for trial access. Please contact admin.'));
@@ -102,7 +102,7 @@ export default function Trial() {
       const isGoogleUser = user?.providerData?.some(p => p.providerId === 'google.com') || (Boolean(user?.email) && !user?.email?.endsWith('@moviznow.com'));
       const phoneToCheck = profile?.phone || phoneNumber;
       if (!isGoogleUser && phoneToCheck) {
-        const isWhitelisted = await isPhoneWhitelisted(phoneToCheck);
+        const isWhitelisted = await isPhoneWhitelisted(phoneToCheck, true);
         if (!isWhitelisted) {
           hasActivatedRef.current = false;
           setStatus('error');
@@ -170,7 +170,7 @@ export default function Trial() {
       setIsSubmittingPhone(true);
       const isGoogleUser = user?.providerData?.some(p => p.providerId === 'google.com') || (Boolean(user?.email) && !user?.email?.endsWith('@moviznow.com'));
       if (!isGoogleUser) {
-        const isWhitelisted = await isPhoneWhitelisted(standardized);
+        const isWhitelisted = await isPhoneWhitelisted(standardized, true);
         if (!isWhitelisted) {
           setPhoneError(t('This WhatsApp number is not authorized / whitelisted for trial access. Please contact admin.'));
           setIsSubmittingPhone(false);

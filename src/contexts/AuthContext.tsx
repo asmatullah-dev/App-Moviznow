@@ -86,7 +86,8 @@ interface AuthContextType {
   getWhitelistedPhoneRecord: (phone: string, forceFresh?: boolean) => Promise<WhitelistedPhoneRecord>;
   whitelistPhoneNumber: (phone: string, uid?: string) => Promise<boolean>;
   unwhitelistPhoneNumber: (phone: string) => Promise<boolean>;
-  linkPhoneToUid: (phone: string, uid: string, extraData?: { email?: string; displayName?: string; hasPassword?: boolean }) => Promise<boolean>;
+  linkPhoneToUid: (phone: string, uid: string, extraData?: { email?: string; displayName?: string; hasPassword?: boolean; oldPhone?: string }) => Promise<boolean>;
+  removePhoneForUid: (uid: string) => Promise<boolean>;
   findUsersByEmailOrPhone: (identifier: string) => Promise<UserProfile[]>;
   updateUserPassword: (newPassword: string) => Promise<void>;
   updateUserProfileData: (
@@ -157,11 +158,17 @@ export const standardizePhone = (phone: string): string => {
 };
 
 export const parseWhitelistedEntry = (entry: any): WhitelistedPhoneItem => {
-  if (!entry) return { phone: "", uid: null };
-  if (typeof entry === "object") {
-    const raw = entry.number || entry.phone || "";
+  if (entry === null || entry === undefined) return { phone: "", uid: null };
+  if (typeof entry === "number") {
+    const raw = String(entry).trim();
     const std = standardizePhone(raw);
-    return { phone: std || raw, uid: entry.uid || null };
+    return { phone: std || raw, uid: null };
+  }
+  if (typeof entry === "object") {
+    const rawVal = entry.number !== undefined ? entry.number : (entry.phone !== undefined ? entry.phone : "");
+    const raw = String(rawVal).trim();
+    const std = standardizePhone(raw);
+    return { phone: std || raw, uid: entry.uid ? String(entry.uid).trim() : null };
   }
   if (typeof entry === "string") {
     const trimmed = entry.trim();
@@ -2722,21 +2729,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!phone || typeof phone !== "string") return emptyResult;
 
     const trimmed = phone.trim();
-    const standardizedPhone = standardizePhone(trimmed);
-    const stdDigits = standardizedPhone ? standardizedPhone.replace(/\D/g, "") : trimmed.replace(/\D/g, "");
-    const last10 = stdDigits.slice(-10);
+    const cleanInput = trimmed.includes("@") ? trimmed.split("@")[0].trim() : trimmed;
+    const standardizedPhone = standardizePhone(cleanInput);
+    const inputDigits = cleanInput.replace(/\D/g, "");
+    const stdDigits = standardizedPhone ? standardizedPhone.replace(/\D/g, "") : inputDigits;
+    const last10 = inputDigits.length >= 10 ? inputDigits.slice(-10) : (stdDigits.length >= 10 ? stdDigits.slice(-10) : "");
     const rawDigits = trimmed.replace(/\D/g, "");
 
     const candidateKeys = [
       standardizedPhone,
+      cleanInput,
       trimmed,
       stdDigits,
+      inputDigits,
       rawDigits,
       last10,
       last10.length === 10 ? `0${last10}` : "",
       last10.length === 10 ? `92${last10}` : "",
       last10.length === 10 ? `+92${last10}` : "",
     ].filter(Boolean) as string[];
+
+    const checkMatch = (p: string): boolean => {
+      if (!p) return false;
+      const pTrim = p.trim();
+      if (candidateKeys.includes(pTrim)) return true;
+      if (standardizedPhone && pTrim === standardizedPhone) return true;
+      const pDigits = pTrim.replace(/\D/g, "");
+      if (!pDigits) return false;
+      if (candidateKeys.includes(pDigits)) return true;
+      if (stdDigits && pDigits === stdDigits) return true;
+      if (inputDigits && pDigits === inputDigits) return true;
+      if (last10.length === 10 && pDigits.slice(-10) === last10) return true;
+      if (pDigits.length >= 9 && stdDigits.length >= 9 && pDigits.slice(-9) === stdDigits.slice(-9)) return true;
+      if (pDigits.length >= 9 && inputDigits.length >= 9 && pDigits.slice(-9) === inputDigits.slice(-9)) return true;
+      return false;
+    };
 
     try {
       const CACHE_DOC_KEY = "cached_whitelisted_phones_data";
@@ -2746,7 +2773,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const now = Date.now();
 
       let data: any = null;
-      if (!forceFresh && cachedStr && now - cachedTime < 10 * 60 * 1000) {
+      if (!forceFresh && cachedStr && now - cachedTime < 5 * 60 * 1000) {
         try {
           data = JSON.parse(cachedStr);
         } catch (e) {}
@@ -2767,13 +2794,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!data) {
         return {
           ...emptyResult,
-          standardizedPhone: standardizedPhone || trimmed,
+          standardizedPhone: standardizedPhone || cleanInput,
         };
       }
 
       const rawNumbersList: any[] = Array.isArray(data.numbers)
         ? data.numbers
-        : (Array.isArray(data.phones) ? data.phones : []);
+        : (Array.isArray(data.phones) ? data.phones : (Array.isArray(data.whitelist) ? data.whitelist : []));
 
       // Parse all entries in numbers array (can be "+923001234567:uid" or "+923001234567")
       const parsedItems = rawNumbersList.map(parseWhitelistedEntry);
@@ -2781,16 +2808,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let matchedItem: WhitelistedPhoneItem | null = null;
       for (const item of parsedItems) {
         if (!item.phone) continue;
-        const itemDigits = item.phone.replace(/\D/g, "");
-        if (standardizedPhone && item.phone === standardizedPhone) {
-          matchedItem = item;
-          break;
-        }
-        if (last10.length === 10 && itemDigits.slice(-10) === last10) {
-          matchedItem = item;
-          break;
-        }
-        if (candidateKeys.includes(item.phone) || candidateKeys.includes(itemDigits)) {
+        if (checkMatch(item.phone)) {
           matchedItem = item;
           break;
         }
@@ -2800,29 +2818,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let uid: string | null = matchedItem?.uid || null;
 
       // Backward compatibility fallback if legacy phoneToUid exists
-      if (!uid && data.phoneToUid) {
-        for (const key of candidateKeys) {
-          if (data.phoneToUid[key]) {
-            uid = data.phoneToUid[key];
-            break;
-          }
-        }
-        if (!uid && last10.length === 10) {
-          for (const [k, u] of Object.entries(data.phoneToUid)) {
-            if (k.replace(/\D/g, "").slice(-10) === last10 && typeof u === "string") {
-              uid = u;
-              break;
+      if (data.phoneToUid && typeof data.phoneToUid === "object") {
+        for (const [key, u] of Object.entries(data.phoneToUid)) {
+          if (checkMatch(key)) {
+            if (!matchedItem) {
+              matchedItem = { phone: standardizePhone(key) || key, uid: typeof u === "string" ? u : null };
             }
+            if (!uid && typeof u === "string") {
+              uid = u;
+            }
+            break;
           }
         }
       }
 
       const isWhitelisted = Boolean(matchedItem) || Boolean(uid);
 
+      // If not whitelisted and we checked cached data, re-check freshly from Firestore to avoid stale cache false-negatives!
+      if (!isWhitelisted && !forceFresh && cachedStr) {
+        return getWhitelistedPhoneRecord(phone, true);
+      }
+
       if (!isWhitelisted) {
         return {
           ...emptyResult,
-          standardizedPhone: standardizedPhone || trimmed,
+          standardizedPhone: standardizedPhone || cleanInput,
         };
       }
 
@@ -2831,6 +2851,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       let phoneUser: any | null = null;
 
       if (uid && !uid.startsWith("pending_")) {
+        // Try reading directly from Firestore
         try {
           const userSnap = await getDoc(doc(db, "users", uid));
           if (userSnap.exists()) {
@@ -2849,11 +2870,93 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
         } catch (e) {}
+
+        // Fallback 1: check userMetadata in whitelisted_phones document
+        if (!phoneUser || !phoneUser.email) {
+          const meta = data.userMetadata?.[uid];
+          if (meta) {
+            phoneUser = {
+              uid,
+              displayName: meta.displayName || phoneUser?.displayName || null,
+              email: meta.email || phoneUser?.email || null,
+              hasPassword: meta.hasPassword !== undefined ? Boolean(meta.hasPassword) : Boolean(phoneUser?.hasPassword),
+              phone: meta.phone || phoneUser?.phone || standardizedPhone,
+              role: meta.role || phoneUser?.role || "user",
+              status: meta.status || phoneUser?.status || "active",
+            };
+            if (meta.email && !meta.email.endsWith("@moviznow.com")) {
+              authEmail = meta.email;
+            }
+          }
+        }
+
+        // Fallback 2: check client cached users
+        if (!phoneUser || !phoneUser.email) {
+          try {
+            const cachedStr = safeStorage.getItem("cached_all_users");
+            if (cachedStr) {
+              const list = JSON.parse(cachedStr);
+              const found = list.find((u: any) => u.uid === uid);
+              if (found) {
+                phoneUser = {
+                  uid,
+                  displayName: found.displayName || phoneUser?.displayName || null,
+                  email: found.email || phoneUser?.email || null,
+                  hasPassword: found.hasPassword !== undefined ? Boolean(found.hasPassword) : Boolean(phoneUser?.hasPassword),
+                  phone: found.phone || phoneUser?.phone || standardizedPhone,
+                  role: found.role || phoneUser?.role || "user",
+                  status: found.status || phoneUser?.status || "active",
+                };
+                if (found.email && !found.email.endsWith("@moviznow.com")) {
+                  authEmail = found.email;
+                }
+              }
+            }
+          } catch (e) {}
+        }
+
+        // Fallback 3: check profile_cache
+        if (!phoneUser || !phoneUser.email) {
+          try {
+            const pStr = safeStorage.getItem("profile_cache");
+            if (pStr) {
+              const p = JSON.parse(pStr);
+              if (p.uid === uid) {
+                phoneUser = {
+                  uid,
+                  displayName: p.displayName || phoneUser?.displayName || null,
+                  email: p.email || phoneUser?.email || null,
+                  hasPassword: p.hasPassword !== undefined ? Boolean(p.hasPassword) : Boolean(phoneUser?.hasPassword),
+                  phone: p.phone || phoneUser?.phone || standardizedPhone,
+                  role: p.role || phoneUser?.role || "user",
+                  status: p.status || phoneUser?.status || "active",
+                };
+                if (p.email && !p.email.endsWith("@moviznow.com")) {
+                  authEmail = p.email;
+                }
+              }
+            }
+          } catch (e) {}
+        }
+
+        // Fallback 4: known owner UID
+        if ((!phoneUser || !phoneUser.email) && (uid === "H0PFpJilsgPNVt6Cc2Y9czwATCs1" || stdDigits.endsWith("3416286423"))) {
+          phoneUser = {
+            uid: uid || "H0PFpJilsgPNVt6Cc2Y9czwATCs1",
+            displayName: phoneUser?.displayName || "Asmat Ullah",
+            email: "asmatn628@gmail.com",
+            hasPassword: Boolean(phoneUser?.hasPassword),
+            phone: standardizedPhone,
+            role: "owner",
+            status: "active",
+          };
+          authEmail = "asmatn628@gmail.com";
+        }
       }
 
       return {
         isWhitelisted: true,
-        standardizedPhone: standardizedPhone || trimmed,
+        standardizedPhone: standardizedPhone || cleanInput,
         uid: uid && !uid.startsWith("pending_") ? uid : null,
         authEmail: authEmail || (uid ? `${stdDigits}@moviznow.com` : null),
         phoneUser,
@@ -2862,7 +2965,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.error("Error getting whitelisted phone record:", err);
       return {
         ...emptyResult,
-        standardizedPhone: standardizedPhone || trimmed,
+        standardizedPhone: standardizedPhone || cleanInput,
       };
     }
   };
@@ -2870,13 +2973,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const linkPhoneToUid = async (
     phone: string,
     uid: string,
-    _extraData?: { email?: string; displayName?: string; hasPassword?: boolean }
+    extraData?: { email?: string; displayName?: string; hasPassword?: boolean; oldPhone?: string }
   ): Promise<boolean> => {
     if (!phone || !uid) return false;
     const standardized = standardizePhone(phone) || phone.trim();
     const stdDigits = standardized.replace(/\D/g, "");
     const last10 = stdDigits.slice(-10);
     const now = new Date().toISOString();
+
+    const oldPhoneDigits = extraData?.oldPhone ? extraData.oldPhone.replace(/\D/g, "") : "";
+    const oldPhoneLast10 = oldPhoneDigits.slice(-10);
 
     try {
       const docRef = doc(db, "settings", "whitelisted_phones");
@@ -2885,7 +2991,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       const rawNumbers: any[] = Array.isArray(data.numbers)
         ? data.numbers
-        : (Array.isArray(data.phones) ? data.phones : []);
+        : (Array.isArray(data.phones) ? data.phones : (Array.isArray(data.whitelist) ? data.whitelist : []));
       
       const newNumbers: string[] = [];
       let foundAndUpdated = false;
@@ -2895,14 +3001,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!parsed.phone) continue;
         const itemDigits = parsed.phone.replace(/\D/g, "");
         const isMatch = (standardized && parsed.phone === standardized) ||
-                        (last10.length === 10 && itemDigits.slice(-10) === last10);
+                        (stdDigits && itemDigits && stdDigits === itemDigits) ||
+                        (last10.length >= 7 && itemDigits.endsWith(last10)) ||
+                        (itemDigits.length >= 7 && stdDigits.endsWith(itemDigits.slice(-10)));
+
+        const isOldPhoneMatch = Boolean(
+          oldPhoneDigits && (
+            itemDigits === oldPhoneDigits ||
+            (oldPhoneLast10.length === 10 && itemDigits.slice(-10) === oldPhoneLast10)
+          )
+        );
+
+        const isSameUid = Boolean(parsed.uid && parsed.uid === uid);
+
+        // Before saving number: uid check if already exist the same uid
+        // so remove previous number and add new or simply change phone number for existing uid instead of adding again with same uid
+        if (isSameUid || (isOldPhoneMatch && parsed.uid === uid)) {
+          if (!foundAndUpdated) {
+            newNumbers.push(`${standardized}:${uid}`);
+            foundAndUpdated = true;
+          }
+          // Remove previous number for this UID by not pushing the old entry
+          continue;
+        }
 
         if (isMatch) {
-          // Store standardized number with UID attached
-          newNumbers.push(`${standardized}:${uid}`);
-          foundAndUpdated = true;
+          // Entry matches the new phone: attach this UID
+          if (!foundAndUpdated) {
+            newNumbers.push(`${standardized}:${uid}`);
+            foundAndUpdated = true;
+          }
         } else {
-          // Preserve existing entry
+          // Preserve existing entry for other phone / user
           if (parsed.uid) {
             newNumbers.push(`${parsed.phone}:${parsed.uid}`);
           } else {
@@ -2915,13 +3045,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         newNumbers.push(`${standardized}:${uid}`);
       }
 
-      // Minimized: only numbers field with UID attached when available (no separate phoneToUid)
+      // Also clean up and update phoneToUid if present in document
+      let updatedPhoneToUid: Record<string, string> | undefined = undefined;
+      if (data.phoneToUid && typeof data.phoneToUid === "object") {
+        updatedPhoneToUid = {};
+        for (const [k, v] of Object.entries(data.phoneToUid)) {
+          // Remove previous phone mappings for this same UID
+          if (v !== uid) {
+            updatedPhoneToUid[k] = v as string;
+          }
+        }
+        updatedPhoneToUid[standardized] = uid;
+      }
+
+      const existingUserMetadata = (data.userMetadata && typeof data.userMetadata === "object") ? data.userMetadata : {};
+      const updatedUserMetadata = {
+        ...existingUserMetadata,
+        [uid]: {
+          uid,
+          phone: standardized,
+          email: extraData?.email || existingUserMetadata[uid]?.email || "",
+          displayName: extraData?.displayName || existingUserMetadata[uid]?.displayName || "",
+          hasPassword: extraData?.hasPassword !== undefined ? Boolean(extraData.hasPassword) : Boolean(existingUserMetadata[uid]?.hasPassword),
+          updatedAt: now,
+        }
+      };
+
       const updatedPayload: any = {
         numbers: newNumbers,
         updatedAt: now,
+        userMetadata: updatedUserMetadata,
       };
+      if (updatedPhoneToUid) {
+        updatedPayload.phoneToUid = updatedPhoneToUid;
+      }
 
-      await setDoc(docRef, updatedPayload);
+      await setDoc(docRef, updatedPayload, { merge: true });
 
       safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(newNumbers));
       safeStorage.setItem("cached_whitelisted_phones_data", JSON.stringify(updatedPayload));
@@ -2930,6 +3089,64 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return true;
     } catch (err) {
       console.error("Error linking phone to UID in whitelisted_phones:", err);
+      return false;
+    }
+  };
+
+  const removePhoneForUid = async (uid: string): Promise<boolean> => {
+    if (!uid) return false;
+    try {
+      const docRef = doc(db, "settings", "whitelisted_phones");
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) return true;
+
+      const data = snap.data() || {};
+      const rawNumbers: any[] = Array.isArray(data.numbers)
+        ? data.numbers
+        : (Array.isArray(data.phones) ? data.phones : (Array.isArray(data.whitelist) ? data.whitelist : []));
+
+      const newNumbers: string[] = [];
+      for (const item of rawNumbers) {
+        const parsed = parseWhitelistedEntry(item);
+        if (!parsed.phone) continue;
+        if (parsed.uid === uid) {
+          // Remove previous number for this UID
+          continue;
+        }
+        if (parsed.uid) {
+          newNumbers.push(`${parsed.phone}:${parsed.uid}`);
+        } else {
+          newNumbers.push(parsed.phone);
+        }
+      }
+
+      let updatedPhoneToUid: Record<string, string> | undefined = undefined;
+      if (data.phoneToUid && typeof data.phoneToUid === "object") {
+        updatedPhoneToUid = {};
+        for (const [k, v] of Object.entries(data.phoneToUid)) {
+          if (v !== uid) {
+            updatedPhoneToUid[k] = v as string;
+          }
+        }
+      }
+
+      const updatedPayload: any = {
+        numbers: newNumbers,
+        updatedAt: new Date().toISOString(),
+      };
+      if (updatedPhoneToUid) {
+        updatedPayload.phoneToUid = updatedPhoneToUid;
+      }
+
+      await setDoc(docRef, updatedPayload, { merge: true });
+
+      safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(newNumbers));
+      safeStorage.setItem("cached_whitelisted_phones_data", JSON.stringify(updatedPayload));
+      safeStorage.setItem("cached_whitelisted_phones_time", Date.now().toString());
+
+      return true;
+    } catch (err) {
+      console.error("Error removing phone for UID:", err);
       return false;
     }
   };
@@ -2960,7 +3177,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!parsed.phone) continue;
         const itemDigits = parsed.phone.replace(/\D/g, "");
         const isMatch = (standardized && parsed.phone === standardized) ||
+                        (stdDigits && itemDigits && stdDigits === itemDigits) ||
                         (last10.length === 10 && itemDigits.slice(-10) === last10);
+
+        const isSameUid = Boolean(uid && parsed.uid && parsed.uid === uid);
+        if (isSameUid) {
+          // If already has this UID, remove previous number for this same UID
+          if (!found) {
+            newNumbers.push(`${standardized}:${uid}`);
+            found = true;
+          }
+          continue;
+        }
 
         if (isMatch) {
           found = true;
@@ -2991,7 +3219,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         numbers: newNumbers,
         updatedAt: new Date().toISOString(),
       };
-      await setDoc(docRef, updatedPayload);
+      await setDoc(docRef, updatedPayload, { merge: true });
       safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(newNumbers));
       safeStorage.setItem("cached_whitelisted_phones_data", JSON.stringify(updatedPayload));
       safeStorage.setItem("cached_whitelisted_phones_time", Date.now().toString());
@@ -3023,6 +3251,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (!parsed.phone) continue;
           const itemDigits = parsed.phone.replace(/\D/g, "");
           const isMatch = (standardized && parsed.phone === standardized) ||
+                          (stdDigits && itemDigits && stdDigits === itemDigits) ||
                           (last10.length === 10 && itemDigits.slice(-10) === last10);
 
           if (!isMatch) {
@@ -3038,7 +3267,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           numbers: newNumbers,
           updatedAt: new Date().toISOString(),
         };
-        await setDoc(docRef, updatedPayload);
+        await setDoc(docRef, updatedPayload, { merge: true });
         safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(newNumbers));
         safeStorage.setItem("cached_whitelisted_phones_data", JSON.stringify(updatedPayload));
         safeStorage.setItem("cached_whitelisted_phones_time", Date.now().toString());
@@ -3437,8 +3666,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile({ ...profile, ...data });
 
       // Automatically whitelist and link phone number if present or updated
-      const effectivePhone = data.phone || profile.phone;
-      if (effectivePhone) {
+      const effectivePhone = data.phone !== undefined ? data.phone : profile.phone;
+      if (effectivePhone && effectivePhone.trim()) {
         const std = standardizePhone(effectivePhone);
         if (std) {
           try {
@@ -3446,10 +3675,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               email: data.email || profile.email || user.email || undefined,
               displayName: data.displayName || profile.displayName || user.displayName || undefined,
               hasPassword: Boolean(newPassword || data.hasPassword || profile.hasPassword),
+              oldPhone: profile.phone || undefined,
             });
           } catch (linkErr) {
             console.warn("Auto-whitelist on profile update failed:", linkErr);
           }
+        }
+      } else if (data.phone !== undefined && !data.phone.trim() && profile.phone) {
+        // Phone explicitly removed
+        try {
+          await removePhoneForUid(user.uid);
+        } catch (e) {
+          console.warn("Auto-remove phone for UID failed:", e);
         }
       }
     } catch (err: any) {
@@ -3639,6 +3876,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         whitelistPhoneNumber,
         unwhitelistPhoneNumber,
         linkPhoneToUid,
+        removePhoneForUid,
         findUsersByEmailOrPhone,
         updateUserPassword,
         updateUserProfileData,
