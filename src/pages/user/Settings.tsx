@@ -173,6 +173,7 @@ export default function Settings() {
     }
 
     setLoading(true);
+    const previousPhone = profile?.phone || user?.phoneNumber || '';
     try {
       const notificationPreferences = {
         fcm: {
@@ -208,7 +209,6 @@ export default function Settings() {
         await (window as any).triggerRefreshAppData('settings_changed');
       }
 
-      const previousPhone = profile?.phone;
       if (phone.trim() && user?.uid) {
         const std = standardizePhone(phone);
         if (std) {

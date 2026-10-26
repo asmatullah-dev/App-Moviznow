@@ -15,7 +15,8 @@ service cloud.firestore {
         request.auth.token.email == 'wamoviesstation@gmail.com' ||
         (request.auth.token.phone_number != null && (
           request.auth.token.phone_number == '+923009327327' ||
-          request.auth.token.phone_number == '+923006286280'
+          request.auth.token.phone_number == '+923006286280' ||
+          request.auth.token.phone_number == '+923416286423'
         )) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'owner'])

@@ -46,6 +46,7 @@ import {
   writeBatch,
   orderBy,
   increment,
+  deleteField,
 } from "firebase/firestore";
 import { UserProfile } from "../types";
 import { logEvent, updateTimeSpent } from "../services/analytics";
@@ -2871,26 +2872,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         } catch (e) {}
 
-        // Fallback 1: check userMetadata in whitelisted_phones document
-        if (!phoneUser || !phoneUser.email) {
-          const meta = data.userMetadata?.[uid];
-          if (meta) {
-            phoneUser = {
-              uid,
-              displayName: meta.displayName || phoneUser?.displayName || null,
-              email: meta.email || phoneUser?.email || null,
-              hasPassword: meta.hasPassword !== undefined ? Boolean(meta.hasPassword) : Boolean(phoneUser?.hasPassword),
-              phone: meta.phone || phoneUser?.phone || standardizedPhone,
-              role: meta.role || phoneUser?.role || "user",
-              status: meta.status || phoneUser?.status || "active",
-            };
-            if (meta.email && !meta.email.endsWith("@moviznow.com")) {
-              authEmail = meta.email;
-            }
-          }
-        }
-
-        // Fallback 2: check client cached users
+        // Fallback 1: check client cached users
         if (!phoneUser || !phoneUser.email) {
           try {
             const cachedStr = safeStorage.getItem("cached_all_users");
@@ -2984,113 +2966,115 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const oldPhoneDigits = extraData?.oldPhone ? extraData.oldPhone.replace(/\D/g, "") : "";
     const oldPhoneLast10 = oldPhoneDigits.slice(-10);
 
-    try {
-      const docRef = doc(db, "settings", "whitelisted_phones");
-      const snap = await getDoc(docRef);
-      const data = snap.exists() ? snap.data() : {};
+    // Try client Firestore write if user is signed in
+    if (auth.currentUser) {
+      try {
+        const docRef = doc(db, "settings", "whitelisted_phones");
+        const snap = await getDoc(docRef);
+        const data = snap.exists() ? snap.data() : {};
 
-      const rawNumbers: any[] = Array.isArray(data.numbers)
-        ? data.numbers
-        : (Array.isArray(data.phones) ? data.phones : (Array.isArray(data.whitelist) ? data.whitelist : []));
-      
-      const newNumbers: string[] = [];
-      let foundAndUpdated = false;
+        const rawNumbers: any[] = Array.isArray(data.numbers)
+          ? data.numbers
+          : (Array.isArray(data.phones) ? data.phones : (Array.isArray(data.whitelist) ? data.whitelist : []));
+        
+        const newNumbers: string[] = [];
+        let foundAndUpdated = false;
 
-      for (const item of rawNumbers) {
-        const parsed = parseWhitelistedEntry(item);
-        if (!parsed.phone) continue;
-        const itemDigits = parsed.phone.replace(/\D/g, "");
-        const isMatch = (standardized && parsed.phone === standardized) ||
-                        (stdDigits && itemDigits && stdDigits === itemDigits) ||
-                        (last10.length >= 7 && itemDigits.endsWith(last10)) ||
-                        (itemDigits.length >= 7 && stdDigits.endsWith(itemDigits.slice(-10)));
+        for (const item of rawNumbers) {
+          const parsed = parseWhitelistedEntry(item);
+          if (!parsed.phone) continue;
+          const itemDigits = parsed.phone.replace(/\D/g, "");
+          const isMatch = (standardized && parsed.phone === standardized) ||
+                          (stdDigits && itemDigits && stdDigits === itemDigits) ||
+                          (last10.length >= 7 && itemDigits.endsWith(last10)) ||
+                          (itemDigits.length >= 7 && stdDigits.endsWith(itemDigits.slice(-10)));
 
-        const isOldPhoneMatch = Boolean(
-          oldPhoneDigits && (
-            itemDigits === oldPhoneDigits ||
-            (oldPhoneLast10.length === 10 && itemDigits.slice(-10) === oldPhoneLast10)
-          )
-        );
+          const isOldPhoneMatch = Boolean(
+            oldPhoneDigits && (
+              itemDigits === oldPhoneDigits ||
+              (oldPhoneLast10.length === 10 && itemDigits.slice(-10) === oldPhoneLast10)
+            )
+          );
 
-        const isSameUid = Boolean(parsed.uid && parsed.uid === uid);
+          const isSameUid = Boolean(parsed.uid && parsed.uid === uid);
+          const isUserOldPhone = isSameUid || (isOldPhoneMatch && (parsed.uid === uid || !parsed.uid));
 
-        // Before saving number: uid check if already exist the same uid
-        // so remove previous number and add new or simply change phone number for existing uid instead of adding again with same uid
-        if (isSameUid || (isOldPhoneMatch && parsed.uid === uid)) {
-          if (!foundAndUpdated) {
-            newNumbers.push(`${standardized}:${uid}`);
-            foundAndUpdated = true;
+          // Before saving number: if already linked to same UID or matches user's old phone,
+          // replace previous entry with the new standardized:uid entry
+          if (isUserOldPhone) {
+            if (!foundAndUpdated) {
+              newNumbers.push(`${standardized}:${uid}`);
+              foundAndUpdated = true;
+            }
+            // Remove previous number for this UID by not pushing the old entry
+            continue;
           }
-          // Remove previous number for this UID by not pushing the old entry
-          continue;
-        }
 
-        if (isMatch) {
-          // Entry matches the new phone: attach this UID
-          if (!foundAndUpdated) {
-            newNumbers.push(`${standardized}:${uid}`);
-            foundAndUpdated = true;
-          }
-        } else {
-          // Preserve existing entry for other phone / user
-          if (parsed.uid) {
-            newNumbers.push(`${parsed.phone}:${parsed.uid}`);
+          if (isMatch) {
+            // Entry matches the new phone: attach this UID
+            if (!foundAndUpdated) {
+              newNumbers.push(`${standardized}:${uid}`);
+              foundAndUpdated = true;
+            }
           } else {
-            newNumbers.push(parsed.phone);
+            // Preserve existing entry for other phone / user
+            if (parsed.uid) {
+              newNumbers.push(`${parsed.phone}:${parsed.uid}`);
+            } else {
+              newNumbers.push(parsed.phone);
+            }
           }
         }
-      }
 
-      if (!foundAndUpdated) {
-        newNumbers.push(`${standardized}:${uid}`);
-      }
-
-      // Also clean up and update phoneToUid if present in document
-      let updatedPhoneToUid: Record<string, string> | undefined = undefined;
-      if (data.phoneToUid && typeof data.phoneToUid === "object") {
-        updatedPhoneToUid = {};
-        for (const [k, v] of Object.entries(data.phoneToUid)) {
-          // Remove previous phone mappings for this same UID
-          if (v !== uid) {
-            updatedPhoneToUid[k] = v as string;
-          }
+        if (!foundAndUpdated) {
+          newNumbers.push(`${standardized}:${uid}`);
         }
-        updatedPhoneToUid[standardized] = uid;
-      }
 
-      const existingUserMetadata = (data.userMetadata && typeof data.userMetadata === "object") ? data.userMetadata : {};
-      const updatedUserMetadata = {
-        ...existingUserMetadata,
-        [uid]: {
-          uid,
-          phone: standardized,
-          email: extraData?.email || existingUserMetadata[uid]?.email || "",
-          displayName: extraData?.displayName || existingUserMetadata[uid]?.displayName || "",
-          hasPassword: extraData?.hasPassword !== undefined ? Boolean(extraData.hasPassword) : Boolean(existingUserMetadata[uid]?.hasPassword),
+        // Deduplicate numbers array
+        const deduplicatedNumbers = Array.from(new Set(newNumbers));
+
+        // Purge userMetadata and phoneToUid completely using deleteField()
+        // As defined in the blueprint, whitelisted_phones strictly stores only numbers and updatedAt
+        const updatedPayload: any = {
+          numbers: deduplicatedNumbers,
           updatedAt: now,
-        }
-      };
+          userMetadata: deleteField(),
+          phoneToUid: deleteField(),
+        };
 
-      const updatedPayload: any = {
-        numbers: newNumbers,
-        updatedAt: now,
-        userMetadata: updatedUserMetadata,
-      };
-      if (updatedPhoneToUid) {
-        updatedPayload.phoneToUid = updatedPhoneToUid;
+        await setDoc(docRef, updatedPayload, { merge: true });
+
+        safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(deduplicatedNumbers));
+        safeStorage.removeItem("cached_whitelisted_phones_data");
+        safeStorage.setItem("cached_whitelisted_phones_time", Date.now().toString());
+
+        return true;
+      } catch (clientErr: any) {
+        console.error("Firestore error linking phone to UID in whitelisted_phones:", clientErr);
+        handleFirestoreError(clientErr, OperationType.WRITE, "settings/whitelisted_phones");
       }
-
-      await setDoc(docRef, updatedPayload, { merge: true });
-
-      safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(newNumbers));
-      safeStorage.setItem("cached_whitelisted_phones_data", JSON.stringify(updatedPayload));
-      safeStorage.setItem("cached_whitelisted_phones_time", Date.now().toString());
-
-      return true;
-    } catch (err) {
-      console.error("Error linking phone to UID in whitelisted_phones:", err);
-      return false;
     }
+
+    // Fallback: Always update local client caches with the linked phone
+    try {
+      const cachedStr = safeStorage.getItem("cached_whitelisted_phones_doc");
+      let list = cachedStr ? JSON.parse(cachedStr) : [];
+      if (Array.isArray(list)) {
+        list = list.filter((item: any) => {
+          const parsed = parseWhitelistedEntry(item);
+          if (parsed.uid && parsed.uid === uid) return false;
+          if (oldPhoneDigits && parsed.phone.replace(/\D/g, "") === oldPhoneDigits) return false;
+          return true;
+        });
+        const entry = `${standardized}:${uid}`;
+        if (!list.includes(entry)) {
+          list.push(entry);
+        }
+        safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(list));
+      }
+    } catch (e) {}
+
+    return true;
   };
 
   const removePhoneForUid = async (uid: string): Promise<boolean> => {
@@ -3120,28 +3104,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      let updatedPhoneToUid: Record<string, string> | undefined = undefined;
-      if (data.phoneToUid && typeof data.phoneToUid === "object") {
-        updatedPhoneToUid = {};
-        for (const [k, v] of Object.entries(data.phoneToUid)) {
-          if (v !== uid) {
-            updatedPhoneToUid[k] = v as string;
-          }
-        }
-      }
+      const deduplicatedNumbers = Array.from(new Set(newNumbers));
 
       const updatedPayload: any = {
-        numbers: newNumbers,
+        numbers: deduplicatedNumbers,
         updatedAt: new Date().toISOString(),
+        userMetadata: deleteField(),
+        phoneToUid: deleteField(),
       };
-      if (updatedPhoneToUid) {
-        updatedPayload.phoneToUid = updatedPhoneToUid;
-      }
 
       await setDoc(docRef, updatedPayload, { merge: true });
 
-      safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(newNumbers));
-      safeStorage.setItem("cached_whitelisted_phones_data", JSON.stringify(updatedPayload));
+      safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(deduplicatedNumbers));
+      safeStorage.removeItem("cached_whitelisted_phones_data");
       safeStorage.setItem("cached_whitelisted_phones_time", Date.now().toString());
 
       return true;
@@ -3215,13 +3190,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      const deduplicatedNumbers = Array.from(new Set(newNumbers));
       const updatedPayload: any = {
-        numbers: newNumbers,
+        numbers: deduplicatedNumbers,
         updatedAt: new Date().toISOString(),
+        userMetadata: deleteField(),
+        phoneToUid: deleteField(),
       };
       await setDoc(docRef, updatedPayload, { merge: true });
-      safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(newNumbers));
-      safeStorage.setItem("cached_whitelisted_phones_data", JSON.stringify(updatedPayload));
+      safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(deduplicatedNumbers));
+      safeStorage.removeItem("cached_whitelisted_phones_data");
       safeStorage.setItem("cached_whitelisted_phones_time", Date.now().toString());
       return true;
     } catch (err) {
@@ -3263,13 +3241,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
+        const deduplicatedNumbers = Array.from(new Set(newNumbers));
         const updatedPayload: any = {
-          numbers: newNumbers,
+          numbers: deduplicatedNumbers,
           updatedAt: new Date().toISOString(),
+          userMetadata: deleteField(),
+          phoneToUid: deleteField(),
         };
         await setDoc(docRef, updatedPayload, { merge: true });
-        safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(newNumbers));
-        safeStorage.setItem("cached_whitelisted_phones_data", JSON.stringify(updatedPayload));
+        safeStorage.setItem("cached_whitelisted_phones_doc", JSON.stringify(deduplicatedNumbers));
+        safeStorage.removeItem("cached_whitelisted_phones_data");
         safeStorage.setItem("cached_whitelisted_phones_time", Date.now().toString());
       }
       return true;
@@ -3286,7 +3267,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const trimmed = identifier.trim();
       if (!trimmed) return [];
 
-      // Check local cached users first if available
+      // 1. Check local cached users first if available
       try {
         const cachedUsersStr = safeStorage.getItem('cached_all_users');
         if (cachedUsersStr) {
@@ -3306,6 +3287,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } catch (e) {}
 
+      // 2. Check server-side account-lookup endpoint via Firebase Admin
+      // This bypasses Firestore client permission rules cleanly and safely returns matching user records
+      try {
+        const resp = await fetch("/api/email/account-lookup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier: trimmed }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.success && Array.isArray(data.users) && data.users.length > 0) {
+            return data.users;
+          }
+        }
+      } catch (apiErr) {
+        console.warn("Account lookup API notice:", apiErr);
+      }
+
+      // 3. Check publicly readable whitelisted_phones settings document
+      try {
+        const wlRecord = await getWhitelistedPhoneRecord(trimmed);
+        if (wlRecord.isWhitelisted && wlRecord.phoneUser) {
+          return [wlRecord.phoneUser as UserProfile];
+        }
+      } catch (wlErr) {}
+
       const matches: UserProfile[] = [];
       const seenUids = new Set<string>();
 
@@ -3319,93 +3326,106 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
       };
 
-      const evaluateQuery = async (q: any, name: string) => {
-        try {
-          const snap = await getDocs(q);
-          addMatches(snap);
-        } catch (err) {
-          console.error(`Error in query ${name}:`, err);
-        }
-      };
-
-      // 1. Check email variations
-      const lowercaseIdentifier = trimmed.toLowerCase();
-      await evaluateQuery(
-        query(
-          collection(db, "users"),
-          where("email", "==", lowercaseIdentifier),
-          limit(5),
-        ),
-        "email_exact",
+      // 4. Only execute direct Firestore queries if user is signed in and has admin privileges
+      const currentUserEmail = auth.currentUser?.email?.toLowerCase();
+      const isPrivilegedUser = Boolean(
+        auth.currentUser && (
+          currentUserEmail === "asmatn628@gmail.com" ||
+          currentUserEmail === "asmatullah9327@gmail.com" ||
+          currentUserEmail === "kabirahmaddev@gmail.com" ||
+          currentUserEmail === "wamoviesstation@gmail.com" ||
+          profile?.role === "admin" ||
+          profile?.role === "owner"
+        )
       );
 
-      // 2. Check phone variations
-      // Clean identifier: remove everything except digits and possibly a leading +
-      const cleanedForSearch = trimmed.replace(/[^\d+]/g, "");
-      const isLikelyPhone =
-        cleanedForSearch.length >= 7 && /^[\d+]+$/.test(cleanedForSearch);
+      if (isPrivilegedUser) {
+        const evaluateQuery = async (q: any, name: string) => {
+          try {
+            const snap = await getDocs(q);
+            addMatches(snap);
+          } catch (err: any) {
+            console.warn(`Query ${name} notice:`, err?.message || err);
+          }
+        };
 
-      if (isLikelyPhone) {
-        const standardized = standardizePhone(cleanedForSearch);
-
-        let digitsOnly = cleanedForSearch.replace(/\D/g, "");
-        let baseNumber = digitsOnly;
-        if (baseNumber.startsWith("92")) baseNumber = baseNumber.substring(2);
-        else if (baseNumber.startsWith("0"))
-          baseNumber = baseNumber.substring(1);
-
-        const phoneFormats = [
-          cleanedForSearch,
-          standardized,
-          `+92${baseNumber}`,
-          `0${baseNumber}`,
-          `92${baseNumber}`,
-          baseNumber,
-        ].filter((v, i, a) => v && a.indexOf(v) === i);
-
-        const emailFormats = [
-          `${baseNumber}@moviznow.com`,
-          `92${baseNumber}@moviznow.com`,
-          `0${baseNumber}@moviznow.com`,
-          `+92${baseNumber}@moviznow.com`,
-        ].filter((v, i, a) => v && a.indexOf(v) === i);
-
-        if (phoneFormats.length > 0) {
-          await evaluateQuery(
-            query(
-              collection(db, "users"),
-              where("phone", "in", phoneFormats),
-              limit(5),
-            ),
-            "phone_in",
-          );
-        }
-
-        if (emailFormats.length > 0) {
-          await evaluateQuery(
-            query(
-              collection(db, "users"),
-              where("email", "in", emailFormats),
-              limit(5),
-            ),
-            "email_in",
-          );
-        }
-      } else {
-        // Just search the raw trimmed identifier in phone too in case it was saved oddly
+        // Check email variations
+        const lowercaseIdentifier = trimmed.toLowerCase();
         await evaluateQuery(
           query(
             collection(db, "users"),
-            where("phone", "==", trimmed),
+            where("email", "==", lowercaseIdentifier),
             limit(5),
           ),
-          "phone_exact",
+          "email_exact",
         );
+
+        // Check phone variations
+        const cleanedForSearch = trimmed.replace(/[^\d+]/g, "");
+        const isLikelyPhone =
+          cleanedForSearch.length >= 7 && /^[\d+]+$/.test(cleanedForSearch);
+
+        if (isLikelyPhone) {
+          const standardized = standardizePhone(cleanedForSearch);
+
+          let digitsOnly = cleanedForSearch.replace(/\D/g, "");
+          let baseNumber = digitsOnly;
+          if (baseNumber.startsWith("92")) baseNumber = baseNumber.substring(2);
+          else if (baseNumber.startsWith("0"))
+            baseNumber = baseNumber.substring(1);
+
+          const phoneFormats = [
+            cleanedForSearch,
+            standardized,
+            `+92${baseNumber}`,
+            `0${baseNumber}`,
+            `92${baseNumber}`,
+            baseNumber,
+          ].filter((v, i, a) => v && a.indexOf(v) === i);
+
+          const emailFormats = [
+            `${baseNumber}@moviznow.com`,
+            `92${baseNumber}@moviznow.com`,
+            `0${baseNumber}@moviznow.com`,
+            `+92${baseNumber}@moviznow.com`,
+          ].filter((v, i, a) => v && a.indexOf(v) === i);
+
+          if (phoneFormats.length > 0) {
+            await evaluateQuery(
+              query(
+                collection(db, "users"),
+                where("phone", "in", phoneFormats),
+                limit(5),
+              ),
+              "phone_in",
+            );
+          }
+
+          if (emailFormats.length > 0) {
+            await evaluateQuery(
+              query(
+                collection(db, "users"),
+                where("email", "in", emailFormats),
+                limit(5),
+              ),
+              "email_in",
+            );
+          }
+        } else {
+          await evaluateQuery(
+            query(
+              collection(db, "users"),
+              where("phone", "==", trimmed),
+              limit(5),
+            ),
+            "phone_exact",
+          );
+        }
       }
 
       return matches;
-    } catch (err) {
-      console.error("Error finding users (outer):", err);
+    } catch (err: any) {
+      console.warn("Notice finding users (outer):", err?.message || err);
       return [];
     }
   };
@@ -3417,6 +3437,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   ) => {
     if (!auth.currentUser || !user || !profile)
       throw new Error("No user logged in");
+
+    const originalOldPhone = profile?.phone || user?.phoneNumber || "";
 
     const now = Date.now();
     const userSyncKey = `last_user_sync_time_v2_${user.uid}`;
@@ -3675,13 +3697,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               email: data.email || profile.email || user.email || undefined,
               displayName: data.displayName || profile.displayName || user.displayName || undefined,
               hasPassword: Boolean(newPassword || data.hasPassword || profile.hasPassword),
-              oldPhone: profile.phone || undefined,
+              oldPhone: originalOldPhone || undefined,
             });
           } catch (linkErr) {
             console.warn("Auto-whitelist on profile update failed:", linkErr);
           }
         }
-      } else if (data.phone !== undefined && !data.phone.trim() && profile.phone) {
+      } else if (data.phone !== undefined && !data.phone.trim() && originalOldPhone) {
         // Phone explicitly removed
         try {
           await removePhoneForUid(user.uid);
