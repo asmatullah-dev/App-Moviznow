@@ -25,6 +25,21 @@ export function maskEmail(email?: string | null): string {
   return `${first}***${last}@${domain}`;
 }
 
+async function safeParseJsonResponse(res: Response): Promise<any> {
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    if (res.status === 404) {
+      throw new Error("Service endpoint not found. Please refresh the page.");
+    }
+    if (res.status >= 500) {
+      throw new Error("Server is temporarily unavailable. Please try again shortly.");
+    }
+    throw new Error("Invalid response received from server. Please try again.");
+  }
+}
+
 export default function Login() {
   const { 
     user, 
@@ -83,6 +98,27 @@ export default function Login() {
   useEffect(() => {
     if (step === 'create_password' && registeredUser && !registeredUser.hasPassword && !verifyToken) {
       if (registeredUser.email && !registeredUser.email.endsWith('@moviznow.com')) {
+        const isGoogle = registeredUser.email.endsWith('@gmail.com') || (registeredUser as any).isGoogleUser || (registeredUser as any).provider === 'google.com';
+        if (isGoogle) {
+          setCustomError(
+            <div className="flex flex-col gap-2.5">
+              <p className="font-semibold text-zinc-900 dark:text-white">Account Linked to Google</p>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                Your account ({maskEmail(registeredUser.email)}) is registered with Google. Click below to sign in directly with one tap:
+              </p>
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                className="w-full bg-emerald-500 text-white py-2.5 rounded-xl font-medium hover:bg-emerald-600 transition-colors mt-1 shadow-sm flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Continue with Google</span>
+              </button>
+            </div>
+          );
+          setStep('social');
+          return;
+        }
         setStep('verify_otp');
       }
     }
@@ -245,7 +281,7 @@ export default function Login() {
           phone: identifier,
         }),
       });
-      const data = await res.json();
+      const data = await safeParseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Verification failed");
 
       setVerifyToken(data.verifyToken);
@@ -275,7 +311,7 @@ export default function Login() {
           displayName: registeredUser.displayName,
         }),
       });
-      const data = await res.json();
+      const data = await safeParseJsonResponse(res);
       if (!res.ok) throw new Error(data.error || "Failed to resend code");
       setResendCooldown(30);
     } catch (err: any) {
@@ -470,40 +506,37 @@ export default function Login() {
           return;
         }
 
-        // Step 5: If not has any password then proceed for create password,
-        // BUT has email then verify OTP first!
-        if (cleanEmail) {
-          try {
-            setOtpSending(true);
-            const sendRes = await fetch("/api/email/send-login-otp", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                phone: standardizedPhone,
-                email: cleanEmail,
-                uid: accountUid,
-                displayName: cleanName || "Movie Fan",
-                emailSettings: settings?.emailSettings,
-              }),
-            });
-            const sendData = await sendRes.json();
-            if (!sendRes.ok) throw new Error(sendData.error || "Failed to send verification code");
-            setResendCooldown(30);
-          } catch (otpErr: any) {
-            console.warn("Failed to send initial OTP:", otpErr);
-            setCustomError(otpErr?.message || "Failed to send verification code. Please try again.");
-          } finally {
-            setOtpSending(false);
-          }
-          setOtp('');
-          setVerifyToken('');
-          setStep('verify_otp');
+        // Step 5: If account is linked to Google, offer 1-click Google Sign-In directly (no redundant OTP)
+        const isGoogleAccount = Boolean(
+          cleanEmail && (
+            cleanEmail.endsWith('@gmail.com') ||
+            phoneRecord.phoneUser?.isGoogleUser ||
+            phoneRecord.phoneUser?.provider === 'google.com'
+          )
+        );
+
+        if (isGoogleAccount) {
+          setCustomError(
+            <div className="flex flex-col gap-2.5">
+              <p className="font-semibold text-zinc-900 dark:text-white">Account Linked to Google</p>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                Your account ({maskEmail(cleanEmail)}) is registered with Google. Click below to sign in directly:
+              </p>
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                className="w-full bg-emerald-500 text-white py-2.5 rounded-xl font-medium hover:bg-emerald-600 transition-colors mt-1 shadow-sm flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Continue with Google</span>
+              </button>
+            </div>
+          );
           setIsLoggingIn(false);
           return;
         }
 
-        // Step 6: If email also Missing then ask to enter email address with creating password,
-        // but don't ask for email if exist!
+        // Step 6: Non-Google user setting password
         setPassword('');
         setConfirmPassword('');
         setVerifyToken('');
@@ -541,40 +574,25 @@ export default function Login() {
         if (foundUser.hasPassword) {
           setStep('password');
         } else {
-          // Google user without password logging in with email: MUST verify OTP first
-          if (cleanEmail) {
-            try {
-              setOtpSending(true);
-              const sendRes = await fetch("/api/email/send-login-otp", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  phone: foundUser.phone || formatIdentifier(rawTrimmed),
-                  email: cleanEmail,
-                  uid: foundUser.uid,
-                  displayName: cleanName || foundUser.displayName,
-                }),
-              });
-              const sendData = await sendRes.json();
-              if (!sendRes.ok) throw new Error(sendData.error || "Failed to send verification code");
-              setResendCooldown(30);
-            } catch (otpErr: any) {
-              console.warn("Failed to send initial OTP:", otpErr);
-              setCustomError(otpErr?.message || "Failed to send verification code. Please try again.");
-            } finally {
-              setOtpSending(false);
-            }
-            setOtp('');
-            setVerifyToken('');
-            setStep('verify_otp');
-            setIsLoggingIn(false);
-            return;
-          } else {
-            setPassword('');
-            setConfirmPassword('');
-            setVerifyToken('');
-            setStep('create_password');
-          }
+          // Google user without password logging in with email: direct to Google sign-in (no redundant OTP)!
+          setCustomError(
+            <div className="flex flex-col gap-2.5">
+              <p className="font-semibold text-zinc-900 dark:text-white">Account Linked to Google</p>
+              <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                This account ({cleanEmail || rawTrimmed}) is registered with Google. Click below to sign in directly:
+              </p>
+              <button
+                type="button"
+                onClick={handleGoogleLogin}
+                className="w-full bg-emerald-500 text-white py-2.5 rounded-xl font-medium hover:bg-emerald-600 transition-colors mt-1 shadow-sm flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Continue with Google</span>
+              </button>
+            </div>
+          );
+          setIsLoggingIn(false);
+          return;
         }
       } else {
         setRegisteredUser(null);
@@ -996,16 +1014,48 @@ export default function Login() {
                 <motion.div 
                   initial={{ opacity: 0, y: 5 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="mt-4 text-center p-3 bg-red-500/5 dark:bg-red-500/10 border border-red-500/20 rounded-xl"
+                  className="mt-4 text-center p-3.5 bg-red-500/5 dark:bg-red-500/10 border border-red-500/20 rounded-2xl space-y-2.5"
                 >
-                  <p className="text-xs text-red-500 mb-2">Incorrect password. Contact admin for reset password.</p>
-                  <button
-                    type="button"
-                    onClick={handleForgotPassword}
-                    className="text-xs text-emerald-500 font-semibold hover:underline inline-flex items-center gap-1"
-                  >
-                    Forgot Password? (WhatsApp Admin)
-                  </button>
+                  <p className="text-xs text-red-500 font-medium">Incorrect password.</p>
+                  {Boolean(
+                    registeredUser && (
+                      registeredUser.provider === 'google.com' ||
+                      (registeredUser as any).isGoogleUser === true ||
+                      (registeredUser.email && registeredUser.email.endsWith('@gmail.com')) ||
+                      (Array.isArray((registeredUser as any).providerData) && (registeredUser as any).providerData.some((p: any) => p?.providerId === 'google.com'))
+                    )
+                  ) ? (
+                    <div className="flex flex-col gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleGoogleLogin}
+                        className="w-full bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 py-2.5 px-4 rounded-xl font-semibold text-xs hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-all flex items-center justify-center gap-2 shadow-sm"
+                      >
+                        <svg className="w-4 h-4 flex-shrink-0" viewBox="0 0 24 24">
+                          <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                          <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                          <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+                          <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+                        </svg>
+                        <span>Continue with Google</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleForgotPassword}
+                        className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold hover:underline inline-flex items-center justify-center gap-1"
+                      >
+                        Reset Password
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      className="text-xs text-emerald-500 font-semibold hover:underline inline-flex items-center gap-1"
+                    >
+                      Forgot Password? (WhatsApp Admin)
+                    </button>
+                  )}
                 </motion.div>
               )}
             </motion.form>
@@ -1199,7 +1249,7 @@ export default function Login() {
                           verifyToken,
                         }),
                       });
-                      const completeData = await completeRes.json();
+                      const completeData = await safeParseJsonResponse(completeRes);
                       if (!completeRes.ok) {
                         throw new Error(completeData.error || "Failed to complete password setup.");
                       }
