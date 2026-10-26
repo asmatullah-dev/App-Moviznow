@@ -4842,7 +4842,7 @@ export default function MovieDetails() {
           <motion.div
             key="link-popup-backdrop"
             {...modalBackdropAnimation}
-            className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-hidden bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 overflow-y-auto bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
             onClick={closeLinkPopup}
           >
             {/* Dialog Card */}
@@ -4850,30 +4850,24 @@ export default function MovieDetails() {
               key="link-popup-card"
               {...modalContainerAnimation}
               style={modalGpuStyle}
-              className="relative bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full shadow-2xl overflow-hidden z-10 transform-gpu my-auto"
+              className="relative bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl max-w-md w-full shadow-2xl z-10 transform-gpu my-auto max-h-[min(92dvh,720px)] flex flex-col overflow-hidden"
               onClick={(e) => e.stopPropagation()}
             >
-                <button
-                  onClick={closeLinkPopup}
-                  className="absolute top-5 right-5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-1 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800"
-                  disabled={extractingLinkId === linkPopup.url}
-                >
-                  <X className="w-5 h-5" />
-                </button>
-                <h3 className="text-xl font-bold mb-2 text-zinc-900 dark:text-white">{t('Play Content')}</h3>
-                <div className="flex justify-between items-center mb-6 gap-2">
-                  <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                    {t('How would you like to open')} <span dir="ltr" className="inline-block mx-1 font-bold text-zinc-900 dark:text-zinc-100">"{linkPopup.name}"</span>{language === 'ur' ? '؟' : '?'}
-                  </p>
-                  {linkPopup.size && (
-                    <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold whitespace-nowrap">
-                      {linkPopup.size}
-                    </span>
-                  )}
+                {/* Fixed Top Header */}
+                <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-zinc-200/70 dark:border-zinc-800/80 shrink-0 bg-zinc-50 dark:bg-zinc-900">
+                  <h3 className="text-xl font-bold text-zinc-900 dark:text-white leading-tight">{t('Play Content')}</h3>
+                  <button
+                    onClick={closeLinkPopup}
+                    className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-1.5 rounded-full hover:bg-zinc-200 dark:hover:bg-zinc-800 cursor-pointer"
+                    disabled={extractingLinkId === linkPopup.url}
+                    aria-label="Close"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
 
                 {extractingLinkId === linkPopup.url && (
-                  <div className="absolute inset-0 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center rounded-3xl">
+                  <div className="absolute inset-0 bg-white/85 dark:bg-zinc-900/85 backdrop-blur-sm z-30 flex flex-col items-center justify-center rounded-3xl p-6 text-center">
                     <Loader2 className="animate-spin h-9 w-9 text-emerald-500 mb-3" />
                     <p className="text-sm font-bold text-zinc-900 dark:text-white">
                       {t('Extracting link...')}
@@ -4881,7 +4875,18 @@ export default function MovieDetails() {
                   </div>
                 )}
 
-                <div className="flex flex-col gap-3">
+                {/* Scrollable Body Content */}
+                <div className="p-5 sm:p-6 overflow-y-auto overscroll-contain flex-1 flex flex-col gap-3.5 custom-scrollbar touch-pan-y">
+                  <div className="flex justify-between items-center mb-1 gap-2">
+                    <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                      {t('How would you like to open')} <span dir="ltr" className="inline-block mx-1 font-bold text-zinc-900 dark:text-zinc-100">"{linkPopup.name}"</span>{language === 'ur' ? '؟' : '?'}
+                    </p>
+                    {linkPopup.size && (
+                      <span className="px-3 py-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 rounded-full text-xs font-bold whitespace-nowrap shrink-0">
+                        {linkPopup.size}
+                      </span>
+                    )}
+                  </div>
                   {linkPopup.candidates && linkPopup.candidates.filter(c => {
                     const lowerT = (c.text || '').toLowerCase();
                     const lowerH = (c.href || '').toLowerCase();
@@ -5109,7 +5114,7 @@ export default function MovieDetails() {
                         : t("Report Link (if not Working)")}
                   </button>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-3 pb-2 sm:pb-3">
                     <button
                       onClick={handleCopyDownloadLink}
                       className={`w-full font-bold py-3 px-4 text-sm rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer ${
@@ -5267,7 +5272,7 @@ export default function MovieDetails() {
       {/* Trailer Selection Modal */}
       <AnimatePresence mode="wait">
         {isTrailerSelectionOpen && (
-          <div key="trailer-selection-wrapper" className="fixed inset-0 z-[9999] flex items-center justify-center p-4 overflow-hidden">
+          <div key="trailer-selection-wrapper" className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 overflow-y-auto bg-black/80 backdrop-blur-xs">
             <motion.div
               key="trailer-selection-backdrop"
               {...modalBackdropAnimation}
@@ -5278,7 +5283,7 @@ export default function MovieDetails() {
               key="trailer-selection-card"
               {...modalContainerAnimation}
               style={modalGpuStyle}
-              className="relative bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full shadow-2xl z-10 transform-gpu"
+              className="relative bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-5 sm:p-6 max-w-md w-full shadow-2xl z-10 transform-gpu my-auto max-h-[min(90dvh,600px)] overflow-y-auto custom-scrollbar"
               onClick={(e) => e.stopPropagation()}
             >
                 <button

@@ -490,7 +490,7 @@ const ContentCard = React.memo(({
       {/* Trailer Selection Modal */}
       <AnimatePresence>
         {isTrailerSelectionOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
             <motion.div
               {...modalBackdropAnimation}
               className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
@@ -499,7 +499,7 @@ const ContentCard = React.memo(({
             <motion.div
               {...modalContainerAnimation}
               style={modalGpuStyle}
-              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 max-w-md w-full relative shadow-2xl z-10 transform-gpu"
+              className="bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-5 sm:p-6 max-w-md w-full relative shadow-2xl z-10 transform-gpu my-auto max-h-[min(90dvh,600px)] overflow-y-auto custom-scrollbar"
               onClick={(e) => e.stopPropagation()}
             >
               <button
