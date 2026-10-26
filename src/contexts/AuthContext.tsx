@@ -2352,7 +2352,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             break;
           } catch (err: any) {
             lastError = err;
-            if (err.code === "auth/wrong-password") {
+            if (err.code === "auth/wrong-password" || (record?.authEmail && candidate === record.authEmail && err.code === "auth/invalid-credential")) {
               throw err;
             }
           }
@@ -2443,13 +2443,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }, 10000);
     } catch (err: any) {
       justLoggedInRef.current = false;
-      console.error("Email login error:", err);
       if (
-        err.code === "auth/invalid-credential" ||
-        err.code === "auth/wrong-password"
+        err?.code === "auth/invalid-credential" ||
+        err?.code === "auth/wrong-password" ||
+        err?.code === "auth/user-not-found" ||
+        err?.code === "auth/invalid-email"
       ) {
+        console.warn("Authentication failed (invalid credentials):", err.code || err.message);
         setError("Invalid password. Try again or reset your password.");
       } else {
+        console.error("Email login error:", err);
         setError(err.message || "Failed to login with email");
       }
       throw err;

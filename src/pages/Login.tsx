@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth, standardizePhone } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Mail, Phone, ArrowLeft, Eye, EyeOff, Lock, User as UserIcon, Loader2, Sparkles, ShieldCheck } from 'lucide-react';
+import { Mail, Phone, ArrowLeft, Eye, EyeOff, Lock, User as UserIcon, Loader2, Sparkles, ShieldCheck, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { UserProfile } from '../types';
@@ -80,6 +80,9 @@ export default function Login() {
   const [verifyToken, setVerifyToken] = useState('');
   const [resendCooldown, setResendCooldown] = useState(0);
   const [wrongPasswordCount, setWrongPasswordCount] = useState(0);
+  const [resetEmailSending, setResetEmailSending] = useState(false);
+  const [resetEmailSent, setResetEmailSent] = useState<string | null>(null);
+  const [resetCooldown, setResetCooldown] = useState(0);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -88,6 +91,14 @@ export default function Login() {
     }, 1000);
     return () => clearInterval(timer);
   }, [resendCooldown]);
+
+  useEffect(() => {
+    if (resetCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResetCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resetCooldown]);
 
   useEffect(() => {
     if (location.state?.suspended) {
@@ -579,7 +590,7 @@ export default function Login() {
             <div className="flex flex-col gap-2.5">
               <p className="font-semibold text-zinc-900 dark:text-white">Account Linked to Google</p>
               <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                This account ({cleanEmail || rawTrimmed}) is registered with Google. Click below to sign in directly:
+                This account ({maskEmail(cleanEmail || rawTrimmed) || cleanEmail || rawTrimmed}) is registered with Google. Click below to sign in directly:
               </p>
               <button
                 type="button"
@@ -662,7 +673,7 @@ export default function Login() {
           break;
         } catch (err: any) {
           lastErr = err;
-          if (err?.code === 'auth/wrong-password') {
+          if (err?.code === 'auth/wrong-password' || err?.code === 'auth/invalid-credential') {
             break;
           }
         }
@@ -674,22 +685,41 @@ export default function Login() {
     } catch (err: any) {
       setIsLoggingIn(false);
       setWrongPasswordCount(prev => prev + 1);
+      if (
+        err?.code === 'auth/wrong-password' ||
+        err?.code === 'auth/invalid-credential'
+      ) {
+        setCustomError(t("Incorrect password. Please check your credentials or reset your password."));
+      }
     }
   };
 
   const handleForgotPassword = async () => {
-    if (registeredUser?.email && !registeredUser.email.endsWith('@moviznow.com')) {
+    if (resetCooldown > 0 || resetEmailSending) return;
+
+    const targetEmail = registeredUser?.email && !registeredUser.email.endsWith('@moviznow.com')
+      ? registeredUser.email
+      : (identifier && identifier.includes('@') && !identifier.endsWith('@moviznow.com') ? identifier.trim().toLowerCase() : '');
+
+    if (targetEmail) {
+      setResetEmailSending(true);
+      clearError();
+      setCustomError(null);
       try {
         const { getAuth, sendPasswordResetEmail } = await import('firebase/auth');
-        await sendPasswordResetEmail(getAuth(), registeredUser.email);
-        alert('A password reset link has been sent to your email.');
+        await sendPasswordResetEmail(getAuth(), targetEmail);
+        const maskedEmail = maskEmail(targetEmail) || `${targetEmail.slice(0, 2)}***@${targetEmail.split('@')[1] || ''}`;
+        setResetEmailSent(maskedEmail);
+        setResetCooldown(60); // 1-minute countdown timer
       } catch (error: any) {
-        console.error("Error sending reset email:", error);
+        console.warn("Notice sending reset email:", error);
         setCustomError(error.message || 'Failed to send reset email.');
+      } finally {
+        setResetEmailSending(false);
       }
     } else {
       if (settings?.isAdminContactEnabled === false) {
-        alert("Password reset via admin contact is currently disabled.");
+        setCustomError(t("Password reset via admin contact is currently disabled."));
         return;
       }
       // Open WhatsApp to admin
@@ -955,7 +985,7 @@ export default function Login() {
             >
               <button 
                 type="button"
-                onClick={() => { setStep('identifier'); setWrongPasswordCount(0); }} 
+                onClick={() => { setStep('identifier'); setWrongPasswordCount(0); setResetEmailSent(null); setResetCooldown(0); }} 
                 className="flex items-center gap-2 text-xs font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white transition-colors mb-2 group"
               >
                 <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" /> Back
@@ -971,8 +1001,51 @@ export default function Login() {
                 </div>
               </div>
 
+              {/* In-page password reset confirmation banner */}
+              <AnimatePresence>
+                {resetEmailSent && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                    transition={{ duration: 0.2 }}
+                    className="p-3.5 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl text-left space-y-1 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-semibold text-xs">
+                        <Check className="w-4 h-4 flex-shrink-0" />
+                        <span>{t("Password reset link sent!")}</span>
+                      </div>
+                      {resetCooldown > 0 && (
+                        <span className="text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                          {resetCooldown}s
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-zinc-600 dark:text-zinc-300 leading-relaxed">
+                      {t("A password reset link has been sent to")} <span className="font-semibold text-zinc-900 dark:text-white">{resetEmailSent}</span>. {t("Please check your email inbox and spam folder.")}
+                    </p>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               <div>
-                <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">Password</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Password")}</label>
+                  {((registeredUser?.email && !registeredUser.email.endsWith('@moviznow.com')) || (identifier && identifier.includes('@'))) && (
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      disabled={resetCooldown > 0 || resetEmailSending}
+                      className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline disabled:opacity-50 disabled:no-underline font-medium inline-flex items-center gap-1"
+                    >
+                      {resetEmailSending ? (
+                        <Loader2 className="w-3 h-3 animate-spin text-emerald-500" />
+                      ) : null}
+                      {resetCooldown > 0 ? `${t("Send again in")} ${resetCooldown}s` : t("Forgot?")}
+                    </button>
+                  )}
+                </div>
                 <div className="relative group">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 group-focus-within:text-emerald-500 transition-colors" />
                   <input
@@ -1018,12 +1091,13 @@ export default function Login() {
                 >
                   <p className="text-xs text-red-500 font-medium">Incorrect password.</p>
                   {Boolean(
-                    registeredUser && (
+                    (identifier && identifier.trim().toLowerCase().endsWith('@gmail.com')) ||
+                    (registeredUser && (
                       registeredUser.provider === 'google.com' ||
                       (registeredUser as any).isGoogleUser === true ||
-                      (registeredUser.email && registeredUser.email.endsWith('@gmail.com')) ||
+                      (registeredUser.email && registeredUser.email.toLowerCase().endsWith('@gmail.com')) ||
                       (Array.isArray((registeredUser as any).providerData) && (registeredUser as any).providerData.some((p: any) => p?.providerId === 'google.com'))
-                    )
+                    ))
                   ) ? (
                     <div className="flex flex-col gap-2 pt-1">
                       <button
@@ -1042,19 +1116,54 @@ export default function Login() {
                       <button
                         type="button"
                         onClick={handleForgotPassword}
-                        className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold hover:underline inline-flex items-center justify-center gap-1"
+                        disabled={resetCooldown > 0 || resetEmailSending}
+                        className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold hover:underline inline-flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:no-underline"
                       >
-                        Reset Password
+                        {resetEmailSending ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>{t("Sending reset link...")}</span>
+                          </>
+                        ) : resetCooldown > 0 ? (
+                          <span>
+                            {t("Send again in")} <span className="font-mono font-bold text-emerald-500">{resetCooldown}s</span>
+                          </span>
+                        ) : (
+                          <span>{resetEmailSent ? t("Send reset link again") : t("Reset Password")}</span>
+                        )}
                       </button>
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      onClick={handleForgotPassword}
-                      className="text-xs text-emerald-500 font-semibold hover:underline inline-flex items-center gap-1"
-                    >
-                      Forgot Password? (WhatsApp Admin)
-                    </button>
+                    <div className="flex flex-col gap-2 pt-1">
+                      {((registeredUser?.email && !registeredUser.email.endsWith('@moviznow.com')) || (identifier && identifier.includes('@'))) && (
+                        <button
+                          type="button"
+                          onClick={handleForgotPassword}
+                          disabled={resetCooldown > 0 || resetEmailSending}
+                          className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold hover:underline inline-flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:no-underline"
+                        >
+                          {resetEmailSending ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>{t("Sending reset link...")}</span>
+                            </>
+                          ) : resetCooldown > 0 ? (
+                            <span>
+                              {t("Send again in")} <span className="font-mono font-bold text-emerald-500">{resetCooldown}s</span>
+                            </span>
+                          ) : (
+                            <span>{resetEmailSent ? t("Send reset link again") : t("Reset Password via Email")}</span>
+                          )}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleForgotPassword}
+                        className="text-xs text-emerald-500 font-semibold hover:underline inline-flex items-center justify-center gap-1"
+                      >
+                        Forgot Password? (WhatsApp Admin)
+                      </button>
+                    </div>
                   )}
                 </motion.div>
               )}

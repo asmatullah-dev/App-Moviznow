@@ -940,7 +940,7 @@ export default function Settings() {
                       </h3>
                       {!profile?.hasPassword && (
                         <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                          {t('Set a password so you can access your account using your email.')}
+                          {t('Set a password so you can access your account using your Whatsapp Number.')}
                         </p>
                       )}
                     </div>
