@@ -1,7 +1,9 @@
 {
   "functions": {
     "api/index.ts": {
-      "includeFiles": "dist/**"
+      "includeFiles": "dist/**",
+      "maxDuration": 60,
+      "memory": 1024
     }
   },
   "headers": [

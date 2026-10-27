@@ -2637,6 +2637,10 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     }
   });
 
+  // FilmyGo / FilmyCab Caches (TTL 30 minutes) to eliminate repetitive gate hops and prevent Vercel serverless timeouts
+  const filmygoCache = new Map<string, { hits: any[]; timestamp: number }>();
+  const filesdlCache = new Map<string, { results: Array<{ file_name: string; url: string; size: string | null; is_direct: boolean }>; timestamp: number }>();
+
   // FilmyGo / FilmyCab Extraction API
   app.get('/api/filmygo', async (req: express.Request, res: express.Response) => {
     try {
@@ -2649,6 +2653,13 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       let targetUrl = url.trim().replace(/[:\s]+$/, '');
       if (!targetUrl.startsWith('http')) {
         targetUrl = 'https://' + targetUrl;
+      }
+
+      const normTarget = normalizeDomain(targetUrl);
+      const cached = filmygoCache.get(targetUrl) || filmygoCache.get(normTarget);
+      if (cached && Date.now() - cached.timestamp < 30 * 60 * 1000 && cached.hits && cached.hits.length > 0) {
+        console.log(`[FilmyGo/FilmyCab] Returning cached hits (${cached.hits.length}) for: ${targetUrl}`);
+        return res.json({ hits: cached.hits, found: cached.hits.length, cached: true });
       }
 
       console.log(`[FilmyGo/FilmyCab] Extracting FilesDL links from: ${targetUrl}`);
@@ -2889,35 +2900,63 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         if (depth > 4 || branchVisited.has(startUrl) || startUrl.toLowerCase().includes("gdflix")) return [];
         branchVisited.add(startUrl);
 
+        // Check FilesDL cache first (avoids duplicate gate hops)
+        const cachedFdl = filesdlCache.get(startUrl) || filesdlCache.get(normalizeDomain(startUrl));
+        if (cachedFdl && Date.now() - cachedFdl.timestamp < 30 * 60 * 1000 && cachedFdl.results.length > 0) {
+          return cachedFdl.results;
+        }
+
         try {
           let htmlText = "";
           let finalUrl = startUrl;
 
+          const browserHeaders: Record<string, string> = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': targetUrl,
+            'Sec-Fetch-Site': 'cross-site',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Upgrade-Insecure-Requests': '1',
+          };
+
           // Attempt up to 3 times for transient vDDoS challenges or network timeouts
           for (let fetchAttempt = 0; fetchAttempt < 3; fetchAttempt++) {
             try {
-              const fetched = await fetchWithVddos(startUrl, undefined, 16000);
+              const fetched = await fetchWithVddos(startUrl, browserHeaders, 9000);
               htmlText = fetched.html || "";
               finalUrl = fetched.finalUrl || startUrl;
               if (htmlText.length > 300 && !htmlText.includes('vDDoS-zn') && !htmlText.includes('toNumbers')) break;
             } catch (fetchErr) {
-              if (fetchAttempt < 2) {
-                await new Promise((r) => setTimeout(r, (fetchAttempt + 1) * 450));
+              if (fetchAttempt === 0) {
+                await new Promise((r) => setTimeout(r, 250));
                 continue;
               }
               try {
                 const res = await axios.get(startUrl, {
-                  headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Referer': targetUrl
-                  },
+                  headers: browserHeaders,
                   httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-                  timeout: 14000,
+                  timeout: 9000,
                   maxRedirects: 5
                 });
                 htmlText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+                if (htmlText.length > 300 && !htmlText.includes('vDDoS-zn') && !htmlText.includes('toNumbers')) break;
               } catch (e2) {}
+
+              // On Vercel, if datacenter IP encounters Cloudflare or 403/503 on filesdl.in, fall back to fetchHtml
+              if (fetchAttempt === 1) {
+                try {
+                  const bypass = await fetchHtml(startUrl, false, false);
+                  if (bypass && bypass.data && typeof bypass.data === 'string' && bypass.data.length > 300) {
+                    htmlText = bypass.data;
+                    break;
+                  }
+                } catch (e3) {}
+              }
             }
           }
 
@@ -2960,12 +2999,18 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
             }
 
-            return hubMatches.map((hubUrl) => ({
+            const matchedResults = hubMatches.map((hubUrl) => ({
               file_name: finalName || "HubCloud Link",
               url: normalizeDomain(hubUrl.replace(/&amp;/g, '&')),
               size,
               is_direct: true,
             }));
+
+            // Cache FilesDL resolution
+            filesdlCache.set(startUrl, { results: matchedResults, timestamp: Date.now() });
+            filesdlCache.set(normalizeDomain(startUrl), { results: matchedResults, timestamp: Date.now() });
+
+            return matchedResults;
           }
 
           // Otherwise, parse HTML with Cheerio to find nested linkmake / intermediate gate links
@@ -3057,14 +3102,20 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               uniqueCandidates.map((cand, i) =>
                 new Promise<Array<{ file_name: string; url: string; size: string | null; is_direct: boolean }>>((resolve) => {
                   setTimeout(async () => {
-                    const res = await resolveFilmyGoLink(cand.url, cand.label, depth + 1, new Set(branchVisited));
-                    resolve(res);
-                  }, i * 60); // 60ms stagger to prevent server TCP/vDDoS concurrency drops
+                    try {
+                      const res = await resolveFilmyGoLink(cand.url, cand.label, depth + 1, new Set(branchVisited));
+                      resolve(res);
+                    } catch (e) {
+                      resolve([]);
+                    }
+                  }, i * 60);
                 })
               )
             );
             const flattened = subResults.flat().filter(h => isHubCloudUrl(h.url));
             if (flattened.length > 0) {
+              filesdlCache.set(startUrl, { results: flattened, timestamp: Date.now() });
+              filesdlCache.set(normalizeDomain(startUrl), { results: flattened, timestamp: Date.now() });
               return flattened;
             }
           }
@@ -3073,24 +3124,30 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           if (isHubCloudUrl(startUrl)) {
             const cleanLabelQuality = parentLabel.replace(/^Download\s*(Now\s*)?/i, '').trim();
             const fallbackName = pageMovieTitle ? `${pageMovieTitle} [${cleanLabelQuality}]` : parentLabel;
-            return [{
+            const res = [{
               file_name: fallbackName || "HubCloud Link",
               url: normalizeDomain(startUrl),
               size: null,
               is_direct: true,
             }];
+            filesdlCache.set(startUrl, { results: res, timestamp: Date.now() });
+            filesdlCache.set(normalizeDomain(startUrl), { results: res, timestamp: Date.now() });
+            return res;
           }
           return [];
         } catch (e) {
           if (isHubCloudUrl(startUrl)) {
             const cleanLabelQuality = parentLabel.replace(/^Download\s*(Now\s*)?/i, '').trim();
             const fallbackName = pageMovieTitle ? `${pageMovieTitle} [${cleanLabelQuality}]` : parentLabel;
-            return [{
+            const res = [{
               file_name: fallbackName || "HubCloud Link",
               url: normalizeDomain(startUrl),
               size: null,
               is_direct: true,
             }];
+            filesdlCache.set(startUrl, { results: res, timestamp: Date.now() });
+            filesdlCache.set(normalizeDomain(startUrl), { results: res, timestamp: Date.now() });
+            return res;
           }
           return [];
         }
@@ -3100,12 +3157,31 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         Array.from(fdlData.entries()).map(([fdlUrl, data], idx) =>
           new Promise<Array<{ file_name: string; url: string; size: string | null; is_direct: boolean }>>((resolve) => {
             setTimeout(async () => {
-              const res = await resolveFilmyGoLink(fdlUrl, data.label, 0, new Set([targetUrl]));
-              resolve(res);
-            }, idx * 75);
+              try {
+                const res = await resolveFilmyGoLink(fdlUrl, data.label, 0, new Set([targetUrl]));
+                resolve(res);
+              } catch (e) {
+                resolve([]);
+              }
+            }, idx * 100);
           })
         )
       );
+
+      // Dedicated secondary retry for any link that returned empty to prevent missing resolutions on Vercel
+      const fdlEntries = Array.from(fdlData.entries());
+      for (let i = 0; i < rawResults.length; i++) {
+        if (!rawResults[i] || rawResults[i].length === 0) {
+          const [fdlUrl, data] = fdlEntries[i];
+          try {
+            console.log(`[FilmyGo] Secondary retry for unextracted quality on Vercel: ${data.label} (${fdlUrl})`);
+            const retryRes = await resolveFilmyGoLink(fdlUrl, data.label, 0, new Set([targetUrl]));
+            if (retryRes && retryRes.length > 0) {
+              rawResults[i] = retryRes;
+            }
+          } catch (retryErr) {}
+        }
+      }
 
       let finalHits = rawResults.flat().filter((hit, index, self) => 
         isHubCloudUrl(hit.url) &&
@@ -3143,6 +3219,12 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         seenKeys.set(key, { hit, index: newIndex });
       }
       finalHits = dedupedHits;
+
+      // Cache full FilmyGo/FilmyCab results (TTL 30 min)
+      if (finalHits.length > 0) {
+        filmygoCache.set(targetUrl, { hits: finalHits, timestamp: Date.now() });
+        filmygoCache.set(normTarget, { hits: finalHits, timestamp: Date.now() });
+      }
       
       res.json({ hits: finalHits, found: finalHits.length });
     } catch (error: any) {
