@@ -2324,7 +2324,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   const handleCheck = async (onlyUrls?: string[], initialInputOverride?: string, depth = 0, force = false) => {
     setError(null);
-    if (depth === 0 && !initialInputOverride) {
+    if (depth === 0) {
       processedExtractionsRef.current.clear();
     }
     if (depth > 10) {
@@ -2933,6 +2933,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
       !u.includes('moviesdrives.') &&
       !u.includes('moviesdrive.') &&
       !u.includes('filmygo.') &&
+      !u.includes('filmycab.') &&
+      !u.includes('hdhub4u') &&
+      !u.includes('filmyfly') &&
       !u.includes('skymovies')
     );
     

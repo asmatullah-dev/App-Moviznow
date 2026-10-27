@@ -2203,7 +2203,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               if (!cachedHb) {
                 cachedHb = await fetchAndCacheHubcloud(linkUrl);
               }
-              if (cachedHb && (cachedHb.isNotFound || !cachedHb.isWorking)) {
+              if (cachedHb && (cachedHb.isNotFound === true || (cachedHb.isWorking === false && !cachedHb.title && !cachedHb.original_title && !cachedHb.url))) {
                 console.log(`[HDHub4U] Skipping dead/broken direct HubCloud link: ${linkUrl}`);
                 return;
               }
@@ -2278,7 +2278,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               if (!cachedHb) {
                 cachedHb = await fetchAndCacheHubcloud(hubcloudLink);
               }
-              if (cachedHb && (cachedHb.isNotFound || !cachedHb.isWorking)) {
+              if (cachedHb && (cachedHb.isNotFound === true || (cachedHb.isWorking === false && !cachedHb.title && !cachedHb.original_title && !cachedHb.url))) {
                 console.log(`[HDHub4U] Skipping dead/broken HubCloud link from HubDrive: ${hubcloudLink}`);
                 return;
               }
@@ -2422,7 +2422,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                 if (!cachedItem) {
                   cachedItem = await fetchAndCacheHubcloud(item.url);
                 }
-                if (cachedItem && (cachedItem.isNotFound || !cachedItem.isWorking)) {
+                if (cachedItem && (cachedItem.isNotFound === true || (cachedItem.isWorking === false && !cachedItem.title && !cachedItem.original_title && !cachedItem.url))) {
                   console.log(`[HDHub4U] Skipping dead/broken nested HubCloud link: ${item.url}`);
                   return;
                 }
@@ -2513,7 +2513,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                     if (!cachedHb) {
                       cachedHb = await fetchAndCacheHubcloud(cleanHubUrl);
                     }
-                    if (cachedHb && (cachedHb.isNotFound || !cachedHb.isWorking)) {
+                    if (cachedHb && (cachedHb.isNotFound === true || (cachedHb.isWorking === false && !cachedHb.title && !cachedHb.original_title && !cachedHb.url))) {
                       console.log(`[HDHub4U] Skipping dead/broken fallback HubCloud link: ${cleanHubUrl}`);
                       return;
                     }
@@ -4988,9 +4988,22 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         currentHost.includes("drivehub")
       ) {
         try {
-          const hbData = await fetchAndCacheHubcloud(currentUrl);
+          const forceCheck = Boolean(req.body.force);
+          const hbData = await fetchAndCacheHubcloud(currentUrl, forceCheck);
           if (hbData) {
-            if (hbData.isNotFound || !hbData.isWorking) {
+            const hasWorkingContent = 
+              hbData.isWorking === true || 
+              Boolean(hbData.title && !hbData.title.toLowerCase().includes("not found")) ||
+              Boolean(hbData.original_title && !hbData.original_title.toLowerCase().includes("not found")) ||
+              Boolean(hbData.url && !hbData.url.includes("hubcloud") && !hbData.url.includes("drivehub")) || 
+              (Array.isArray(hbData.candidates) && hbData.candidates.length > 0) || 
+              (Array.isArray(hbData.download_links) && hbData.download_links.length > 0);
+
+            const isExplicitlyNotFound = 
+              hbData.isNotFound === true || 
+              (hbData.isWorking === false && !hasWorkingContent);
+
+            if (isExplicitlyNotFound) {
               return res.json({
                 ok: false,
                 status: 404,
@@ -5007,7 +5020,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                 status: 200,
                 statusLabel: "WORKING",
                 message: "Cloud file is available",
-                finalUrl: currentUrl,
+                finalUrl: hbData.url || currentUrl,
                 source: "hubcloud-api",
                 host: currentHost,
                 fileName: hbData.original_title || hbData.title,

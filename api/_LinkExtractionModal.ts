@@ -63,13 +63,22 @@ export function getCachedHubcloudData(url: string) {
                  extractionCache.get(`direct_${normalizedUrl}_false`) ||
                  extractionCache.get(`direct_${normalizedUrl}_true`);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return cached.data;
+    const d = cached.data;
+    if (d && (d.title || d.original_title || (Array.isArray(d.candidates) && d.candidates.length > 0) || hasValidDirectLink(d, url))) {
+      if (d.isWorking === undefined) d.isWorking = true;
+      if (d.isNotFound === undefined) d.isNotFound = false;
+    }
+    return d;
   }
   return null;
 }
 
 export function setCachedHubcloudData(url: string, data: any) {
   if (!url || !data) return;
+  if (data.title || data.original_title || (Array.isArray(data.candidates) && data.candidates.length > 0) || hasValidDirectLink(data, url)) {
+    if (data.isWorking === undefined) data.isWorking = true;
+    if (data.isNotFound === undefined) data.isNotFound = false;
+  }
   const normalizedUrl = normalizeDomain(url);
   const item = { data, timestamp: Date.now() };
   extractionCache.set(`extract_${url}`, item);
@@ -1003,6 +1012,8 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
         seasonEpLabel: parsedMeta.seasonEpLabel,
         quality: parsedMeta.quality,
         shortQuality: parsedMeta.shortQuality,
+        isWorking: true,
+        isNotFound: false,
       };
 
       if (finalExtractedData.title || finalExtractedData.original_title) {
