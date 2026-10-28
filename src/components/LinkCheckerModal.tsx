@@ -185,6 +185,7 @@ type Props = {
   contentType?: "movie" | "series";
   autoStart?: boolean;
   isBatchMode?: boolean;
+  initialEnableWaterfall?: boolean;
   onAddLinks?: (
     links: QualityLinks,
     metadata?: {
@@ -258,6 +259,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
   contentType,
   autoStart = false,
   isBatchMode = false,
+  initialEnableWaterfall,
   onAddLinks,
   onBatchAddLinks,
   onResults,
@@ -293,6 +295,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [clipboardStatus, setClipboardStatus] = useState<"active" | "unfocused" | "denied" | "idle">("idle");
 
   const getDefaultWaterfallEnabled = useCallback(() => {
+    if (initialEnableWaterfall !== undefined) {
+      return initialEnableWaterfall;
+    }
     // Disabled by default when open by batch fetch
     if (isBatchMode || Boolean(title && /batch/i.test(title))) {
       return false;
@@ -302,7 +307,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       return true;
     }
     return false;
-  }, [isBatchMode, title, content, initialTitle]);
+  }, [initialEnableWaterfall, isBatchMode, title, content, initialTitle]);
 
   const [titleImportWaterfall, setTitleImportWaterfall] = useState<boolean>(getDefaultWaterfallEnabled);
   const [loading, setLoading] = useState(false);
@@ -2373,7 +2378,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       setLoading(true);
       setError(null);
       try {
-        if (titleLines.length === 1) {
+        if (titleLines.length === 1 && !isBatchMode) {
           const rawLine = titleLines[0];
           const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(rawLine);
           const searchTitle = extractedTitle || rawLine;
@@ -3430,7 +3435,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setTitleImportWaterfall(getDefaultWaterfallEnabled());
+      setTitleImportWaterfall(initialEnableWaterfall !== undefined ? initialEnableWaterfall : getDefaultWaterfallEnabled());
       if (initialInput) {
         setInput(initialInput);
       } else if (initialTitle) {
@@ -3472,7 +3477,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     } else {
       autoStartedInputRef.current = null;
     }
-  }, [isOpen, initialInput, initialTitle, initialYear, autoStart, disableAutoClipboard]);
+  }, [isOpen, initialInput, initialTitle, initialYear, autoStart, disableAutoClipboard, initialEnableWaterfall, getDefaultWaterfallEnabled]);
 
   useEffect(() => {
     if (!isOpen || disableAutoClipboard || !autoClipboard) {
@@ -5445,7 +5450,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                 />
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={() => handleCheck()} disabled={loading} className="inline-flex items-center justify-center rounded-xl gap-1.5 bg-cyan-500 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-cyan-600 dark:hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm">{loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{loading ? "Checking..." : `Check ${links.length || ""} Link${links.length > 1 ? "s" : ""}`}</button>
+                  <button onClick={() => handleCheck()} disabled={loading} className="inline-flex items-center justify-center rounded-xl gap-1.5 bg-cyan-500 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-cyan-600 dark:hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm">{loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{loading ? (titleImportWaterfall && !links.length ? "Searching Waterfall..." : "Checking...") : links.length > 0 ? `Check ${links.length} Link${links.length > 1 ? "s" : ""}` : (titleImportWaterfall ? "Search Waterfall" : "Check Links")}</button>
                   <button 
                     onClick={() => {
                       const trimmedInput = input.trim();

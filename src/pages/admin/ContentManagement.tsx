@@ -1284,6 +1284,8 @@ export default function ContentManagement() {
   const [isMasterFetchModalOpen, setIsMasterFetchModalOpen] = useState(false);
   const [isLinkCheckerOpen, setIsLinkCheckerOpen] = useState(false);
   const [isBatchLinkCheckerOpen, setIsBatchLinkCheckerOpen] = useState(false);
+  const [isWaterfallBulkOpen, setIsWaterfallBulkOpen] = useState(false);
+  const [waterfallBulkInput, setWaterfallBulkInput] = useState("");
   const [isAdjustContentsModalOpen, setIsAdjustContentsModalOpen] =
     useState(false);
   const [telegramDownloadContent, setTelegramDownloadContent] = useState<Content | null>(null);
@@ -6574,6 +6576,15 @@ export default function ContentManagement() {
                         } else if (val === "batch_links") {
                           setIsBatchFetchModalOpen(true);
                           setBatchFetchMode("links");
+                        } else if (val === "waterfall_search") {
+                          const selectedItems = selectedContent
+                            .map((id) => contentList.find((c) => c.id === id))
+                            .filter(Boolean) as Content[];
+                          const formattedTitles = selectedItems
+                            .map((c) => `${c.title.trim()}${c.year ? ` (${c.year})` : ""}`)
+                            .join("\n");
+                          setWaterfallBulkInput(formattedTitles);
+                          setIsWaterfallBulkOpen(true);
                         } else if (val) {
                           handleBulkStatusChange(val as any);
                         }
@@ -6589,6 +6600,9 @@ export default function ContentManagement() {
                           <option value="selected_content">
                             Selected Content Only
                           </option>
+                          <option value="waterfall_search">
+                            Search in Waterfall
+                          </option>
                           <option value="batch_fetch">
                             Batch Fetch Missing Data
                           </option>
@@ -6599,7 +6613,12 @@ export default function ContentManagement() {
                       )}
                       {(profile?.role === "content_manager" ||
                         profile?.role === "manager") && (
-                        <option value="draft">Draft</option>
+                        <>
+                          <option value="waterfall_search">
+                            Search in Waterfall
+                          </option>
+                          <option value="draft">Draft</option>
+                        </>
                       )}
                     </select>
                   </>
@@ -7121,6 +7140,20 @@ export default function ContentManagement() {
       <LinkCheckerModal
         isOpen={isBatchLinkCheckerOpen}
         onClose={() => setIsBatchLinkCheckerOpen(false)}
+        isBatchMode={true}
+        onBatchAddLinks={handleBatchAddLinks}
+        languages={languages}
+        qualities={qualities}
+      />
+      <LinkCheckerModal
+        isOpen={isWaterfallBulkOpen}
+        onClose={() => {
+          setIsWaterfallBulkOpen(false);
+          setWaterfallBulkInput("");
+        }}
+        title="Search in Waterfall (Batch)"
+        initialInput={waterfallBulkInput}
+        initialEnableWaterfall={true}
         isBatchMode={true}
         onBatchAddLinks={handleBatchAddLinks}
         languages={languages}
