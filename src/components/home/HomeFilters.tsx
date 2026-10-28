@@ -9,8 +9,8 @@ interface HomeFiltersProps {
   search: string;
   setSearch: (value: string) => void;
   searchInputRef: React.RefObject<HTMLInputElement>;
-  sort: "default" | "newest" | "year" | "az";
-  setSort: (val: "default" | "newest" | "year" | "az") => void;
+  sort: "default" | "reverse" | "newest" | "year" | "az";
+  setSort: (val: "default" | "reverse" | "newest" | "year" | "az") => void;
   selectedType: string;
   setSelectedType: (val: string) => void;
   selectedGenre: string;
@@ -143,6 +143,7 @@ export const HomeFilters: React.FC<HomeFiltersProps> = React.memo(({
           className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-800 dark:text-zinc-200 focus:border-emerald-500 shadow-sm cursor-pointer hover:border-emerald-500/50 transition-colors"
         >
           <option value="default">{t("Default Order")}</option>
+          <option value="reverse">{t("Reverse Order")}</option>
           <option value="newest">{t("Recently Added")}</option>
           <option value="year">{t("Release Year")}</option>
           <option value="az">{t("A-Z")}</option>

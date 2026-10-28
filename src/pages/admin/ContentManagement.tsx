@@ -1183,7 +1183,7 @@ export default function ContentManagement() {
   const [filterAddedBy, setFilterAddedBy] = useState<string>(
     () => sessionStorage.getItem("content_mgmt_added_by") || "all",
   );
-  const [filterSort, setFilterSort] = useState<"default" | "newest" | "oldest">(
+  const [filterSort, setFilterSort] = useState<"default" | "reverse" | "newest" | "oldest">(
     () => (sessionStorage.getItem("content_mgmt_sort_v2") as any) || "default",
   );
   const [selectedContent, setSelectedContent] = useState<string[]>([]);
@@ -5379,24 +5379,31 @@ export default function ContentManagement() {
     // Sort according to user preference, just like Home page
     let sortedResult = [...result];
 
-    // If we're searching and the sort is default or newest, we SHOULD NOT re-sort,
+    // If we're searching and the sort is default, reverse, or newest, we SHOULD NOT re-sort,
     // because smartSearch already sorted by relevance score.
     if (
       debouncedSearchTerm &&
-      (filterSort === "default" || filterSort === "newest")
+      (filterSort === "default" || filterSort === "reverse" || filterSort === "newest")
     ) {
       return result;
     }
 
+    const compareDefault = (itemA: Content, itemB: Content) => {
+      if (itemA.order !== undefined && itemB.order !== undefined)
+        return itemB.order - itemA.order;
+      if (itemA.order === undefined && itemB.order !== undefined) return 1;
+      if (itemA.order !== undefined && itemB.order === undefined) return -1;
+      return (
+        new Date(itemB.createdAt).getTime() - new Date(itemA.createdAt).getTime()
+      );
+    };
+
     sortedResult.sort((a, b) => {
       if (filterSort === "default") {
-        if (a.order !== undefined && b.order !== undefined)
-          return b.order - a.order;
-        if (a.order === undefined && b.order !== undefined) return 1;
-        if (a.order !== undefined && b.order === undefined) return -1;
-        return (
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
+        return compareDefault(a, b);
+      }
+      if (filterSort === "reverse") {
+        return compareDefault(b, a);
       }
       const timeA = new Date(a.createdAt).getTime();
       const timeB = new Date(b.createdAt).getTime();
@@ -6743,6 +6750,7 @@ export default function ContentManagement() {
               className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2 py-1 text-xs focus:border-emerald-500"
             >
               <option value="default">Default Order</option>
+              <option value="reverse">Reverse Order</option>
               <option value="newest">Newest Added</option>
               <option value="oldest">Oldest Added</option>
             </select>

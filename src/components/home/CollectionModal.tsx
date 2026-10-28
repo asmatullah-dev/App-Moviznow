@@ -12,8 +12,8 @@ import {
 interface CollectionModalProps {
   collection: AppCollection | null;
   onClose: () => void;
-  collectionSort: "default" | "newest" | "az";
-  setCollectionSort: (sort: "default" | "newest" | "az") => void;
+  collectionSort: "default" | "reverse" | "newest" | "az";
+  setCollectionSort: (sort: "default" | "reverse" | "newest" | "az") => void;
   scrollRef: React.RefObject<HTMLDivElement>;
   contentMap: Map<string, Content>;
   canPlayMap: Map<string, boolean>;
@@ -62,7 +62,9 @@ export const CollectionModal: React.FC<CollectionModalProps> = React.memo(({
       .map((id) => contentMap.get(id))
       .filter((c): c is Content => Boolean(c && c.status !== "draft"));
 
-    if (collectionSort === "newest") {
+    if (collectionSort === "reverse") {
+      items.reverse();
+    } else if (collectionSort === "newest") {
       items.sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
@@ -112,6 +114,7 @@ export const CollectionModal: React.FC<CollectionModalProps> = React.memo(({
                 className="bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:border-emerald-500 outline-none cursor-pointer"
               >
                 <option value="default">{t("Default Order")}</option>
+                <option value="reverse">{t("Reverse Order")}</option>
                 <option value="newest">{t("Newest First")}</option>
                 <option value="az">{t("A-Z")}</option>
               </select>

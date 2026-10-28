@@ -185,7 +185,7 @@ export default function Home({
     };
   }, [profile?.uid, profile?.email]);
 
-  const [sort, setSort] = useState<"default" | "newest" | "year" | "az">(
+  const [sort, setSort] = useState<"default" | "reverse" | "newest" | "year" | "az">(
     () => (sessionStorage.getItem("home_sort") as any) || "default",
   );
   const [selectedGenre, setSelectedGenre] = useState<string>(
@@ -231,7 +231,7 @@ export default function Home({
   const [selectedCollection, setSelectedCollection] = useState<AppCollection | null>(() => {
     return memoryStore.get("home_selected_collection") || null;
   });
-  const [collectionSort, setCollectionSort] = useState<"default" | "newest" | "az">("default");
+  const [collectionSort, setCollectionSort] = useState<"default" | "reverse" | "newest" | "az">("default");
 
   const collectionScrollRef = useScrollRestoration<HTMLDivElement>(
     "home_selected_collection_scroll",
@@ -845,7 +845,7 @@ export default function Home({
         if (aCanPlay !== bCanPlay) return bCanPlay - aCanPlay;
       }
 
-      if (debouncedSearch && (sort === "default" || sort === "newest")) {
+      if (debouncedSearch && (sort === "default" || sort === "reverse" || sort === "newest")) {
         return 0;
       }
 
@@ -855,11 +855,17 @@ export default function Home({
         if (aAssigned !== bAssigned) return bAssigned - aAssigned;
       }
 
+      const compareDefault = (itemA: Content, itemB: Content) => {
+        if (itemA.order !== undefined && itemB.order !== undefined) return itemB.order - itemA.order;
+        if (itemA.order === undefined && itemB.order !== undefined) return 1;
+        if (itemA.order !== undefined && itemB.order === undefined) return -1;
+        return (createdAtTimeMap.get(itemB.id) || 0) - (createdAtTimeMap.get(itemA.id) || 0);
+      };
+
       if (sort === "default") {
-        if (a.order !== undefined && b.order !== undefined) return b.order - a.order;
-        if (a.order === undefined && b.order !== undefined) return 1;
-        if (a.order !== undefined && b.order === undefined) return -1;
-        return (createdAtTimeMap.get(b.id) || 0) - (createdAtTimeMap.get(a.id) || 0);
+        return compareDefault(a, b);
+      } else if (sort === "reverse") {
+        return compareDefault(b, a);
       } else if (sort === "newest") {
         return (createdAtTimeMap.get(b.id) || 0) - (createdAtTimeMap.get(a.id) || 0);
       } else if (sort === "year") {

@@ -523,6 +523,7 @@ const translations: Record<string, Record<Language, string>> = {
   'Newly Added': { en: 'Newly Added', 'ur-roman': 'Naya Shamil Shuda', ur: 'نیا شامل شدہ' },
   'Collections': { en: 'Collections', 'ur-roman': 'Majmuay', ur: 'مجموعے' },
   'Default Order': { en: 'Default Order', 'ur-roman': 'Default Tarteeb', ur: 'ڈیفالٹ ترتیب' },
+  'Reverse Order': { en: 'Reverse Order', 'ur-roman': 'Ulat Tarteeb', ur: 'الٹ ترتیب' },
   'Release Year': { en: 'Release Year', 'ur-roman': 'Release ka Saal', ur: 'ریلیز کا سال' },
   'A-Z': { en: 'A-Z', 'ur-roman': 'A-Z', ur: 'الف ب' },
   'Contact Admin': { en: 'Contact Admin', 'ur-roman': 'Admin se Rabta', ur: 'ایڈمن سے رابطہ کریں' },
