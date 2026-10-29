@@ -985,10 +985,10 @@ export async function performFullLinkScan(
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const extractController = new AbortController();
-        const extractTimeout = setTimeout(() => extractController.abort(), 15000);
+        const extractTimeout = setTimeout(() => extractController.abort(), 12000);
         
         const directController = new AbortController();
-        const directTimeout = setTimeout(() => directController.abort(), 15000);
+        const directTimeout = setTimeout(() => directController.abort(), 12000);
 
         const currentForce = attempt === 2 ? true : force;
 
@@ -1007,6 +1007,7 @@ export async function performFullLinkScan(
           })
         ]);
         
+        const wasTimedOut = extractController.signal.aborted && directController.signal.aborted;
         clearTimeout(extractTimeout);
         clearTimeout(directTimeout);
 
@@ -1066,7 +1067,8 @@ export async function performFullLinkScan(
         };
         finalUrlToUse = url;
 
-        if ((candidatesInfo && candidatesInfo.length > 0) || resolvedTitle) {
+        const hasCandidates = Boolean(candidatesInfo && candidatesInfo.length > 0);
+        if (hasCandidates || (!isHubcloudVariant && resolvedTitle) || attempt === 2 || wasTimedOut) {
           break;
         }
       } catch {
@@ -1077,6 +1079,7 @@ export async function performFullLinkScan(
           message: "Assuming working (network error)",
         };
         finalUrlToUse = url;
+        break;
       }
     }
   } else if (url.includes("?token=") || url.includes("&token=")) {

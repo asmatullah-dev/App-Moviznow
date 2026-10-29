@@ -642,15 +642,15 @@ export async function runWaterfallLinkSearch(
     searchFn: (query: string, page: number, signal?: AbortSignal) => Promise<any[]>,
     getLinksFn: (postUrl: string, signal?: AbortSignal) => Promise<any[]>,
     filterFn: (hits: any[], pageUrl?: string) => any[],
-    maxPagesToSearch = 4
+    maxPagesToSearch = 2
   ): Promise<{ candidates: { url: string; source: string; postTitle?: string; isSample?: boolean }[]; posts: any[] }> {
     if (signal?.aborted) return { candidates: [], posts: [] };
 
     let verifiedPosts: any[] = [];
 
     // Searches a specific query across pages 1..maxPagesToSearch until confirmed title+year is found
-    async function searchAcrossPages(q: string): Promise<any[]> {
-      for (let page = 1; page <= maxPagesToSearch; page++) {
+    async function searchAcrossPages(q: string, maxPages = maxPagesToSearch): Promise<any[]> {
+      for (let page = 1; page <= maxPages; page++) {
         if (signal?.aborted) break;
         try {
           const posts = await searchFn(q, page, signal);
@@ -671,18 +671,18 @@ export async function runWaterfallLinkSearch(
       return [];
     }
 
-    // 1. Search primary query variation across pages (page 1, 2, 3...)
+    // 1. Search primary query variation across pages (page 1, 2)
     const primaryQuery = uniqueQueryVariations[0];
     if (primaryQuery) {
-      verifiedPosts = await searchAcrossPages(primaryQuery);
+      verifiedPosts = await searchAcrossPages(primaryQuery, maxPagesToSearch);
     }
 
-    // 2. If not found yet and fallback queries exist, try them across pages
+    // 2. If not found yet and fallback queries exist, try first fallback on page 1
     if (verifiedPosts.length === 0 && uniqueQueryVariations.length > 1) {
-      const fallbackQueries = uniqueQueryVariations.slice(1);
+      const fallbackQueries = uniqueQueryVariations.slice(1, 2);
       for (const fq of fallbackQueries) {
         if (signal?.aborted) break;
-        verifiedPosts = await searchAcrossPages(fq);
+        verifiedPosts = await searchAcrossPages(fq, 1);
         if (verifiedPosts.length > 0) {
           break;
         }
@@ -718,19 +718,31 @@ export async function runWaterfallLinkSearch(
   }
 
   // ==========================================
-  // STAGE 1: FilmyCab / FilmyGo (1st Priority)
+  // STAGE 1: FilmyCab / FilmyGo & STAGE 2: MoviesDrive (Parallel Pre-fetch)
   // ==========================================
   log(`[Stage 1/5] Querying FilmyCab / FilmyGo (${fgDomain}) for title "${cleanTitle}"...`);
-  const s1Fast = await queryProviderFast(
+  const s1FastPromise = queryProviderFast(
     'FilmyGo',
     (q, page, sig) => scrapeFilmygoPosts(q, page, sig),
     scrapeFilmygoPostLinks,
-    filterFilmygoHits
+    filterFilmygoHits,
+    2
   );
+
+  // Pre-fetch MoviesDrive in parallel so Stage 2 is instant if Stage 1 is incomplete or empty
+  const s2FastPromise = queryProviderFast(
+    'MoviesDrive',
+    (q, page, sig) => scrapeMoviesdrivePosts(q, page, sig),
+    scrapeMoviesdrivePostLinks,
+    filterMoviesdriveHits,
+    2
+  );
+
+  const s1Fast = await s1FastPromise;
   const stage1Candidates = s1Fast.candidates;
 
   if (stage1Candidates.length > 0) {
-    log(`FilmyGo: Found ${stage1Candidates.length} candidate links, verifying...`);
+    log(`FilmyGo: Found ${stage1Candidates.length} candidate links, verifying in batch...`);
     const s1Result = await scanAndVerifyCandidates(
       stage1Candidates,
       cleanTitle,
@@ -764,7 +776,7 @@ export async function runWaterfallLinkSearch(
       );
       if (over5gb1080p) {
         const sz = getHitSizeGB(over5gb1080p) || parseSizeInGB(over5gb1080p.size);
-        log(`FilmyGo: 1080p link (${sz ? sz.toFixed(2) + ' GB' : '>=5GB'}) is 5GB or greater. Skipping and proceeding to next stage for 1080p < 5GB...`);
+        log(`FilmyGo: 1080p link (${sz ? sz.toFixed(2) + ' GB' : '>=5GB'}) is 5GB or greater. Proceeding to Stage 2 (MoviesDrive) for 1080p < 5GB...`);
       } else {
         log(`FilmyGo: Missing one or more required qualities (480p, 720p [HEVC if >1.45GB is compulsory], 1080p [<5GB]). Proceeding to Stage 2 (MoviesDrive)...`);
       }
@@ -774,20 +786,15 @@ export async function runWaterfallLinkSearch(
   }
 
   // ==========================================
-  // STAGE 2: MoviesDrive (2nd Priority)
+  // STAGE 2: MoviesDrive (2nd Priority - Already pre-fetched)
   // ==========================================
   if (!signal?.aborted) {
-    log(`[Stage 2/5] Querying MoviesDrive (${mdDomain}) for title "${cleanTitle}"...`);
-    const s2Fast = await queryProviderFast(
-      'MoviesDrive',
-      (q, page, sig) => scrapeMoviesdrivePosts(q, page, sig),
-      scrapeMoviesdrivePostLinks,
-      filterMoviesdriveHits
-    );
+    log(`[Stage 2/5] Inspecting MoviesDrive (${mdDomain}) for title "${cleanTitle}"...`);
+    const s2Fast = await s2FastPromise;
     const stage2Candidates = s2Fast.candidates;
 
     if (stage2Candidates.length > 0) {
-      log(`MoviesDrive: Found ${stage2Candidates.length} candidate links, verifying...`);
+      log(`MoviesDrive: Found ${stage2Candidates.length} candidate links, verifying in batch...`);
       const s2Result = await scanAndVerifyCandidates(
         stage2Candidates,
         cleanTitle,

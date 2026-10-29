@@ -333,6 +333,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [isReviewingBatch, setIsReviewingBatch] = useState(false);
+  const [batchSearchStatus, setBatchSearchStatus] = useState<{ completed: number; total: number; currentTitle?: string } | null>(null);
   const [batchReviewItems, setBatchReviewItems] = useState<{
     key: string;
     title: string;
@@ -2415,7 +2416,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
             setError(`No links found for "${searchTitle}" across waterfall sources.`);
           }
         } else {
-          // Bulk titles search
+          // Bulk titles search - process in concurrent batches to drastically improve speed
           const batchItems: {
             key: string;
             title: string;
@@ -2425,43 +2426,73 @@ export const LinkCheckerModal: React.FC<Props> = ({
           }[] = [];
           const allFoundCheckResults: LinkCheckResult[] = [];
 
-          for (let i = 0; i < titleLines.length; i++) {
-            const rawLine = titleLines[i];
+          const itemsToProcess = titleLines.map((rawLine, idx) => {
             const { title: extractedTitle, year: extractedYear } = extractTitleAndYear(rawLine);
             const searchTitle = extractedTitle || rawLine;
             const searchYear = extractedYear;
             const searchType = /\b(s\d+|season\s*\d+|series|tv|episode|ep\d+)\b/i.test(rawLine) ? 'series' : 'movie';
+            return { index: idx, searchTitle, searchYear, searchType };
+          });
 
-            try {
-              const res = await runWaterfallLinkSearch({
-                title: searchTitle,
-                year: searchYear,
-                type: searchType,
-                languages,
-                qualities,
+          setBatchSearchStatus({ completed: 0, total: itemsToProcess.length });
+
+          const BATCH_CONCURRENCY = 3;
+          let queueIdx = 0;
+          let completed = 0;
+
+          const worker = async () => {
+            while (queueIdx < itemsToProcess.length) {
+              const item = itemsToProcess[queueIdx++];
+              if (!item) break;
+
+              setBatchSearchStatus({
+                completed,
+                total: itemsToProcess.length,
+                currentTitle: item.searchTitle,
               });
 
-              if (res.links.length > 0) {
-                allFoundCheckResults.push(...res.results);
-                batchItems.push({
-                  key: `bulk-${i}-${searchTitle}-${Date.now()}`,
-                  title: res.metadata?.title || searchTitle,
-                  year: res.metadata?.year ? String(res.metadata.year) : (searchYear ? String(searchYear) : ''),
-                  links: res.qualityLinks,
-                  metadata: {
-                    ...res.metadata,
-                    languages: res.metadata?.languages || [],
-                    sampleUrl: res.sample?.url || res.metadata?.sampleUrl,
-                    type: res.metadata?.type || searchType,
-                    tmdbData: res.tmdbData,
-                    isTitleSearch: true,
-                  }
+              try {
+                const res = await runWaterfallLinkSearch({
+                  title: item.searchTitle,
+                  year: item.searchYear,
+                  type: item.searchType as any,
+                  languages,
+                  qualities,
+                });
+
+                if (res.links.length > 0) {
+                  allFoundCheckResults.push(...res.results);
+                  batchItems.push({
+                    key: `bulk-${item.index}-${item.searchTitle}-${Date.now()}`,
+                    title: res.metadata?.title || item.searchTitle,
+                    year: res.metadata?.year ? String(res.metadata.year) : (item.searchYear ? String(item.searchYear) : ''),
+                    links: res.qualityLinks,
+                    metadata: {
+                      ...res.metadata,
+                      languages: res.metadata?.languages || [],
+                      sampleUrl: res.sample?.url || res.metadata?.sampleUrl,
+                      type: res.metadata?.type || item.searchType,
+                      tmdbData: res.tmdbData,
+                      isTitleSearch: true,
+                    }
+                  });
+                }
+              } catch (err) {
+                console.error(`Error searching bulk title "${item.searchTitle}":`, err);
+              } finally {
+                completed++;
+                setBatchSearchStatus({
+                  completed,
+                  total: itemsToProcess.length,
+                  currentTitle: item.searchTitle,
                 });
               }
-            } catch (err) {
-              console.error(`Error searching bulk title "${searchTitle}":`, err);
             }
-          }
+          };
+
+          const activeWorkers = Math.min(BATCH_CONCURRENCY, itemsToProcess.length);
+          await Promise.all(Array.from({ length: activeWorkers }, () => worker()));
+          setBatchSearchStatus(null);
 
           if (batchItems.length > 0) {
             setResults(allFoundCheckResults);
@@ -2478,6 +2509,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       } catch (e: any) {
         setError(e.message || "Failed to search title across sources.");
       } finally {
+        setBatchSearchStatus(null);
         setLoading(false);
       }
       return;
@@ -2514,8 +2546,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
       setLoading(true);
       let pausedForUI = false;
       try {
-        // Take up to 5 links at once
-        const batch = extractableLinks.slice(0, 5);
+        // Take up to 15 links at once
+        const batch = extractableLinks.slice(0, 15);
         const results = await Promise.all(batch.map(async (targetUrl, batchIdx) => {
           if (batchIdx > 0) {
             await new Promise((r) => setTimeout(r, batchIdx * 100));
@@ -2688,11 +2720,32 @@ export const LinkCheckerModal: React.FC<Props> = ({
               if (res.type === 'filmygo' || res.original.includes('filmygo.') || res.original.includes('filmycab.') || res.original.includes('filesdl.')) {
                 const autoHits = filterFilmygoHits(hits, res.original);
                 if (autoHits.length > 0) {
+                  autoHits.forEach((h: any) => {
+                    if (h.url) {
+                      const metaObj = {
+                        fileName: h.file_name,
+                        fileSizeText: h.size,
+                        qualityLabel: h.quality || undefined,
+                      };
+                      extractedMetaRef.current[h.url] = metaObj;
+                      extractedMetaRef.current[normalizeUrl(h.url)] = metaObj;
+                    }
+                  });
                   const selectedUrls = autoHits.map(h => h.url).join('\n');
                   replaceOriginalUrl(res.original, selectedUrls);
                   console.log(`FilmyGo auto-selected ${autoHits.length} hits without modal popup:`, { from: res.original, count: autoHits.length });
                   continue;
                 } else if (hits.length === 1) {
+                  const singleHit = hits[0];
+                  if (singleHit?.url) {
+                    const metaObj = {
+                      fileName: singleHit.file_name,
+                      fileSizeText: singleHit.size,
+                      qualityLabel: singleHit.quality || undefined,
+                    };
+                    extractedMetaRef.current[singleHit.url] = metaObj;
+                    extractedMetaRef.current[normalizeUrl(singleHit.url)] = metaObj;
+                  }
                   replaceOriginalUrl(res.original, hits[0].url);
                   console.log("FilmyGo single link auto-replacement:", hits[0].url);
                   continue;
@@ -3449,6 +3502,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       setError(null);
       setExpanded({});
       setIsReviewingBatch(false);
+      setBatchSearchStatus(null);
       setBatchReviewItems([]);
       setAutoClipboard(false);
       setDetectedSampleUrl(null);
@@ -3548,6 +3602,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     setError(null);
     setExpanded({});
     setIsReviewingBatch(false);
+    setBatchSearchStatus(null);
     setBatchReviewItems([]);
     setDetectedSampleUrl(null);
     setDetectedMetadata(null);
@@ -5450,7 +5505,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                 />
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={() => handleCheck()} disabled={loading} className="inline-flex items-center justify-center rounded-xl gap-1.5 bg-cyan-500 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-cyan-600 dark:hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm">{loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{loading ? (titleImportWaterfall && !links.length ? "Searching Waterfall..." : "Checking...") : links.length > 0 ? `Check ${links.length} Link${links.length > 1 ? "s" : ""}` : (titleImportWaterfall ? "Search Waterfall" : "Check Links")}</button>
+                  <button onClick={() => handleCheck()} disabled={loading} className="inline-flex items-center justify-center rounded-xl gap-1.5 bg-cyan-500 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-cyan-600 dark:hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm">{loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{loading ? (batchSearchStatus ? `Batch Checking (${batchSearchStatus.completed}/${batchSearchStatus.total})...` : (titleImportWaterfall && !links.length ? "Searching Waterfall..." : "Checking...")) : links.length > 0 ? `Check ${links.length} Link${links.length > 1 ? "s" : ""}` : (titleImportWaterfall ? "Search Waterfall" : "Check Links")}</button>
                   <button 
                     onClick={() => {
                       const trimmedInput = input.trim();
@@ -5619,6 +5674,28 @@ export const LinkCheckerModal: React.FC<Props> = ({
                 </div>
               </>
             )}
+
+                {loading && batchSearchStatus && (
+                  <div className="w-full bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-4 flex flex-col gap-2.5 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <span className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Batch Waterfall Search: {batchSearchStatus.completed} of {batchSearchStatus.total} checked in parallel
+                      </span>
+                      {batchSearchStatus.currentTitle && (
+                        <span className="text-zinc-600 dark:text-zinc-300 truncate max-w-[260px]">
+                          Checking: {batchSearchStatus.currentTitle}
+                        </span>
+                      )}
+                    </div>
+                    <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
+                      <div 
+                        className="bg-indigo-600 h-full transition-all duration-300 rounded-full" 
+                        style={{ width: `${Math.round((batchSearchStatus.completed / Math.max(1, batchSearchStatus.total)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {error ? <div className="rounded-2xl border border-red-200 dark:border-red-900/70 bg-red-50 dark:bg-red-950/40 p-4 text-red-600 dark:text-red-300 text-sm flex items-start gap-2 transition-colors duration-300"><AlertTriangle className="h-4 w-4 mt-0.5" /><span>{error}</span></div> : null}
 

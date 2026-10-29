@@ -976,10 +976,21 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
       }
 
       let nextHubcloudLink = "";
-      for (const c of returnCandidates) {
-        if (c.href.includes("hubcloud") || c.href.includes("moviesdrive") || c.href.includes("vcloud") || c.href.includes("hubdrive") || c.href.includes("skymovies") || c.href.includes("mdrive") || c.href.includes("filmygo")) {
-           nextHubcloudLink = c.href;
-           break;
+      const hasDirectCandidate = returnCandidates.some(c => 
+        /pixeldrain|pixel\.drain|pixeldra\.in|workers\.dev|r2\.cloudflarestorage|fast|buzz|fsl/i.test(c.href || '')
+      );
+
+      if (!hasDirectCandidate) {
+        for (const c of returnCandidates) {
+          if (
+            !c.href.includes("gpdl.") &&
+            !c.href.includes("hbplay.") &&
+            !c.href.includes("/tg/") &&
+            (c.href.includes("hubcloud") || c.href.includes("moviesdrive") || c.href.includes("vcloud") || c.href.includes("hubdrive") || c.href.includes("skymovies") || c.href.includes("mdrive") || c.href.includes("filmygo"))
+          ) {
+             nextHubcloudLink = c.href;
+             break;
+          }
         }
       }
 
