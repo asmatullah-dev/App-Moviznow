@@ -57,12 +57,17 @@ import {
   disconnectGoogleContacts,
   syncSingleUserContact,
   syncMultipleUsersContacts,
+  batchSyncUsersContacts,
+  compareUsersWithGoogleContacts,
   loadAndVerifyStoredContactsToken,
   getPendingContactsList,
+  addToPendingContactsSync,
   processPendingContactsQueue,
   syncUserContactWithAutoOAuth,
   fetchPendingContactsFromFirestore
 } from '../../services/googleContactsService';
+import { GoogleContactsCompareModal } from '../../components/GoogleContactsCompareModal';
+
 
 type SortField = 'createdAt' | 'displayName' | 'phone' | 'expiryDate' | 'lastActive';
 type SortOrder = 'asc' | 'desc';
@@ -162,6 +167,7 @@ export default function UserManagement() {
   const [contactsAccountEmail, setContactsAccountEmail] = useState<string | null>(() => getConnectedAccountEmail() || 'wmoviznow@gmail.com');
   const [isContactsAuthorized, setIsContactsAuthorized] = useState<boolean>(() => isGoogleContactsAuthorized());
   const [isContactsPanelOpen, setIsContactsPanelOpen] = useState(false);
+  const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
   const [isConnectingContacts, setIsConnectingContacts] = useState(false);
   const [isSyncingContacts, setIsSyncingContacts] = useState(false);
   const [contactsSyncProgress, setContactsSyncProgress] = useState<{ current: number; total: number } | null>(null);
@@ -783,8 +789,8 @@ export default function UserManagement() {
     return allUsers;
   }, [allUsers, profile, managedByFilter]);
 
-  // Auto-detect any status, role, or expiry date changes on users in User Management tab
-  // Automatically saves to Google Contacts (if authorized) or moves to Pending Contacts queue
+  // Auto-detect newly added users, or status, role, expiry date, city, or phone changes
+  // Automatically saves to Google Contacts via Batch API or moves to Pending Contacts queue
   const prevUserSigsRef = useRef<Map<string, string>>(new Map());
   const isInitialSigLoadRef = useRef(true);
 
@@ -798,12 +804,22 @@ export default function UserManagement() {
       if (!u.uid || (!u.phone && !u.email)) return;
       const isExp = u.status === 'expired' || (!!u.expiryDate && u.expiryDate !== 'Lifetime' && isUserExpired(u.expiryDate));
       const effStatus = u.role === 'owner' ? 'active' : (isExp ? 'expired' : (u.status || 'pending'));
-      const sig = `${u.role || 'user'}|${effStatus}|${u.expiryDate || ''}|${u.displayName || ''}|${u.city || ''}`;
+      const sig = `${u.role || 'user'}|${effStatus}|${u.expiryDate || ''}|${u.displayName || ''}|${u.city || ''}|${u.phone || ''}`;
       nextSigs.set(u.uid, sig);
 
       if (!isInitialSigLoadRef.current) {
         const prevSig = prevUserSigsRef.current.get(u.uid);
-        if (prevSig && prevSig !== sig) {
+        // Detect newly added user OR changed user!
+        if (!prevSig) {
+          console.log(`[Google Contacts Auto-Sync] Newly added user detected: ${u.displayName || u.phone || u.uid}`);
+          usersWithChanges.push(u);
+        } else if (prevSig !== sig) {
+          console.log(`[Google Contacts Auto-Sync] User role/status/expiry change detected: ${u.displayName || u.phone || u.uid}`);
+          usersWithChanges.push(u);
+        }
+      } else {
+        // On initial load, check if any user is flagged pending sync
+        if (u.contactSyncStatus === 'pending') {
           usersWithChanges.push(u);
         }
       }
@@ -813,12 +829,34 @@ export default function UserManagement() {
     isInitialSigLoadRef.current = false;
 
     if (usersWithChanges.length > 0) {
-      console.log(`[UserManagement Contacts Auto-Detect] Detected status/role/expiry change on ${usersWithChanges.length} user(s). Syncing or queuing to pending contacts.`);
-      usersWithChanges.forEach(u => {
-        autoSyncUserToContacts(u, false);
-      });
+      console.log(`[Google Contacts Auto-Sync] Batch syncing ${usersWithChanges.length} new/changed user(s)...`);
+      if (isGoogleContactsAuthorized()) {
+        ensureValidContactsToken(false).then(({ accessToken }) => {
+          if (accessToken) {
+            batchSyncUsersContacts(usersWithChanges, accessToken).then(batchRes => {
+              console.log(`[Google Contacts Auto-Sync Batch Success] Synced ${batchRes.synced}/${usersWithChanges.length} users (Created: ${batchRes.created}, Updated: ${batchRes.updated})`);
+            }).catch(err => {
+              console.warn('[Google Contacts Auto-Sync Batch Error]:', err);
+              // Fallback to queuing each user
+              usersWithChanges.forEach(u => {
+                addToPendingContactsSync(u, 'Batch auto-sync failed');
+              });
+            });
+          } else {
+            // Token expired or not available silently, queue to pending contacts
+            usersWithChanges.forEach(u => {
+              addToPendingContactsSync(u, 'Google Contacts token needs authorization');
+            });
+          }
+        });
+      } else {
+        // Not authorized, move to pending contacts queue
+        usersWithChanges.forEach(u => {
+          addToPendingContactsSync(u, 'Google Contacts not connected');
+        });
+      }
     }
-  }, [allUsers, autoSyncUserToContacts]);
+  }, [allUsers]);
 
   useEffect(() => {
     setLoading(usersLoading);
@@ -1606,6 +1644,7 @@ export default function UserManagement() {
     
     try {
       const batchUpdates: Record<string, Partial<UserProfile>> = {};
+      const usersToSyncContacts: UserProfile[] = [];
 
       currentSelected.forEach(uid => {
         const user = allUsers.find(u => u.uid === uid) || users.find(u => u.uid === uid);
@@ -1619,13 +1658,23 @@ export default function UserManagement() {
             clearNoticeRecord(uid);
           }
           batchUpdates[uid] = userUpdates;
-          autoSyncUserToContacts({ ...user, ...userUpdates }, false);
+          usersToSyncContacts.push({ ...user, ...userUpdates });
         }
       });
 
       if (Object.keys(batchUpdates).length > 0) {
         updateMultipleUserFields(batchUpdates);
       }
+
+      // Auto-sync updated users to Google Contacts via single fast batch
+      if (usersToSyncContacts.length > 0 && isGoogleContactsAuthorized()) {
+        ensureValidContactsToken(false).then(({ accessToken }) => {
+          if (accessToken) {
+            batchSyncUsersContacts(usersToSyncContacts, accessToken).catch(e => console.warn(e));
+          }
+        });
+      }
+
       setAlertConfig({
         isOpen: true,
         title: 'Status Updated Locally',
@@ -1648,16 +1697,28 @@ export default function UserManagement() {
     
     try {
       const batchUpdates: Record<string, Partial<UserProfile>> = {};
+      const usersToSyncContacts: UserProfile[] = [];
+
       currentSelected.forEach(uid => {
         const user = allUsers.find(u => u.uid === uid) || users.find(u => u.uid === uid);
         if (user && user.role !== 'owner' && uid !== profile?.uid) {
           batchUpdates[uid] = { role };
-          autoSyncUserToContacts({ ...user, role }, false);
+          usersToSyncContacts.push({ ...user, role });
         }
       });
       if (Object.keys(batchUpdates).length > 0) {
         updateMultipleUserFields(batchUpdates);
       }
+
+      // Auto-sync updated users to Google Contacts via single fast batch
+      if (usersToSyncContacts.length > 0 && isGoogleContactsAuthorized()) {
+        ensureValidContactsToken(false).then(({ accessToken }) => {
+          if (accessToken) {
+            batchSyncUsersContacts(usersToSyncContacts, accessToken).catch(e => console.warn(e));
+          }
+        });
+      }
+
       setAlertConfig({
         isOpen: true,
         title: 'Role Updated Locally',
@@ -1989,6 +2050,19 @@ export default function UserManagement() {
                   } else {
                     window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'up-to-date', isManual: true, scope: 'user_management', message: 'Users are up to date' } }));
                   }
+
+                  // Always keep contacts synced: on refresh, check if any newly added or out-of-sync users
+                  if (isGoogleContactsAuthorized()) {
+                    ensureValidContactsToken(false).then(({ accessToken }) => {
+                      if (accessToken) {
+                        const unsyncedUsers = allUsers.filter(u => (u.phone || u.email) && u.contactSyncStatus !== 'synced');
+                        if (unsyncedUsers.length > 0) {
+                          console.log(`[Refresh Auto-Sync] Auto-syncing ${unsyncedUsers.length} newly found/unsynced users via batch...`);
+                          batchSyncUsersContacts(unsyncedUsers, accessToken).catch(e => console.warn(e));
+                        }
+                      }
+                    });
+                  }
                 }).catch((err) => {
                   console.error("Manual refresh failed:", err);
                   window.dispatchEvent(new CustomEvent('sync_status', { detail: { status: 'error', isManual: true, scope: 'user_management', message: 'Failed to refresh users' } }));
@@ -2083,6 +2157,14 @@ export default function UserManagement() {
                 </span>
               )}
             </button>
+            <button
+              onClick={() => setIsCompareModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer select-none bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/20"
+              title="Compare Google Contact formats (check AT to AV replacement, missing contacts, etc.)"
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-500" />
+              <span className="hidden sm:inline">Compare</span>
+            </button>
           </div>
         )}
       </div>
@@ -2133,6 +2215,15 @@ export default function UserManagement() {
                 <div className="flex items-center gap-2 shrink-0">
                   {isContactsAuthorized ? (
                     <>
+                      <Button
+                        onClick={() => setIsCompareModalOpen(true)}
+                        variant="secondary"
+                        className="px-3 py-1.5 text-xs text-indigo-700 dark:text-indigo-300 border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20"
+                        icon={<ShieldCheck className="w-4 h-4 text-emerald-500" />}
+                        title="Compare Google Contact formats and auto-sync mismatches (e.g. AT to AV)"
+                      >
+                        Compare & Auto-Sync
+                      </Button>
                       <Button
                         onClick={() => handleBulkSyncContacts(filteredAndSortedUsers.map(u => u.uid))}
                         variant="emerald"
@@ -4338,6 +4429,20 @@ export default function UserManagement() {
         onConfirm={async (targetUser) => {
           await handleSendStatusEmail(targetUser);
           setEmailModalUser(null);
+        }}
+      />
+
+      {/* Google Contacts Compare & Auto-Sync Modal */}
+      <GoogleContactsCompareModal
+        isOpen={isCompareModalOpen}
+        onClose={() => setIsCompareModalOpen(false)}
+        users={allUsers}
+        accountEmail={contactsAccountEmail}
+        onSyncCompleted={(result) => {
+          setContactsSyncResult({
+            title: 'Google Contacts Batch Sync Complete',
+            message: `Batch sync finished successfully!\n• Total Synced: ${result.synced}\n• Newly Created: ${result.created}\n• Updated / Replaced: ${result.updated}`
+          });
         }}
       />
     </div>

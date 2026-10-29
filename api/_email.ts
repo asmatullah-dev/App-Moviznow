@@ -1543,6 +1543,175 @@ emailRouter.post("/link-phone", async (_req, res) => {
   return res.json({ success: true, message: "OK" });
 });
 
+// 7. Directly set or reset account password via Firebase Admin
+emailRouter.post("/set-account-password", async (req, res) => {
+  try {
+    const { uid, phone, email, password } = req.body;
+    if (!password || typeof password !== "string" || password.length < 6) {
+      return res.status(400).json({ error: "Password must be at least 6 characters." });
+    }
+
+    const firestore = getDb();
+    const authAdmin = getAuthAdmin();
+    if (!authAdmin) {
+      return res.status(500).json({ error: "Authentication service unavailable." });
+    }
+
+    const stdPhone = phone ? standardizePkPhone(phone) : "";
+    const cleanEmail = email && typeof email === "string" && !email.endsWith("@moviznow.com") ? email.trim().toLowerCase() : null;
+    const phoneDigits = stdPhone ? stdPhone.replace(/\D/g, "") : (phone ? String(phone).replace(/\D/g, "") : "");
+    const phoneAuthEmail = phoneDigits ? `${phoneDigits}@moviznow.com` : null;
+
+    let targetUid = uid || null;
+
+    // If targetUid is missing or pending, look up existing user in Firestore
+    if (!targetUid || targetUid.startsWith("pending_")) {
+      if (firestore && stdPhone) {
+        const usersSnap = await firestore.collection("users").where("phone", "==", stdPhone).limit(1).get();
+        if (!usersSnap.empty) {
+          targetUid = usersSnap.docs[0].id;
+        }
+      }
+      if (!targetUid && firestore && cleanEmail) {
+        const usersSnap = await firestore.collection("users").where("email", "==", cleanEmail).limit(1).get();
+        if (!usersSnap.empty) {
+          targetUid = usersSnap.docs[0].id;
+        }
+      }
+    }
+
+    let primaryUserRecord: admin.auth.UserRecord | null = null;
+    if (targetUid) {
+      try {
+        primaryUserRecord = await authAdmin.updateUser(targetUid, { password });
+      } catch (authErr: any) {
+        if (authErr.code === "auth/user-not-found") {
+          try {
+            primaryUserRecord = await authAdmin.createUser({
+              uid: targetUid,
+              email: cleanEmail || phoneAuthEmail || undefined,
+              password,
+            });
+          } catch (createErr) {}
+        }
+      }
+    }
+
+    // Also sync the phone auth email credential (e.g. 923001234567@moviznow.com)
+    if (phoneAuthEmail) {
+      try {
+        const phoneAuthUser = await authAdmin.getUserByEmail(phoneAuthEmail);
+        if (phoneAuthUser) {
+          await authAdmin.updateUser(phoneAuthUser.uid, { password });
+          if (!primaryUserRecord) primaryUserRecord = phoneAuthUser;
+        }
+      } catch (pErr: any) {
+        if (pErr.code === "auth/user-not-found" && (!targetUid || !primaryUserRecord)) {
+          try {
+            primaryUserRecord = await authAdmin.createUser({
+              email: phoneAuthEmail,
+              password,
+            });
+            targetUid = primaryUserRecord.uid;
+          } catch (cErr) {}
+        }
+      }
+    }
+
+    // Also sync the real email credential if present
+    if (cleanEmail) {
+      try {
+        const emailAuthUser = await authAdmin.getUserByEmail(cleanEmail);
+        if (emailAuthUser) {
+          await authAdmin.updateUser(emailAuthUser.uid, { password });
+          if (!primaryUserRecord) primaryUserRecord = emailAuthUser;
+        }
+      } catch (eErr: any) {
+        if (eErr.code === "auth/user-not-found" && (!targetUid || !primaryUserRecord)) {
+          try {
+            primaryUserRecord = await authAdmin.createUser({
+              email: cleanEmail,
+              password,
+            });
+            targetUid = primaryUserRecord.uid;
+          } catch (cErr) {}
+        }
+      }
+    }
+
+    const finalUid = primaryUserRecord?.uid || targetUid;
+    if (!finalUid) {
+      return res.status(400).json({ error: "Could not find or create authentication account." });
+    }
+
+    // Update Firestore user document
+    if (firestore) {
+      try {
+        await firestore.collection("users").doc(finalUid).set({
+          hasPassword: true,
+          updatedAt: new Date().toISOString(),
+          ...(stdPhone ? { phone: stdPhone } : {}),
+          ...(cleanEmail ? { email: cleanEmail } : {}),
+        }, { merge: true });
+
+        // Update settings/whitelisted_phones
+        if (stdPhone) {
+          const wlRef = firestore.collection("settings").doc("whitelisted_phones");
+          const wlSnap = await wlRef.get();
+          if (wlSnap.exists) {
+            const wlData = wlSnap.data() || {};
+            const rawList = Array.isArray(wlData.numbers) ? wlData.numbers : (Array.isArray(wlData.phones) ? wlData.phones : []);
+            const numbers: string[] = [];
+            let found = false;
+            for (const item of rawList) {
+              if (!item) continue;
+              let p = "";
+              let u: string | null = null;
+              if (typeof item === "string") {
+                const parts = item.split(":");
+                p = standardizePkPhone(parts[0]);
+                u = parts[1] ? parts[1].trim() : null;
+              }
+              if (u === finalUid || (p && p === stdPhone)) {
+                if (!found) {
+                  numbers.push(`${stdPhone}:${finalUid}`);
+                  found = true;
+                }
+              } else {
+                numbers.push(typeof item === "string" ? item : p);
+              }
+            }
+            if (!found) {
+              numbers.push(`${stdPhone}:${finalUid}`);
+            }
+            await wlRef.set({ numbers, updatedAt: new Date().toISOString() }, { merge: true });
+          }
+        }
+      } catch (fErr) {
+        console.warn("Firestore notice in set-account-password:", fErr);
+      }
+    }
+
+    // Generate customToken to log client in immediately
+    let customToken = null;
+    try {
+      customToken = await authAdmin.createCustomToken(finalUid);
+    } catch (tErr) {
+      console.warn("Could not create custom token:", tErr);
+    }
+
+    return res.json({
+      success: true,
+      customToken,
+      uid: finalUid,
+      message: "Password set successfully.",
+    });
+  } catch (error: any) {
+    console.error("Notice in set-account-password:", error?.message || error);
+    return res.status(400).json({ success: false, error: error.message || "Failed to set password." });
+  }
+});
+
 
 
 

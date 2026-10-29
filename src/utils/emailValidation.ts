@@ -14,3 +14,11 @@ export function isValidGmailAddress(email?: string | null): boolean {
   const gmailRegex = /^[a-zA-Z0-9._%+-]+@g(oogle)?mail\.com$/;
   return gmailRegex.test(cleanEmail);
 }
+
+export function isValidEmailAddress(email?: string | null): boolean {
+  if (!email || typeof email !== "string") return false;
+  const cleanEmail = email.trim().toLowerCase();
+  if (cleanEmail.endsWith("@moviznow.com")) return false;
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(cleanEmail);
+}

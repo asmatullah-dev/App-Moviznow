@@ -1,7 +1,7 @@
 import firebaseConfig from '../../firebase-applet-config.json';
 import { UserProfile } from '../types';
 import { isUserExpired } from '../contexts/UsersContext';
-import { doc, updateDoc, getDoc, setDoc, deleteDoc, deleteField } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, setDoc, deleteDoc, deleteField, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 
 const CONTACTS_SCOPE = 'https://www.googleapis.com/auth/contacts';
@@ -1635,50 +1635,576 @@ export async function syncSingleUserContact(
   }
 }
 
+export interface BatchSyncResult {
+  total: number;
+  synced: number;
+  created: number;
+  updated: number;
+  unchanged: number;
+  photosUpdated: number;
+  failed: number;
+  errors: string[];
+}
+
+export interface ContactComparisonItem {
+  user: UserProfile;
+  status: 'mismatch' | 'missing' | 'synced';
+  googlePerson?: GoogleContactPerson;
+  currentGoogleName: string;
+  expectedTargetName: string;
+  changeReason: string;
+  oldPrefix: string;
+  newPrefix: string;
+  phone: string;
+  normalizedPhone: string;
+}
+
+export interface ContactsComparisonReport {
+  totalChecked: number;
+  mismatches: ContactComparisonItem[];
+  missing: ContactComparisonItem[];
+  synced: ContactComparisonItem[];
+}
+
 /**
- * Bulk syncs an array of users to Google Contacts.
+ * Executes a batch creation of contacts via Google People API (people:batchCreateContacts).
+ * Accepts up to 200 contacts per call (recommended chunk size 50).
  */
-export async function syncMultipleUsersContacts(
+export async function batchCreateGoogleContacts(
+  contactsList: Array<{ contactPerson: any }>,
+  accessToken: string
+): Promise<{ success: boolean; createdCount: number; createdPeople: GoogleContactPerson[]; error?: string }> {
+  if (!contactsList || contactsList.length === 0) {
+    return { success: true, createdCount: 0, createdPeople: [] };
+  }
+
+  const endpoint = 'https://people.googleapis.com/v1/people:batchCreateContacts';
+  const readMask = 'names,phoneNumbers,emailAddresses,birthdays,memberships';
+
+  try {
+    let res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contacts: contactsList,
+        readMask
+      })
+    });
+
+    if (res.status === 401) {
+      throw new Error('401 Unauthorized: Google Contacts token is expired');
+    }
+
+    // Fallback: If creation fails with memberships error, strip memberships and retry
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[Batch Create Contacts] Initial batch failed (${res.status}): ${errText}. Retrying without memberships...`);
+
+      const cleanedList = contactsList.map(item => {
+        const copy = { ...item.contactPerson };
+        delete copy.memberships;
+        return { contactPerson: copy };
+      });
+
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          contacts: cleanedList,
+          readMask: 'names,phoneNumbers,emailAddresses,birthdays'
+        })
+      });
+
+      if (!res.ok) {
+        const retryErr = await res.text();
+        throw new Error(`Batch create failed: ${retryErr}`);
+      }
+    }
+
+    const data = await res.json();
+    const createdPeople: GoogleContactPerson[] = [];
+    if (data.createdPeople && Array.isArray(data.createdPeople)) {
+      for (const entry of data.createdPeople) {
+        if (entry.person) {
+          createdPeople.push(entry.person);
+        }
+      }
+    }
+
+    return {
+      success: true,
+      createdCount: createdPeople.length,
+      createdPeople
+    };
+  } catch (err: any) {
+    console.error('[Google Contacts Batch Create Error]:', err);
+    return {
+      success: false,
+      createdCount: 0,
+      createdPeople: [],
+      error: err?.message || 'Failed batch create contacts'
+    };
+  }
+}
+
+/**
+ * Executes a batch update of contacts via Google People API (people:batchUpdateContacts).
+ * Accepts up to 200 contacts per call (recommended chunk size 50).
+ */
+export async function batchUpdateGoogleContacts(
+  contactsMap: Record<string, any>,
+  accessToken: string
+): Promise<{ success: boolean; updatedCount: number; updatedPeople: GoogleContactPerson[]; error?: string }> {
+  const resourceKeys = Object.keys(contactsMap);
+  if (resourceKeys.length === 0) {
+    return { success: true, updatedCount: 0, updatedPeople: [] };
+  }
+
+  const endpoint = 'https://people.googleapis.com/v1/people:batchUpdateContacts';
+  const updateMask = 'names,phoneNumbers,emailAddresses,birthdays,memberships';
+  const readMask = 'names,phoneNumbers,emailAddresses,birthdays,memberships';
+
+  try {
+    let res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        contacts: contactsMap,
+        updateMask,
+        readMask
+      })
+    });
+
+    if (res.status === 401) {
+      throw new Error('401 Unauthorized: Google Contacts token is expired');
+    }
+
+    // Fallback: If update fails due to memberships, retry without memberships
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn(`[Batch Update Contacts] Initial batch failed (${res.status}): ${errText}. Retrying without memberships...`);
+
+      const cleanedMap: Record<string, any> = {};
+      for (const [key, val] of Object.entries(contactsMap)) {
+        const copy = { ...val };
+        delete copy.memberships;
+        cleanedMap[key] = copy;
+      }
+
+      res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          contacts: cleanedMap,
+          updateMask: 'names,phoneNumbers,emailAddresses,birthdays',
+          readMask: 'names,phoneNumbers,emailAddresses,birthdays'
+        })
+      });
+
+      if (!res.ok) {
+        const retryErr = await res.text();
+        throw new Error(`Batch update failed: ${retryErr}`);
+      }
+    }
+
+    const data = await res.json();
+    const updatedPeople: GoogleContactPerson[] = [];
+    if (data.updateResult && typeof data.updateResult === 'object') {
+      for (const [rName, entry] of Object.entries<any>(data.updateResult)) {
+        if (entry.person) {
+          updatedPeople.push(entry.person);
+        }
+      }
+    }
+
+    return {
+      success: true,
+      updatedCount: updatedPeople.length,
+      updatedPeople
+    };
+  } catch (err: any) {
+    console.error('[Google Contacts Batch Update Error]:', err);
+    return {
+      success: false,
+      updatedCount: 0,
+      updatedPeople: [],
+      error: err?.message || 'Failed batch update contacts'
+    };
+  }
+}
+
+/**
+ * Extracts prefix (e.g. AT26/10/13, Exd AT26/10/13, AV26/12/31, AUPending) from a contact name.
+ */
+export function extractContactPrefix(contactName: string): string {
+  if (!contactName || !contactName.trim()) return '';
+  const prefixRegex = /^(?:(?:Exd|EXD|exd)\s+)?(?:AUPending|ABPending|AVPending|ATPending|ASCPending|ACMPending|AUMPending|AMPending|AAPending|(?:[A-Za-z]{2,4})?\s*(?:\d{2,4}[\/\.-]\d{2}[\/\.-]\d{2,4}|Pending))\s*/i;
+  const match = contactName.trim().match(prefixRegex);
+  return match ? match[0].trim() : '';
+}
+
+/**
+ * Compares system users against Google Contacts to detect:
+ * 1. Missing users (not yet saved in Google Contacts).
+ * 2. Format / Prefix mismatches (e.g., Trial upgraded to VIP where AT must be replaced with AV, Exd missing, or city updated).
+ * 3. Already synced contacts.
+ */
+export async function compareUsersWithGoogleContacts(
   users: UserProfile[],
   accessToken: string,
-  onProgress?: (current: number, total: number) => void
-): Promise<{ total: number; synced: number; created: number; updated: number; photosUpdated: number; failed: number; errors: string[] }> {
+  cachedConnections?: GoogleContactPerson[]
+): Promise<ContactsComparisonReport> {
+  let connections = cachedConnections;
+  if (!connections) {
+    connections = await fetchAllGoogleContacts(accessToken);
+  }
+
+  const mismatches: ContactComparisonItem[] = [];
+  const missing: ContactComparisonItem[] = [];
+  const synced: ContactComparisonItem[] = [];
+
+  for (const user of users) {
+    if (!user.phone && !user.email) continue;
+
+    const { normalized } = normalizePhone(user.phone);
+    const matchingPerson = findMatchingContact(user, connections);
+
+    if (!matchingPerson) {
+      // User is missing from Google Contacts
+      const expectedTargetName = formatContactName(user);
+      const newPrefix = extractContactPrefix(expectedTargetName);
+      missing.push({
+        user,
+        status: 'missing',
+        currentGoogleName: '(Not saved in Google Contacts)',
+        expectedTargetName,
+        changeReason: 'New contact: Not yet saved in Google Contacts',
+        oldPrefix: '',
+        newPrefix,
+        phone: user.phone || '',
+        normalizedPhone: normalized
+      });
+      continue;
+    }
+
+    // Contact found in Google Contacts
+    let currentGoogleName = '';
+    if (matchingPerson.names && matchingPerson.names.length > 0) {
+      const p = matchingPerson.names[0];
+      currentGoogleName = p.displayName || [p.givenName, p.familyName].filter(Boolean).join(' ') || p.givenName || '';
+    }
+
+    const expectedTargetName = formatContactName(user, currentGoogleName);
+    const oldPrefix = extractContactPrefix(currentGoogleName);
+    const newPrefix = extractContactPrefix(expectedTargetName);
+
+    const isNameMatch = currentGoogleName.trim() === expectedTargetName.trim();
+
+    if (!isNameMatch) {
+      // Analyze specific replacement reason
+      let reason = 'Format replacement needed';
+      const oldPrefixClean = oldPrefix.toUpperCase();
+      const newPrefixClean = newPrefix.toUpperCase();
+
+      if (oldPrefixClean !== newPrefixClean) {
+        // Prefix code changed (e.g. AT to AV, AUPending to AV, etc.)
+        const oldTier = oldPrefixClean.replace(/EXD\s*/, '').slice(0, 2);
+        const newTier = newPrefixClean.replace(/EXD\s*/, '').slice(0, 2);
+
+        if (oldPrefixClean.includes('PENDING') && !newPrefixClean.includes('PENDING')) {
+          reason = `Activated: ${oldPrefix} ➔ ${newPrefix}`;
+        } else if (oldTier && newTier && oldTier !== newTier) {
+          reason = `Role prefix replacement: ${oldTier} ➔ ${newTier} (${user.role.toUpperCase()})`;
+        } else if (!oldPrefixClean.startsWith('EXD') && newPrefixClean.startsWith('EXD')) {
+          reason = `Status expired: Needs "Exd" prefix (${user.status})`;
+        } else if (oldPrefixClean.startsWith('EXD') && !newPrefixClean.startsWith('EXD')) {
+          reason = `Status active: Remove "Exd" prefix (${user.status})`;
+        } else {
+          reason = `Prefix updated: ${oldPrefix} ➔ ${newPrefix}`;
+        }
+      } else {
+        const oldCity = extractCityFromContactName(currentGoogleName);
+        const newCity = extractCityFromContactName(expectedTargetName);
+        if (oldCity !== newCity) {
+          reason = `City format updated: (${oldCity || 'None'}) ➔ (${newCity || 'City'})`;
+        } else {
+          reason = `Name format updated`;
+        }
+      }
+
+      mismatches.push({
+        user,
+        status: 'mismatch',
+        googlePerson: matchingPerson,
+        currentGoogleName,
+        expectedTargetName,
+        changeReason: reason,
+        oldPrefix,
+        newPrefix,
+        phone: user.phone || '',
+        normalizedPhone: normalized
+      });
+    } else {
+      synced.push({
+        user,
+        status: 'synced',
+        googlePerson: matchingPerson,
+        currentGoogleName,
+        expectedTargetName,
+        changeReason: 'Synced & correctly formatted',
+        oldPrefix,
+        newPrefix,
+        phone: user.phone || '',
+        normalizedPhone: normalized
+      });
+    }
+  }
+
+  return {
+    totalChecked: missing.length + mismatches.length + synced.length,
+    mismatches,
+    missing,
+    synced
+  };
+}
+
+/**
+ * Bulk syncs an array of users to Google Contacts using Google People API BATCH endpoints
+ * (batchCreateContacts and batchUpdateContacts) in chunks of up to 50 items.
+ * Drastically improves sync performance from minutes to seconds.
+ */
+export async function batchSyncUsersContacts(
+  users: UserProfile[],
+  accessToken: string,
+  onProgress?: (current: number, total: number) => void,
+  cachedConnections?: GoogleContactPerson[]
+): Promise<BatchSyncResult> {
+  const CHUNK_SIZE = 50;
   let created = 0;
   let updated = 0;
+  let unchanged = 0;
   let photosUpdated = 0;
   let failed = 0;
   const errors: string[] = [];
 
-  // Fetch connections once to avoid rate limits
-  let connections: GoogleContactPerson[] = [];
-  try {
-    connections = await fetchAllGoogleContacts(accessToken);
-  } catch (e: any) {
-    console.warn('Could not fetch existing connections prior to bulk sync:', e);
+  if (!users || users.length === 0) {
+    return { total: 0, synced: 0, created: 0, updated: 0, unchanged: 0, photosUpdated: 0, failed: 0, errors: [] };
   }
 
-  for (let i = 0; i < users.length; i++) {
-    const u = users[i];
-    if (onProgress) {
-      onProgress(i + 1, users.length);
-    }
+  // 1. Fetch contact groups
+  const createdGroupId = await getOrCreateContactGroup('Created by MovizNow', accessToken).catch(() => null);
+  const modifiedGroupId = await getOrCreateContactGroup('Modified by MovizNow', accessToken).catch(() => null);
 
-    if (!u.phone) {
+  // 2. Pre-fetch connections if not passed
+  let connections: GoogleContactPerson[] = [];
+  try {
+    connections = cachedConnections || await fetchAllGoogleContacts(accessToken);
+  } catch (e: any) {
+    console.warn('[Batch Sync] Could not fetch connections before batch sync:', e);
+  }
+
+  // 3. Partition users into Creations and Updates
+  const toCreate: Array<{ user: UserProfile; contactPerson: any }> = [];
+  const toUpdate: Array<{ user: UserProfile; resourceName: string; contactPerson: any }> = [];
+  const successfulUids: string[] = [];
+
+  for (let i = 0; i < users.length; i++) {
+    const user = users[i];
+    if (!user.phone && !user.email) {
       failed++;
-      errors.push(`${u.displayName || u.email || u.uid}: No phone number`);
+      errors.push(`${user.displayName || user.uid}: Missing phone and email`);
       continue;
     }
 
-    const res = await syncSingleUserContact(u, accessToken, connections);
-    if (res.success) {
-      if (res.created) created++;
-      if (res.updated) updated++;
-      if (res.photoUpdated) photosUpdated++;
-      // Auto-remove from pending queue if present
-      removeFromPendingContactsSync(u.uid).catch(() => {});
+    const { normalized } = normalizePhone(user.phone);
+    const existingPerson = findMatchingContact(user, connections);
+
+    if (existingPerson) {
+      let existingDisplayName = '';
+      if (existingPerson.names && existingPerson.names.length > 0) {
+        const p = existingPerson.names[0];
+        existingDisplayName = p.displayName || [p.givenName, p.familyName].filter(Boolean).join(' ') || p.givenName || '';
+      }
+
+      const formattedName = formatContactName(user, existingDisplayName);
+      const userDobObj = parseDobToGoogleDate(user.dob);
+
+      // Memberships
+      const membershipsToUse: any[] = (existingPerson.memberships || []).filter((m: any) => m && m.contactGroupMembership);
+      if (!membershipsToUse.some((m: any) => m.contactGroupMembership?.contactGroupResourceName === 'contactGroups/myContacts')) {
+        membershipsToUse.push({ contactGroupMembership: { contactGroupResourceName: 'contactGroups/myContacts' } });
+      }
+      if (modifiedGroupId && !membershipsToUse.some((m: any) => m.contactGroupMembership?.contactGroupResourceName === modifiedGroupId)) {
+        membershipsToUse.push({ contactGroupMembership: { contactGroupResourceName: modifiedGroupId } });
+      }
+
+      const phoneNumbers = normalized
+        ? [{ value: normalized }]
+        : (existingPerson.phoneNumbers || []);
+
+      const emailAddresses = (user.email && !user.email.endsWith('@moviznow.com'))
+        ? [{ value: user.email.trim() }]
+        : (existingPerson.emailAddresses || []);
+
+      const birthdays = userDobObj ? [{ date: userDobObj }] : (existingPerson.birthdays || []);
+
+      const updatePersonPayload: any = {
+        etag: existingPerson.etag || '*',
+        names: [{ givenName: formattedName, familyName: '', middleName: '' }],
+        phoneNumbers,
+        emailAddresses,
+        birthdays,
+        memberships: membershipsToUse
+      };
+
+      toUpdate.push({
+        user,
+        resourceName: existingPerson.resourceName,
+        contactPerson: updatePersonPayload
+      });
     } else {
-      failed++;
-      errors.push(`${u.displayName || u.phone}: ${res.error}`);
+      // Create new contact payload
+      const formattedName = formatContactName(user);
+      const userDobObj = parseDobToGoogleDate(user.dob);
+
+      const memberships: any[] = [
+        { contactGroupMembership: { contactGroupResourceName: 'contactGroups/myContacts' } }
+      ];
+      if (createdGroupId) {
+        memberships.push({ contactGroupMembership: { contactGroupResourceName: createdGroupId } });
+      }
+
+      const createPersonPayload: any = {
+        names: [{ givenName: formattedName, familyName: '', middleName: '' }],
+        phoneNumbers: normalized ? [{ value: normalized }] : [],
+        emailAddresses: (user.email && !user.email.endsWith('@moviznow.com')) ? [{ value: user.email.trim() }] : [],
+        memberships
+      };
+      if (userDobObj) {
+        createPersonPayload.birthdays = [{ date: userDobObj }];
+      }
+
+      toCreate.push({
+        user,
+        contactPerson: createPersonPayload
+      });
+    }
+  }
+
+  const totalOps = toCreate.length + toUpdate.length;
+  let processedOps = 0;
+
+  // 4. Process Batch Creations in chunks of CHUNK_SIZE
+  for (let c = 0; c < toCreate.length; c += CHUNK_SIZE) {
+    const chunk = toCreate.slice(c, c + CHUNK_SIZE);
+    const chunkPayload = chunk.map(item => ({ contactPerson: item.contactPerson }));
+
+    const res = await batchCreateGoogleContacts(chunkPayload, accessToken);
+    if (res.success) {
+      created += res.createdCount;
+      chunk.forEach(item => {
+        successfulUids.push(item.user.uid);
+        removeFromPendingContactsSync(item.user.uid).catch(() => {});
+      });
+      // Append created people to connections cache
+      connections.push(...res.createdPeople);
+    } else {
+      // Chunk failed: fallback to single creates for this chunk so individual errors don't drop the rest
+      console.warn(`[Batch Sync] Chunk creation failed, falling back to single creates:`, res.error);
+      for (const item of chunk) {
+        const singleRes = await syncSingleUserContact(item.user, accessToken, connections);
+        if (singleRes.success) {
+          created++;
+          successfulUids.push(item.user.uid);
+          removeFromPendingContactsSync(item.user.uid).catch(() => {});
+        } else {
+          failed++;
+          errors.push(`${item.user.displayName || item.user.phone}: ${singleRes.error}`);
+        }
+      }
+    }
+
+    processedOps += chunk.length;
+    if (onProgress) {
+      onProgress(processedOps, totalOps);
+    }
+  }
+
+  // 5. Process Batch Updates in chunks of CHUNK_SIZE
+  for (let u = 0; u < toUpdate.length; u += CHUNK_SIZE) {
+    const chunk = toUpdate.slice(u, u + CHUNK_SIZE);
+    const chunkMap: Record<string, any> = {};
+    chunk.forEach(item => {
+      chunkMap[item.resourceName] = item.contactPerson;
+    });
+
+    const res = await batchUpdateGoogleContacts(chunkMap, accessToken);
+    if (res.success) {
+      updated += res.updatedCount;
+      chunk.forEach(item => {
+        successfulUids.push(item.user.uid);
+        removeFromPendingContactsSync(item.user.uid).catch(() => {});
+      });
+    } else {
+      // Chunk failed: fallback to single updates for this chunk
+      console.warn(`[Batch Sync] Chunk update failed, falling back to single updates:`, res.error);
+      for (const item of chunk) {
+        const singleRes = await syncSingleUserContact(item.user, accessToken, connections);
+        if (singleRes.success) {
+          updated++;
+          successfulUids.push(item.user.uid);
+          removeFromPendingContactsSync(item.user.uid).catch(() => {});
+        } else {
+          failed++;
+          errors.push(`${item.user.displayName || item.user.phone}: ${singleRes.error}`);
+        }
+      }
+    }
+
+    processedOps += chunk.length;
+    if (onProgress) {
+      onProgress(processedOps, totalOps);
+    }
+  }
+
+  // 6. Bulk update Firestore user documents with contactSyncStatus: 'synced' in writeBatch
+  if (successfulUids.length > 0) {
+    try {
+      const nowIso = new Date().toISOString();
+      const firestoreBatches = [];
+      const BATCH_LIMIT = 400;
+
+      for (let b = 0; b < successfulUids.length; b += BATCH_LIMIT) {
+        const slice = successfulUids.slice(b, b + BATCH_LIMIT);
+        const fbBatch = writeBatch(db);
+        slice.forEach(uid => {
+          if (!uid.startsWith('pending_')) {
+            const userRef = doc(db, 'users', uid);
+            fbBatch.update(userRef, {
+              contactSyncStatus: 'synced',
+              contactLastSyncedAt: nowIso
+            });
+          }
+        });
+        firestoreBatches.push(fbBatch.commit());
+      }
+
+      await Promise.allSettled(firestoreBatches);
+      console.log(`[Batch Sync] Updated ${successfulUids.length} user records in Firestore to 'synced'.`);
+    } catch (fbErr) {
+      console.warn('[Batch Sync] Non-blocking error updating Firestore contact sync statuses:', fbErr);
     }
   }
 
@@ -1687,9 +2213,30 @@ export async function syncMultipleUsersContacts(
     synced: created + updated,
     created,
     updated,
+    unchanged,
     photosUpdated,
     failed,
     errors
+  };
+}
+
+/**
+ * Bulk syncs an array of users to Google Contacts (now powered by batchSyncUsersContacts).
+ */
+export async function syncMultipleUsersContacts(
+  users: UserProfile[],
+  accessToken: string,
+  onProgress?: (current: number, total: number) => void
+): Promise<{ total: number; synced: number; created: number; updated: number; photosUpdated: number; failed: number; errors: string[] }> {
+  const result = await batchSyncUsersContacts(users, accessToken, onProgress);
+  return {
+    total: result.total,
+    synced: result.synced,
+    created: result.created,
+    updated: result.updated,
+    photosUpdated: result.photosUpdated,
+    failed: result.failed,
+    errors: result.errors
   };
 }
 

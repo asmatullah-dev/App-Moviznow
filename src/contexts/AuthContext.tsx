@@ -2323,6 +2323,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const rawDigits = phonePart.replace(/\D/g, "");
 
         const candidateEmails: string[] = [];
+        if (record?.phoneUser?.email && !record.phoneUser.email.endsWith("@moviznow.com")) {
+          candidateEmails.push(record.phoneUser.email.trim().toLowerCase());
+        }
         if (record?.authEmail && !candidateEmails.includes(record.authEmail)) {
           candidateEmails.push(record.authEmail);
         }
@@ -2352,9 +2355,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             break;
           } catch (err: any) {
             lastError = err;
-            if (err.code === "auth/wrong-password" || (record?.authEmail && candidate === record.authEmail && err.code === "auth/invalid-credential")) {
-              throw err;
-            }
           }
         }
 
@@ -2385,7 +2385,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const { writeBatch} = await import("firebase/firestore");
         const batch = writeBatch(db);
-        const updates: any = { sessionId: getLocalSessionId() };
+        const updates: any = { sessionId: getLocalSessionId(), hasPassword: true };
 
         try {
           const pendingStr = safeStorage.getItem("pending_user_updates");

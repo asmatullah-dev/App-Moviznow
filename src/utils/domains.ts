@@ -25,7 +25,7 @@ export function setHubcloudDomain(domain: string): void {
 }
 
 export const DEFAULT_MOVIESDRIVE_DOMAIN = 'https://new3.moviesdrive.christmas';
-export const DEFAULT_SKYMOVIES_DOMAIN = 'https://skymovieshd.meme';
+export const DEFAULT_SKYMOVIES_DOMAIN = 'https://new3.skymovieshd.clinic/';
 export const DEFAULT_FILMYGO_DOMAIN = 'https://filmycab.im';
 export const DEFAULT_HDHUB4U_DOMAIN = 'https://new5.hdhub4u.cl';
 export const DEFAULT_FILMYFLY_DOMAIN = 'https://filmyfly.army';

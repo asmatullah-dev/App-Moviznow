@@ -54,6 +54,7 @@ const Cart = lazy(() => import('./pages/user/Cart'));
 const Settings = lazy(() => import('./pages/user/Settings'));
 const InstallApp = lazy(() => import('./pages/InstallApp'));
 const Unsubscribe = lazy(() => import('./pages/Unsubscribe'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 
 // Lazy Loaded Admin Pages (Not loaded for standard users)
 const AdminLayout = lazy(() => import('./pages/admin/AdminLayout'));
@@ -87,6 +88,11 @@ function CatchAllRedirect() {
       const emailMatch = search.match(/[?&]email=([^&]+)/) || pathname.match(/email=([^&]+)/);
       const emailParam = emailMatch ? `?email=${emailMatch[1]}` : search;
       navigate('/unsubscribe' + emailParam, { replace: true });
+      return;
+    }
+
+    if (pathname.includes('/auth/action') || pathname.includes('/reset-password')) {
+      navigate('/reset-password' + search, { replace: true });
       return;
     }
 
@@ -322,6 +328,9 @@ export default function App() {
                     <Suspense fallback={<LoadingFallback />}>
                       <Routes>
                         <Route path="/login" element={<Login />} />
+                        <Route path="/reset-password" element={<ResetPassword />} />
+                        <Route path="/auth/action" element={<ResetPassword />} />
+                        <Route path="/__/auth/action" element={<ResetPassword />} />
                         <Route path="/maintenance" element={<MaintenancePage />} />
                         <Route path="/app" element={<InstallApp />} />
                         <Route path="/install" element={<InstallApp />} />

@@ -117,6 +117,9 @@ export interface UserProfile {
   expiryNoticeSent?: boolean;
   expiryNoticeSentDate?: string;
   notificationPreferences?: UserNotificationPreferences;
+  contactSyncStatus?: 'synced' | 'pending' | 'failed';
+  contactLastSyncedAt?: string;
+  contactSyncPendingAt?: string;
 }
 
 export interface AppNotification {

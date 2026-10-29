@@ -9,6 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { UserProfile } from '../types';
 import { getUserDisplayName } from '../utils/userUtils';
 import { safeStorage } from '../utils/safeStorage';
+import { isValidEmailAddress } from '../utils/emailValidation';
 
 type LoginStep = 'social' | 'identifier' | 'password' | 'reset-password' | 'create_password' | 'verify_otp';
 
@@ -106,34 +107,7 @@ export default function Login() {
     }
   }, [location.state]);
 
-  useEffect(() => {
-    if (step === 'create_password' && registeredUser && !registeredUser.hasPassword && !verifyToken) {
-      if (registeredUser.email && !registeredUser.email.endsWith('@moviznow.com')) {
-        const isGoogle = registeredUser.email.endsWith('@gmail.com') || (registeredUser as any).isGoogleUser || (registeredUser as any).provider === 'google.com';
-        if (isGoogle) {
-          setCustomError(
-            <div className="flex flex-col gap-2.5">
-              <p className="font-semibold text-zinc-900 dark:text-white">Account Linked to Google</p>
-              <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                Your account ({maskEmail(registeredUser.email)}) is registered with Google. Click below to sign in directly with one tap:
-              </p>
-              <button
-                type="button"
-                onClick={handleGoogleLogin}
-                className="w-full bg-emerald-500 text-white py-2.5 rounded-xl font-medium hover:bg-emerald-600 transition-colors mt-1 shadow-sm flex items-center justify-center gap-2"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>Continue with Google</span>
-              </button>
-            </div>
-          );
-          setStep('social');
-          return;
-        }
-        setStep('verify_otp');
-      }
-    }
-  }, [step, registeredUser, verifyToken]);
+
 
   // Persist target redirect in sessionStorage so it survives OAuth popups or page refreshes
   useEffect(() => {
@@ -454,7 +428,7 @@ export default function Login() {
           }
         }
 
-        // 3c. Check client cache (cached_all_users / profile_cache)
+        // 3c. Check client cache for displayName and email only (never override fresh hasPassword)
         if (!resolvedEmail || !resolvedDisplayName) {
           try {
             const cachedStr = safeStorage.getItem('cached_all_users');
@@ -464,7 +438,6 @@ export default function Login() {
               if (found) {
                 if (!resolvedDisplayName && found.displayName) resolvedDisplayName = found.displayName;
                 if (!resolvedEmail && found.email && !found.email.endsWith('@moviznow.com')) resolvedEmail = found.email;
-                if (!resolvedHasPassword && found.hasPassword) resolvedHasPassword = Boolean(found.hasPassword);
               }
             }
           } catch (e) {}
@@ -476,7 +449,6 @@ export default function Login() {
               if (p.uid === accountUid) {
                 if (!resolvedDisplayName && p.displayName) resolvedDisplayName = p.displayName;
                 if (!resolvedEmail && p.email && !p.email.endsWith('@moviznow.com')) resolvedEmail = p.email;
-                if (!resolvedHasPassword && p.hasPassword) resolvedHasPassword = Boolean(p.hasPassword);
               }
             }
           } catch (e) {}
@@ -517,13 +489,11 @@ export default function Login() {
           return;
         }
 
-        // Step 5: If account is linked to Google, offer 1-click Google Sign-In directly (no redundant OTP)
+        // Step 5: If account is linked to Google (only if provider is google.com or isGoogleUser)
         const isGoogleAccount = Boolean(
-          cleanEmail && (
-            cleanEmail.endsWith('@gmail.com') ||
-            phoneRecord.phoneUser?.isGoogleUser ||
-            phoneRecord.phoneUser?.provider === 'google.com'
-          )
+          phoneRecord.phoneUser?.isGoogleUser === true ||
+          phoneRecord.phoneUser?.provider === 'google.com' ||
+          (phoneRecord.phoneUser as any)?.providerId === 'google.com'
         );
 
         if (isGoogleAccount) {
@@ -584,7 +554,7 @@ export default function Login() {
 
         if (foundUser.hasPassword) {
           setStep('password');
-        } else {
+        } else if (foundUser.isGoogleUser === true || foundUser.provider === 'google.com' || (foundUser as any)?.providerId === 'google.com') {
           // Google user without password logging in with email: direct to Google sign-in (no redundant OTP)!
           setCustomError(
             <div className="flex flex-col gap-2.5">
@@ -602,6 +572,14 @@ export default function Login() {
               </button>
             </div>
           );
+          setIsLoggingIn(false);
+          return;
+        } else {
+          // Non-Google user without password (or hasPassword changed to false): allow setting password directly!
+          setPassword('');
+          setConfirmPassword('');
+          setVerifyToken('');
+          setStep('create_password');
           setIsLoggingIn(false);
           return;
         }
@@ -657,15 +635,36 @@ export default function Login() {
       // Use the WhatsApp number / email to authenticate
       const loginCandidates: string[] = [];
       if (registeredUser?.email && !registeredUser.email.endsWith('@moviznow.com')) {
-        loginCandidates.push(registeredUser.email);
+        loginCandidates.push(registeredUser.email.trim().toLowerCase());
       }
-      if (identifier && !loginCandidates.includes(identifier)) {
-        loginCandidates.push(identifier);
+
+      // Standardized phone dummy emails (e.g. 923416286423@moviznow.com, 03416286423@moviznow.com)
+      const phoneRaw = registeredUser?.phone || (!identifier.includes('@') ? identifier : (identifier.endsWith('@moviznow.com') ? identifier.split('@')[0] : ''));
+      if (phoneRaw) {
+        const std = standardizePhone(phoneRaw);
+        if (std) {
+          const stdDigits = std.replace(/\D/g, '');
+          if (stdDigits) {
+            const stdDummy = `${stdDigits}@moviznow.com`;
+            if (!loginCandidates.includes(stdDummy)) loginCandidates.push(stdDummy);
+          }
+        }
+        const rawDigits = phoneRaw.replace(/\D/g, '');
+        if (rawDigits) {
+          const rawDummy = `${rawDigits}@moviznow.com`;
+          if (!loginCandidates.includes(rawDummy)) loginCandidates.push(rawDummy);
+        }
+      }
+
+      if (identifier.includes('@')) {
+        const idEmail = identifier.trim().toLowerCase();
+        if (!loginCandidates.includes(idEmail)) loginCandidates.push(idEmail);
       }
 
       let loggedIn = false;
       let lastErr: any = null;
       for (const cand of loginCandidates) {
+        if (!cand.includes('@')) continue;
         try {
           await signInWithEmail(cand, password);
           loggedIn = true;
@@ -673,9 +672,6 @@ export default function Login() {
           break;
         } catch (err: any) {
           lastErr = err;
-          if (err?.code === 'auth/wrong-password' || err?.code === 'auth/invalid-credential') {
-            break;
-          }
         }
       }
 
@@ -753,7 +749,7 @@ export default function Login() {
     )
   );
 
-  const existingDisplayName = (registeredUser?.displayName || displayName || '').trim();
+  const existingDisplayName = (registeredUser?.displayName || '').trim();
   const hasExistingName = Boolean(
     existingDisplayName &&
     existingDisplayName !== 'Movie Fan' &&
@@ -763,7 +759,7 @@ export default function Login() {
     !existingDisplayName.startsWith('User (')
   );
 
-  const existingEmail = (registeredUser?.email || optionalEmail || '').trim();
+  const existingEmail = (registeredUser?.email || '').trim();
   const hasExistingEmail = Boolean(
     existingEmail &&
     !existingEmail.endsWith('@moviznow.com') &&
@@ -1284,7 +1280,7 @@ export default function Login() {
                   )
                 );
 
-                const existingDisplayName = (registeredUser?.displayName || displayName || '').trim();
+                const existingDisplayName = (registeredUser?.displayName || '').trim();
                 const hasExistingName = Boolean(
                   existingDisplayName &&
                   existingDisplayName !== 'Movie Fan' &&
@@ -1294,7 +1290,7 @@ export default function Login() {
                   !existingDisplayName.startsWith('User (')
                 );
 
-                const existingEmail = (registeredUser?.email || optionalEmail || '').trim();
+                const existingEmail = (registeredUser?.email || '').trim();
                 const hasExistingEmail = Boolean(
                   existingEmail &&
                   !existingEmail.endsWith('@moviznow.com') &&
@@ -1344,129 +1340,156 @@ export default function Login() {
                     ? cleanId.split('@')[0]
                     : (!cleanId.includes('@') ? cleanId : '');
                   const stdPhone = phonePart ? (standardizePhone(phonePart) || phonePart) : '';
+                  const cleanEmail = (optionalEmail.trim() || (registeredUser?.email && !registeredUser.email.endsWith('@moviznow.com') ? registeredUser.email.trim() : '')).toLowerCase();
+                  const phoneDigits = (stdPhone || phonePart || (!cleanId.includes('@') ? cleanId : '')).replace(/\D/g, '');
+                  const phoneDummyEmail = phoneDigits ? `${phoneDigits}@moviznow.com` : '';
+
+                  const { getAuth, updatePassword, signInWithEmailAndPassword, createUserWithEmailAndPassword } = await import('firebase/auth');
+                  const authInstance = getAuth();
+
+                  // 1. If currently signed in, directly update password on the active user session
+                  if (authInstance.currentUser) {
+                    await updatePassword(authInstance.currentUser, password);
+                    const { doc, setDoc } = await import('firebase/firestore');
+                    const { db } = await import('../firebase');
+                    const targetUid = registeredUser?.uid || authInstance.currentUser.uid;
+                    await setDoc(doc(db, "users", targetUid), {
+                      hasPassword: true,
+                      updatedAt: new Date().toISOString(),
+                      ...(stdPhone ? { phone: stdPhone } : {}),
+                      ...(cleanEmail ? { email: cleanEmail } : {}),
+                      ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
+                    }, { merge: true });
+                    safeStorage.removeItem('profile_cache');
+                    safeStorage.removeItem('cached_all_users');
+                    setIsLoggingIn(false);
+                    return;
+                  }
 
                   if (isExistingAccount && registeredUser) {
-                    // 1. If verified via OTP token, complete password setup securely on the server
-                    if (verifyToken && registeredUser.uid) {
-                      const completeRes = await fetch("/api/email/complete-phone-password-setup", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                          uid: registeredUser.uid,
-                          phone: stdPhone || identifier,
-                          password,
-                          verifyToken,
-                        }),
-                      });
-                      const completeData = await safeParseJsonResponse(completeRes);
-                      if (!completeRes.ok) {
-                        throw new Error(completeData.error || "Failed to complete password setup.");
-                      }
-
-                      if (completeData.customToken) {
-                        const { getAuth, signInWithCustomToken } = await import('firebase/auth');
-                        await signInWithCustomToken(getAuth(), completeData.customToken);
-                        setIsLoggingIn(false);
-                        return;
-                      }
+                    // Existing account setting or updating password
+                    const emailCandidates: string[] = [];
+                    if (cleanEmail && isValidEmailAddress(cleanEmail)) {
+                      emailCandidates.push(cleanEmail);
+                    }
+                    if (phoneDummyEmail && !emailCandidates.includes(phoneDummyEmail)) {
+                      emailCandidates.push(phoneDummyEmail);
                     }
 
-                    // Existing account (e.g. from Google login) setting password for WhatsApp login
-                    const stdDigits = (stdPhone || identifier).replace(/\D/g, '');
-                    const phoneAuthEmail = `${stdDigits}@moviznow.com`;
-                    const googleEmail = (registeredUser.email && !registeredUser.email.endsWith('@moviznow.com'))
-                      ? registeredUser.email
-                      : (optionalEmail.trim() || null);
-                    
-                    let authUser: any = null;
-                    const { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword } = await import('firebase/auth');
-                    const authInst = getAuth();
+                    let authenticatedUser: any = null;
 
-                    // 1. Try creating phone credential (e.g. 923001234567@moviznow.com)
-                    try {
-                      const cred = await createUserWithEmailAndPassword(authInst, phoneAuthEmail, password);
-                      authUser = cred.user;
-                    } catch (err1: any) {
-                      if (err1.code === 'auth/email-already-in-use') {
-                        try {
-                          const cred = await signInWithEmailAndPassword(authInst, phoneAuthEmail, password);
-                          authUser = cred.user;
-                        } catch (signInErr: any) {}
-                      }
-                    }
-
-                    // 2. If phoneAuthEmail was not used, try googleEmail if available
-                    if (!authUser && googleEmail) {
+                    // First: Try signing in with the provided password (in case it matches their password or recent reset)
+                    for (const cand of emailCandidates) {
                       try {
-                        const cred = await createUserWithEmailAndPassword(authInst, googleEmail, password);
-                        authUser = cred.user;
-                      } catch (err2: any) {
-                        if (err2.code === 'auth/email-already-in-use') {
-                          try {
-                            const cred = await signInWithEmailAndPassword(authInst, googleEmail, password);
-                            authUser = cred.user;
-                          } catch (signInErr: any) {}
+                        const cred = await signInWithEmailAndPassword(authInstance, cand, password);
+                        authenticatedUser = cred.user;
+                        break;
+                      } catch (signErr) {
+                        // Continue to next candidate or creation
+                      }
+                    }
+
+                    // Second: If not signed in yet, try creating the Firebase Auth account
+                    if (!authenticatedUser) {
+                      for (const cand of emailCandidates) {
+                        try {
+                          const cred = await createUserWithEmailAndPassword(authInstance, cand, password);
+                          authenticatedUser = cred.user;
+                          break;
+                        } catch (createErr: any) {
+                          if (createErr.code === 'auth/email-already-in-use') {
+                            continue;
+                          }
                         }
                       }
                     }
 
-                    if (authUser) {
-                      const { doc, writeBatch } = await import('firebase/firestore');
+                    if (authenticatedUser) {
+                      // Successfully authenticated with the password
+                      const { doc, setDoc } = await import('firebase/firestore');
                       const { db } = await import('../firebase');
-                      const batch = writeBatch(db);
-
-                      // 1. Update the original user doc (the Google user)
-                      batch.set(doc(db, "users", registeredUser.uid), {
+                      const targetUid = registeredUser.uid || authenticatedUser.uid;
+                      await setDoc(doc(db, "users", targetUid), {
                         hasPassword: true,
-                        phone: stdPhone || registeredUser.phone,
-                        email: googleEmail || registeredUser.email,
-                        displayName: (registeredUser.displayName && registeredUser.displayName !== 'Movie Fan') ? registeredUser.displayName : (displayName.trim() || undefined),
-                        linkedPhoneUid: authUser.uid,
                         updatedAt: new Date().toISOString(),
+                        ...(stdPhone ? { phone: stdPhone } : {}),
+                        ...(cleanEmail ? { email: cleanEmail } : {}),
+                        ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
                       }, { merge: true });
 
-                      // 2. If authUser is a separate UID from registeredUser, mirror full profile so they access the SAME account
-                      if (authUser.uid !== registeredUser.uid) {
-                        batch.set(doc(db, "users", authUser.uid), {
-                          ...registeredUser,
-                          uid: authUser.uid,
-                          primaryUid: registeredUser.uid,
+                      if (stdPhone && targetUid) {
+                        await linkPhoneToUid(stdPhone, targetUid, {
+                          email: cleanEmail || undefined,
+                          displayName: displayName.trim() || undefined,
                           hasPassword: true,
-                          phone: stdPhone || registeredUser.phone,
-                          email: googleEmail || phoneAuthEmail,
-                          updatedAt: new Date().toISOString(),
-                        }, { merge: true });
+                        }).catch(() => {});
                       }
 
-                      await batch.commit();
-
-                      // 3. Update whitelisted_phones single doc
-                      await linkPhoneToUid(stdPhone || identifier, registeredUser.uid, {
-                        email: googleEmail || phoneAuthEmail,
-                        displayName: registeredUser.displayName,
-                        hasPassword: true,
-                      });
-
-                      // Auth state change will redirect to home automatically
-                      setIsLoggingIn(false);
-                      return;
-                    } else {
-                      // If automated creation requires Google verification
-                      setCustomError(
-                        <div className="flex flex-col gap-2">
-                          <p>To verify ownership of your Google account ({googleEmail || 'Google'}), click below to confirm:</p>
-                          <button
-                            type="button"
-                            onClick={handleGoogleLogin}
-                            className="w-full bg-emerald-500 text-white py-2.5 rounded-xl font-medium hover:bg-emerald-600 transition-colors mt-1"
-                          >
-                            Verify with Google
-                          </button>
-                        </div>
-                      );
+                      safeStorage.removeItem('profile_cache');
+                      safeStorage.removeItem('cached_all_users');
                       setIsLoggingIn(false);
                       return;
                     }
+
+                    // If still not authenticated, account already exists in Firebase Auth with a different password
+                    const isGoogle = Boolean(
+                      registeredUser?.provider === 'google.com' ||
+                      (registeredUser as any)?.isGoogleUser === true ||
+                      (registeredUser as any)?.providerId === 'google.com'
+                    );
+
+                    if (isGoogle) {
+                      setCustomError(
+                        <div className="flex flex-col gap-2.5">
+                          <p className="font-semibold text-zinc-900 dark:text-white">Account Linked to Google</p>
+                          <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                            This account is registered with Google. Click below to sign in directly:
+                          </p>
+                          <button
+                            type="button"
+                            onClick={handleGoogleLogin}
+                            className="w-full bg-emerald-500 text-white py-2.5 rounded-xl font-medium hover:bg-emerald-600 transition-colors shadow-sm flex items-center justify-center gap-2"
+                          >
+                            <Sparkles className="w-4 h-4" />
+                            <span>Continue with Google</span>
+                          </button>
+                        </div>
+                      );
+                    } else {
+                      const targetResetEmail = cleanEmail || (registeredUser?.email && !registeredUser.email.endsWith('@moviznow.com') ? registeredUser.email : '');
+                      setCustomError(
+                        <div className="flex flex-col gap-2.5 text-left">
+                          <p className="font-semibold text-zinc-900 dark:text-white">Account Already Has a Password</p>
+                          <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                            This account is already registered with a password. If you know your password, log in below. If you forgot or want to set a new password, send a reset link to your email.
+                          </p>
+                          <div className="flex flex-col sm:flex-row gap-2 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStep('password');
+                                setCustomError(null);
+                              }}
+                              className="flex-1 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 py-2.5 px-3 rounded-xl text-xs font-semibold hover:opacity-90 transition-opacity"
+                            >
+                              Enter Password to Log In
+                            </button>
+                            {targetResetEmail && (
+                              <button
+                                type="button"
+                                onClick={handleForgotPassword}
+                                disabled={resetCooldown > 0 || resetEmailSending}
+                                className="flex-1 bg-emerald-500 text-white py-2.5 px-3 rounded-xl text-xs font-semibold hover:bg-emerald-600 transition-colors disabled:opacity-50"
+                              >
+                                {resetCooldown > 0 ? `Resend (${resetCooldown}s)` : `Reset via ${maskEmail(targetResetEmail) || 'Email'}`}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    }
+                    setIsLoggingIn(false);
+                    return;
                   } else {
                     // Truly new user signup
                     if (stdPhone) {
@@ -1481,17 +1504,29 @@ export default function Login() {
                       }
                     }
 
-                    const dummyEmail = `${identifier.replace(/[^0-9]/g, '')}@moviznow.com`;
+                    const dummyEmail = phoneDummyEmail || `${cleanId.replace(/[^0-9]/g, '')}@moviznow.com`;
+                    const signupEmail = cleanEmail || dummyEmail;
+
                     try {
-                      await signUpWithPhoneAndPassword(identifier, password, displayName, optionalEmail.trim().toLowerCase() || dummyEmail);
+                      await signUpWithPhoneAndPassword(identifier, password, displayName, signupEmail);
+                      setIsLoggingIn(false);
+                      return;
                     } catch (signErr: any) {
                       if (signErr?.code === 'auth/email-already-in-use' || signErr?.message?.includes('already registered')) {
-                        // User already registered! Switch smoothly to password login
-                        setCustomError("This WhatsApp number already has an account. Please enter your password to log in.");
+                        try {
+                          await signInWithEmailAndPassword(authInstance, signupEmail, password);
+                          safeStorage.removeItem('profile_cache');
+                          safeStorage.removeItem('cached_all_users');
+                          setIsLoggingIn(false);
+                          return;
+                        } catch (subErr) {}
+
+                        // Switch to password login
+                        setCustomError("This account already has a password. Please enter your password to log in.");
                         setRegisteredUser({
                           uid: '',
                           phone: stdPhone || identifier,
-                          email: optionalEmail.trim().toLowerCase() || dummyEmail,
+                          email: signupEmail,
                           hasPassword: true,
                           displayName: displayName || `User (${identifier})`,
                           role: 'user',
