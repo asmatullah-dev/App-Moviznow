@@ -982,68 +982,51 @@ export async function performFullLinkScan(
       statusLabel: "WORKING",
       message: "Assuming working (initial)",
     };
+
+    const metaFromContext = extractedMeta[normalizedUrl] || extractedMeta[url] || {};
+    const contextTitle = metaFromContext.fileName || metaFromContext.file_name || metaFromContext.postTitle || "";
+    const contextSize = metaFromContext.fileSizeText || metaFromContext.size || "";
+
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        const extractController = new AbortController();
-        const extractTimeout = setTimeout(() => extractController.abort(), 12000);
-        
         const directController = new AbortController();
-        const directTimeout = setTimeout(() => directController.abort(), 12000);
+        const timeoutMs = attempt === 1 ? 12000 : 16000;
+        const directTimeout = setTimeout(() => directController.abort(), timeoutMs);
 
         const currentForce = attempt === 2 ? true : force;
 
-        const [res, dLinkRes] = await Promise.allSettled([
-          fetch("/api/hubcloud/extract", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: normalizedUrl, force: currentForce }),
-            signal: extractController.signal
-          }),
-          fetch("/api/hubcloud/direct-link", {
+        let dLinkData: any = null;
+        try {
+          const dLinkRes = await fetch("/api/hubcloud/direct-link", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url: normalizedUrl, checkOnly: false, force: currentForce }),
             signal: directController.signal
-          })
-        ]);
-        
-        const wasTimedOut = extractController.signal.aborted && directController.signal.aborted;
-        clearTimeout(extractTimeout);
-        clearTimeout(directTimeout);
+          });
+          if (dLinkRes.ok) {
+            dLinkData = await dLinkRes.json();
+          }
+        } catch {
+          // Direct link fetch error or abort
+        } finally {
+          clearTimeout(directTimeout);
+        }
 
         let candidatesInfo: undefined | any[] = undefined;
-        let dLinkData: any = null;
-        let extractData: any = null;
-
-        if (dLinkRes.status === "fulfilled" && dLinkRes.value.ok) {
-          try {
-            dLinkData = await dLinkRes.value.json();
-            if (dLinkData && dLinkData.candidates && Array.isArray(dLinkData.candidates) && dLinkData.candidates.length > 0) {
-              candidatesInfo = dLinkData.candidates.filter((c: any) => {
-                const lowerT = (c.text || '').toLowerCase();
-                const lowerH = (c.href || '').toLowerCase();
-                return !lowerT.includes('login') && !lowerH.includes('login') &&
-                       !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
-                       !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
-                       !lowerT.includes('telegram') && !lowerH.includes('telegram');
-              });
-            }
-          } catch (e) {
-            console.error("Direct link parsing error", e);
-          }
+        if (dLinkData && dLinkData.candidates && Array.isArray(dLinkData.candidates) && dLinkData.candidates.length > 0) {
+          candidatesInfo = dLinkData.candidates.filter((c: any) => {
+            const lowerT = (c.text || '').toLowerCase();
+            const lowerH = (c.href || '').toLowerCase();
+            return !lowerT.includes('login') && !lowerH.includes('login') &&
+                   !lowerT.includes('moviesdrive') && !lowerH.includes('moviesdrive') &&
+                   !lowerT.includes('mdrive') && !lowerH.includes('mdrive') &&
+                   !lowerT.includes('telegram') && !lowerH.includes('telegram');
+          });
         }
 
-        if (res.status === "fulfilled" && res.value.ok) {
-          try {
-            extractData = await res.value.json();
-          } catch (e) {
-            console.error("Extract link parsing error", e);
-          }
-        }
-
-        const resolvedTitle = extractData?.original_title || extractData?.title || dLinkData?.original_title || dLinkData?.title || "";
-        const resolvedSize = (extractData?.size && extractData?.unit) ? `${extractData.size} ${extractData.unit}` : (dLinkData?.size || "");
-        const isNotFound = extractData?.isNotFound || dLinkData?.isNotFound;
+        let resolvedTitle = dLinkData?.original_title || dLinkData?.title || contextTitle || "";
+        let resolvedSize = (dLinkData?.size && dLinkData?.unit) ? `${dLinkData.size} ${dLinkData.unit}` : (dLinkData?.size || contextSize || "");
+        const isNotFound = dLinkData?.isNotFound;
 
         if (isNotFound) {
           base = {
@@ -1068,9 +1051,12 @@ export async function performFullLinkScan(
         finalUrlToUse = url;
 
         const hasCandidates = Boolean(candidatesInfo && candidatesInfo.length > 0);
-        if (hasCandidates || (!isHubcloudVariant && resolvedTitle) || attempt === 2 || wasTimedOut) {
+        // If we have candidates or finished second attempt, break loop
+        if (hasCandidates || attempt === 2) {
           break;
         }
+        // Small backoff before attempt 2 if attempt 1 had empty candidates or timed out
+        await new Promise((r) => setTimeout(r, 250));
       } catch {
         base = {
           url,
@@ -1079,7 +1065,7 @@ export async function performFullLinkScan(
           message: "Assuming working (network error)",
         };
         finalUrlToUse = url;
-        break;
+        if (attempt === 2) break;
       }
     }
   } else if (url.includes("?token=") || url.includes("&token=")) {

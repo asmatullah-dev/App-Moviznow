@@ -53,6 +53,27 @@ const htmlCache = new Map<string, { data: any, status: number, headers: any, tim
 const inFlightHtmlRequests = new Map<string, Promise<any>>();
 const HTML_CACHE_TTL = 30 * 60 * 1000; // 30 minutes HTML cache
 
+class HubcloudQueue {
+  private running = 0;
+  private queue: (() => void)[] = [];
+  constructor(private maxConcurrent: number) {}
+
+  async run<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.running >= this.maxConcurrent) {
+      await new Promise<void>((resolve) => this.queue.push(resolve));
+    }
+    this.running++;
+    try {
+      return await fn();
+    } finally {
+      this.running--;
+      const next = this.queue.shift();
+      if (next) next();
+    }
+  }
+}
+const hubcloudFetchQueue = new HubcloudQueue(5);
+
 export function getCachedHubcloudData(url: string) {
   if (!url) return null;
   const normalizedUrl = normalizeDomain(url);
@@ -441,28 +462,30 @@ async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
 }
 
 async function fetchHtmlFallback(url: string, isVcloud = false) {
-  let response;
-  
-  // Try direct fetch with 12s timeout
-  try {
-    response = await fetchDirect(url, 12000);
-    if (!isCloudflareResponse(response)) return response;
-  } catch (err) {}
+  return await hubcloudFetchQueue.run(async () => {
+    let response;
+    
+    // Try direct fetch with 12s timeout
+    try {
+      response = await fetchDirect(url, 12000);
+      if (!isCloudflareResponse(response)) return response;
+    } catch (err) {}
 
-  // Quick retry with small delay (many transient network or CF handshakes succeed on retry)
-  try {
-    await new Promise((r) => setTimeout(r, 300));
-    response = await fetchDirect(url, 12000);
-    if (!isCloudflareResponse(response)) return response;
-  } catch (err) {}
+    // Quick retry with small delay (many transient network or CF handshakes succeed on retry)
+    try {
+      await new Promise((r) => setTimeout(r, 300));
+      response = await fetchDirect(url, 12000);
+      if (!isCloudflareResponse(response)) return response;
+    } catch (err) {}
 
-  // Fallback to fetchWithApi if direct fetch failed
-  try {
-    response = await fetchWithApi(url, 14000, isVcloud);
-    if (!isCloudflareResponse(response)) return response;
-  } catch (err) {}
+    // Fallback to fetchWithApi if direct fetch failed
+    try {
+      response = await fetchWithApi(url, 14000, isVcloud);
+      if (!isCloudflareResponse(response)) return response;
+    } catch (err) {}
 
-  return response || { data: "", status: 500, headers: {} };
+    return response || { data: "", status: 500, headers: {} };
+  });
 }
 
 export async function fetchHtml(url: string, isVcloud = false, force = false) {

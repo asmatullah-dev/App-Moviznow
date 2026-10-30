@@ -179,7 +179,7 @@ async function scanAndVerifyCandidates(
 
   const checkResults: LinkCheckResult[] = [];
   const queue = [...resolvedUrls];
-  const concurrency = 30;
+  const concurrency = 8;
 
   const worker = async () => {
     while (queue.length > 0) {
@@ -216,7 +216,8 @@ async function scanAndVerifyCandidates(
     Array.from({ length: Math.min(concurrency, resolvedUrls.length) }, () => worker())
   );
 
-  const validResults = checkResults.filter((r) => {
+  const validResults: LinkCheckResult[] = [];
+  for (const r of checkResults) {
     const isWorking =
       r.statusLabel === 'WORKING' ||
       r.statusLabel === 'REDIRECT' ||
@@ -224,8 +225,35 @@ async function scanAndVerifyCandidates(
       r.statusLabel === 'MISSING_FILENAME' ||
       r.statusLabel === 'MISSING_METADATA' ||
       r.statusLabel === 'SIZE_MISMATCH';
-    return isWorking && r.url && !isMissingPixeldrain(r);
-  });
+    if (!isWorking || !r.url) continue;
+
+    if (isMissingPixeldrain(r)) {
+      // If candidates list was empty (e.g. momentary timeout during concurrent batch check),
+      // do a fast single targeted re-scan to rescue the working link before discarding
+      try {
+        const recheck = await performFullLinkScan(
+          r.url,
+          metaMap,
+          languages,
+          qualities,
+          signal,
+          undefined,
+          undefined,
+          true
+        );
+        if (r.isSample) (recheck as any).isSample = true;
+        (recheck as any).source = (r as any).source;
+        if (!isMissingPixeldrain(recheck)) {
+          validResults.push(recheck);
+          continue;
+        }
+      } catch {}
+      // If it still lacks pixeldrain, skip
+      continue;
+    }
+
+    validResults.push(r);
+  }
 
   const scrapedItems: ScrapedLinkItem[] = [];
   const detectedLangs = new Set<string>();
@@ -718,32 +746,21 @@ export async function runWaterfallLinkSearch(
   }
 
   // ==========================================
-  // STAGE 1: FilmyCab / FilmyGo & STAGE 2: MoviesDrive (Parallel Pre-fetch)
+  // STAGE 1: FilmyCab / FilmyGo (Primary Priority)
   // ==========================================
   log(`[Stage 1/5] Querying FilmyCab / FilmyGo (${fgDomain}) for title "${cleanTitle}"...`);
-  const s1FastPromise = queryProviderFast(
+  const s1Fast = await queryProviderFast(
     'FilmyGo',
     (q, page, sig) => scrapeFilmygoPosts(q, page, sig),
     scrapeFilmygoPostLinks,
     filterFilmygoHits,
     2
   );
-
-  // Pre-fetch MoviesDrive in parallel so Stage 2 is instant if Stage 1 is incomplete or empty
-  const s2FastPromise = queryProviderFast(
-    'MoviesDrive',
-    (q, page, sig) => scrapeMoviesdrivePosts(q, page, sig),
-    scrapeMoviesdrivePostLinks,
-    filterMoviesdriveHits,
-    2
-  );
-
-  const s1Fast = await s1FastPromise;
   const stage1Candidates = s1Fast.candidates;
 
   if (stage1Candidates.length > 0) {
     log(`FilmyGo: Found ${stage1Candidates.length} candidate links, verifying in batch...`);
-    const s1Result = await scanAndVerifyCandidates(
+    let s1Result = await scanAndVerifyCandidates(
       stage1Candidates,
       cleanTitle,
       searchYear,
@@ -752,6 +769,34 @@ export async function runWaterfallLinkSearch(
       qualities,
       signal
     );
+
+    // Auto-rescue check: If 480p candidate existed in stage1Candidates but is missing from s1Result
+    const has480pScraped = s1Result.scrapedItems.some((l) => l.quality === '480p' && !l.isSample);
+    if (!has480pScraped) {
+      const cand480p = stage1Candidates.find((c) => {
+        const text = `${c.postTitle || ''} ${c.url || ''}`.toLowerCase();
+        return (text.includes('480p') || /\bsd\b/i.test(text)) && !c.isSample && !/\bsample\b/i.test(text);
+      });
+      if (cand480p) {
+        log(`FilmyGo: Rescuing missing 480p link (${cand480p.url})...`);
+        try {
+          const rescueRes = await scanAndVerifyCandidates(
+            [cand480p],
+            cleanTitle,
+            searchYear,
+            type,
+            languages,
+            qualities,
+            signal
+          );
+          if (rescueRes.scrapedItems.length > 0) {
+            s1Result.scrapedItems.push(...rescueRes.scrapedItems);
+            s1Result.checkResults.push(...rescueRes.checkResults);
+          }
+        } catch {}
+      }
+    }
+
     allDiscoveredLinks.push(...s1Result.scrapedItems);
     allCheckResults.push(...s1Result.checkResults);
     finalMetadata = { ...finalMetadata, ...s1Result.metadata };
@@ -786,11 +831,17 @@ export async function runWaterfallLinkSearch(
   }
 
   // ==========================================
-  // STAGE 2: MoviesDrive (2nd Priority - Already pre-fetched)
+  // STAGE 2: MoviesDrive (2nd Priority - Queried on demand if Stage 1 incomplete)
   // ==========================================
   if (!signal?.aborted) {
     log(`[Stage 2/5] Inspecting MoviesDrive (${mdDomain}) for title "${cleanTitle}"...`);
-    const s2Fast = await s2FastPromise;
+    const s2Fast = await queryProviderFast(
+      'MoviesDrive',
+      (q, page, sig) => scrapeMoviesdrivePosts(q, page, sig),
+      scrapeMoviesdrivePostLinks,
+      filterMoviesdriveHits,
+      2
+    );
     const stage2Candidates = s2Fast.candidates;
 
     if (stage2Candidates.length > 0) {
