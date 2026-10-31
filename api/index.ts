@@ -2933,16 +2933,6 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         return /(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive|mdrive|fastdl|filepress|drivehub)\./i.test(lower);
       };
 
-      // Helper to check if URL is a valid downloadable hit (HubCloud or Direct R2 / cloud download link)
-      const isValidFilmyHitUrl = (u: string): boolean => {
-        if (!u || typeof u !== 'string') return false;
-        const lower = u.toLowerCase();
-        if (lower.includes("gdflix") || lower.includes("failed") || lower.includes("please check") || lower.includes("cdn-cgi")) return false;
-        if (isHubCloudUrl(u)) return true;
-        if (lower.includes(".r2.dev") || lower.includes("cabdownload.php") || (lower.includes("filesdl") && lower.includes("download.php")) || lower.includes("gofile.io") || lower.includes("workers.dev")) return true;
-        return false;
-      };
-
       // Recursive multi-hop resolver for FilmyGo / FilmyCab gates (e.g. FilmyGo -> LinkMake -> FilesDL -> HubCloud)
       async function resolveFilmyGoLink(
         startUrl: string,
@@ -3067,52 +3057,6 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             return matchedResults;
           }
 
-          // Check for direct high-speed download links (e.g. R2 / Cloudflare storage, cabdownload.php, gofile) when no Hubcloud mirror
-          const directMatches: string[] = [];
-          $doc("a[href]").each((_, aEl) => {
-            const h = ($doc(aEl).attr("href") || "").trim();
-            if (!h || h.startsWith("#") || h.startsWith("javascript:") || h.includes("gdflix") || h.includes("cdn-cgi")) return;
-            if (h.includes(".r2.dev") || h.includes("cabdownload.php") || (h.includes("filesdl") && h.includes("download.php")) || h.includes("gofile.io") || h.includes("workers.dev")) {
-              if (!directMatches.includes(h)) {
-                directMatches.push(h);
-              }
-            }
-          });
-
-          const preferredDirect = directMatches.find(u => u.includes(".r2.dev")) ||
-                                  directMatches.find(u => u.includes("cabdownload.php")) ||
-                                  directMatches[0];
-
-          if (preferredDirect) {
-            const sizeMatch = htmlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || 
-                              htmlText.match(/Size:\s*([0-9.]+\s*(?:GB|MB|KB))/i) || 
-                              htmlText.match(/Instant Download Link\s*-\s*([0-9.]+\s*(?:GB|MB|KB))/i) ||
-                              htmlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
-            const size = sizeMatch ? sizeMatch[1].toUpperCase() : null;
-
-            const cleanLabelQuality = parentLabel.replace(/^Download\s*(Now\s*)?/i, '').trim();
-            const fallbackName = pageMovieTitle ? `${pageMovieTitle} [${cleanLabelQuality}]` : parentLabel;
-            let finalName = (!pageFileName || isGenericTitle(pageFileName)) ? fallbackName : pageFileName;
-
-            if (size) {
-              const escapedSize = size.replace(/\./g, '\\.');
-              finalName = finalName.replace(new RegExp(`\\[?${escapedSize}\\]?`, 'gi'), "").trim();
-              finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
-            }
-
-            const matchedResults = [{
-              file_name: finalName || "Download Link",
-              url: preferredDirect.replace(/&amp;/g, '&'),
-              size,
-              is_direct: true,
-            }];
-
-            filesdlCache.set(startUrl, { results: matchedResults, timestamp: Date.now() });
-            filesdlCache.set(normalizeDomain(startUrl), { results: matchedResults, timestamp: Date.now() });
-
-            return matchedResults;
-          }
-
           // Otherwise, parse HTML with Cheerio to find nested linkmake / intermediate gate links
           const $page = cheerio.load(htmlText);
           const nestedCandidates: Array<{ url: string; label: string }> = [];
@@ -3212,7 +3156,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                 })
               )
             );
-            const flattened = subResults.flat().filter(h => isValidFilmyHitUrl(h.url));
+            const flattened = subResults.flat().filter(h => isHubCloudUrl(h.url));
             if (flattened.length > 0) {
               filesdlCache.set(startUrl, { results: flattened, timestamp: Date.now() });
               filesdlCache.set(normalizeDomain(startUrl), { results: flattened, timestamp: Date.now() });
@@ -3220,12 +3164,12 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             }
           }
 
-          // If startUrl itself is a valid download URL, return it; otherwise return empty array
-          if (isValidFilmyHitUrl(startUrl)) {
+          // If startUrl itself is a HubCloud URL, return it; otherwise return empty array
+          if (isHubCloudUrl(startUrl)) {
             const cleanLabelQuality = parentLabel.replace(/^Download\s*(Now\s*)?/i, '').trim();
             const fallbackName = pageMovieTitle ? `${pageMovieTitle} [${cleanLabelQuality}]` : parentLabel;
             const res = [{
-              file_name: fallbackName || "Download Link",
+              file_name: fallbackName || "HubCloud Link",
               url: normalizeDomain(startUrl),
               size: null,
               is_direct: true,
@@ -3236,11 +3180,11 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           }
           return [];
         } catch (e) {
-          if (isValidFilmyHitUrl(startUrl)) {
+          if (isHubCloudUrl(startUrl)) {
             const cleanLabelQuality = parentLabel.replace(/^Download\s*(Now\s*)?/i, '').trim();
             const fallbackName = pageMovieTitle ? `${pageMovieTitle} [${cleanLabelQuality}]` : parentLabel;
             const res = [{
-              file_name: fallbackName || "Download Link",
+              file_name: fallbackName || "HubCloud Link",
               url: normalizeDomain(startUrl),
               size: null,
               is_direct: true,
@@ -3286,7 +3230,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       }
 
       let finalHits = rawResults.flat().filter((hit, index, self) => 
-        isValidFilmyHitUrl(hit.url) &&
+        isHubCloudUrl(hit.url) &&
         index === self.findIndex((t) => t.url === hit.url)
       );
 
