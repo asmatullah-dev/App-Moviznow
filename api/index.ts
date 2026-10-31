@@ -178,6 +178,14 @@ export async function fetchFilesdlViaMicrolink(targetUrl: string, timeoutMs = 60
   return null;
 }
 
+export const sharedHttpsAgent = new https.Agent({
+  keepAlive: true,
+  maxSockets: 50,
+  maxFreeSockets: 20,
+  timeout: 30000,
+  rejectUnauthorized: false
+});
+
 export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<string, string>, timeoutMs = 8000) {
   // If running on Vercel and the target URL is a FilesDL domain, use Microlink directly to bypass Cloudflare
   if (isVercelEnv && isFilesdlUrl(targetUrl)) {
@@ -187,7 +195,7 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
     }
   }
 
-  const httpsAgent = new https.Agent({ rejectUnauthorized: false });
+  const httpsAgent = sharedHttpsAgent;
   const cachedCookie = getCachedVddosCookie(targetUrl);
   const baseHeaders: Record<string, string> = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -543,169 +551,7 @@ async function startServer() {
     });
   });
 
-  // Background Scan Endpoint
-  // In-memory background scan storage to avoid Firestore writes
-  const inMemoryScanStore: Record<string, any> = {};
-
-  app.post(
-    ["/api/start-background-scan", "/start-background-scan"],
-    async (req, res) => {
-      console.log("Received request to /api/start-background-scan");
-      const { links } = req.body;
-      console.log("Links length:", links ? links.length : "undefined");
-      if (!links || !Array.isArray(links)) {
-        console.log("Invalid links array");
-        return res.status(400).json({ error: "Links array required" });
-      }
-
-      // Start in-memory background process
-      const scanId = "background";
-      inMemoryScanStore[scanId] = {
-        id: scanId,
-        status: "scanning",
-        scannedCount: 0,
-        totalLinks: links.length,
-        errorLinks: [],
-        startedAt: new Date().toISOString(),
-        lastUpdated: new Date().toISOString(),
-      };
-
-      res.json({ message: "Background scan started (in-memory)", scanId });
-
-      // Run the scan in the background
-      (async () => {
-        const foundErrors: any[] = [];
-        let scannedCount = 0;
-        const concurrency = 10;
-        const queue = [...links];
-
-        const checkPixeldrainLink = async (url: string) => {
-          if (!url || url.trim() === "") return { error: "Empty link" };
-          const fileMatch = url.match(
-            /pixeldrain\.(?:com|dev)\/(?:u|api\/file)\/([a-zA-Z0-9]+)/,
-          );
-          const listMatch = url.match(
-            /pixeldrain\.(?:com|dev)\/(?:l|api\/list)\/([a-zA-Z0-9]+)/,
-          );
-
-          try {
-            let apiUrl = "";
-            if (fileMatch)
-              apiUrl = `https://pixeldrain.com/api/file/${fileMatch[1]}/info`;
-            else if (listMatch)
-              apiUrl = `https://pixeldrain.com/api/list/${listMatch[1]}`;
-            else return { error: null };
-
-            const res = await fetch(apiUrl);
-            if (res.status === 451) return { error: "Unavailable from Server" };
-            if (!res.ok) return { error: `HTTP ${res.status}` };
-
-            const data = await res.json();
-            if (data.success === false)
-              return { error: "File not found or deleted" };
-
-            let sizeInBytes = 0;
-            if (fileMatch) sizeInBytes = data.size;
-            else if (listMatch && data.files)
-              sizeInBytes = data.files.reduce(
-                (acc: number, f: any) => acc + (f.size || 0),
-                0,
-              );
-
-            let size = 0;
-            let unit: "MB" | "GB" = "MB";
-            if (sizeInBytes >= 1000 * 1000 * 1000) {
-              size = sizeInBytes / (1000 * 1000 * 1000);
-              unit = "GB";
-            } else {
-              size = sizeInBytes / (1000 * 1000);
-              unit = "MB";
-            }
-            return {
-              error: null,
-              size: size.toFixed(2).replace(/\.00$/, ""),
-              unit,
-            };
-          } catch (e) {
-            return { error: "Network error" };
-          }
-        };
-
-        const processNext = async (): Promise<void> => {
-          if (queue.length === 0) return;
-          const item = queue.shift()!;
-
-          try {
-            const result = await checkPixeldrainLink(item.url);
-            let error = result.error;
-
-            if (!error && (!item.link.size || !item.link.unit)) {
-              error = "Missing size or unit";
-            }
-
-            if (
-              !error &&
-              item.link.size &&
-              item.link.unit &&
-              result.size &&
-              result.unit
-            ) {
-              const stored = `${item.link.size}${item.link.unit}`;
-              const server = `${result.size}${result.unit}`;
-              if (stored !== server) error = `Size mismatch`;
-            }
-
-            if (error) {
-              foundErrors.push({
-                ...item,
-                errorDetail: error,
-                fetchedSize: result.size,
-                fetchedUnit: result.unit,
-              });
-            }
-
-            scannedCount++;
-            if (inMemoryScanStore[scanId]) {
-              inMemoryScanStore[scanId].scannedCount = scannedCount;
-              inMemoryScanStore[scanId].errorLinks = foundErrors;
-              inMemoryScanStore[scanId].lastUpdated = new Date().toISOString();
-            }
-          } catch (e) {
-            console.error("Background scan error for link:", item.url, e);
-          } finally {
-            await processNext();
-          }
-        };
-
-        const workers = Array.from(
-          { length: Math.min(concurrency, links.length) },
-          () => processNext(),
-        );
-        await Promise.all(workers);
-
-        if (inMemoryScanStore[scanId]) {
-          inMemoryScanStore[scanId].status = "completed";
-          inMemoryScanStore[scanId].lastUpdated = new Date().toISOString();
-        }
-      })().catch((err) => {
-        console.error("Background scan fatal error:", err);
-        if (inMemoryScanStore[scanId]) {
-          inMemoryScanStore[scanId].status = "error";
-          inMemoryScanStore[scanId].lastUpdated = new Date().toISOString();
-        }
-      });
-    },
-  );
-
-  app.get(
-    ["/api/background-scan-status", "/background-scan-status"],
-    (req, res) => {
-      const scanId = (req.query.scanId as string) || "background";
-      res.json(inMemoryScanStore[scanId] || { status: "not_found" });
-    }
-  );
-
-  // IMDb Fetch Proxy
+  // Image Proxy
   app.get(["/api/image-proxy"], async (req, res) => {
     try {
       const { url } = req.query;
@@ -3068,7 +2914,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                 try {
                   const res = await axios.get(startUrl, {
                     headers: browserHeaders,
-                    httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+                    httpsAgent: sharedHttpsAgent,
                     timeout: 6000,
                     maxRedirects: 5,
                     validateStatus: () => true
@@ -3135,12 +2981,11 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             return matchedResults;
           }
 
-          // If no direct HubCloud links found on this page, parse HTML with Cheerio to find nested linkmake / intermediate gate links
-          const $page = cheerio.load(htmlText);
+          // If no direct HubCloud links found on this page, search anchors for nested linkmake / intermediate gate links
           const nestedCandidates: Array<{ url: string; label: string }> = [];
 
-          $page("a[href]").each((_, el) => {
-            let href = $page(el).attr("href") || "";
+          $doc("a[href]").each((_, el) => {
+            let href = $doc(el).attr("href") || "";
             if (!href || href.startsWith("#") || href.startsWith("javascript:")) return;
 
             try {
@@ -3172,7 +3017,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               lowerHref.includes("drivehub") ||
               lowerHref.includes("page-download")
             ) {
-              let anchorText = $page(el).text().trim() || $page(el).attr("title") || "";
+              let anchorText = $doc(el).text().trim() || $doc(el).attr("title") || "";
               anchorText = anchorText.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 
               let updatedLabel = parentLabel;
@@ -4934,7 +4779,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
   const checkLinkCache = new Map<string, { data: any, timestamp: number }>();
   const CHECK_LINK_CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache
 
-  app.post(["/api/check-link", "/check-link"], async (req, res) => {
+  const internalCheckLinkHandler = async (req: express.Request, res: express.Response) => {
     try {
       const { url } = req.body;
       if (!url || typeof url !== "string") {
@@ -5452,7 +5297,52 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         message: "Unexpected server error",
       });
     }
-  });
+  };
+
+  app.post(["/api/check-link", "/check-link"], internalCheckLinkHandler);
+
+  const executeCheckLink = async (urlToCheck: string, force = false): Promise<any> => {
+    const cached = checkLinkCache.get(urlToCheck);
+    if (!force && cached && Date.now() - cached.timestamp < CHECK_LINK_CACHE_TTL) {
+      return cached.data;
+    }
+
+    return new Promise((resolve) => {
+      let resolved = false;
+      const mockRes: any = {
+        status: () => mockRes,
+        json: (data: any) => {
+          if (!resolved) {
+            resolved = true;
+            if (data && data.ok === true && data.statusLabel === "WORKING") {
+              checkLinkCache.set(urlToCheck, { data, timestamp: Date.now() });
+            }
+            resolve(data);
+          }
+          return mockRes;
+        },
+        send: (msg: any) => {
+          if (!resolved) {
+            resolved = true;
+            resolve({ ok: false, statusLabel: "BROKEN", message: String(msg) });
+          }
+          return mockRes;
+        }
+      };
+
+      internalCheckLinkHandler({ body: { url: urlToCheck, force } } as any, mockRes as any).catch((err: any) => {
+        if (!resolved) {
+          resolved = true;
+          resolve({
+            url: urlToCheck,
+            ok: false,
+            statusLabel: "UNKNOWN",
+            message: err?.message || "Check failed",
+          });
+        }
+      });
+    });
+  };
 
   app.post(["/api/check-links-batch", "/check-links-batch"], async (req, res) => {
     try {
@@ -5468,44 +5358,11 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       const BATCH_CONCURRENCY = 25;
       const queue = [...cleanUrls];
 
-      // Internal fetch helper to reuse /api/check-link logic with caching
-      const checkOne = async (urlToCheck: string) => {
-        const cached = checkLinkCache.get(urlToCheck);
-        if (!force && cached && Date.now() - cached.timestamp < CHECK_LINK_CACHE_TTL) {
-          return cached.data;
-        }
-
-        try {
-          const checkRes = await fetch("http://127.0.0.1:3000/api/check-link", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: urlToCheck, force }),
-          });
-          if (checkRes.ok) {
-            const data = await checkRes.json();
-            return data;
-          }
-          return {
-            url: urlToCheck,
-            ok: false,
-            statusLabel: "BROKEN",
-            message: `HTTP ${checkRes.status}`,
-          };
-        } catch (err: any) {
-          return {
-            url: urlToCheck,
-            ok: false,
-            statusLabel: "UNKNOWN",
-            message: err?.message || "Check failed",
-          };
-        }
-      };
-
       const worker = async () => {
         while (queue.length > 0) {
           const u = queue.shift();
           if (!u) break;
-          results[u] = await checkOne(u);
+          results[u] = await executeCheckLink(u, force);
         }
       };
 
@@ -5524,6 +5381,10 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     }
   });
 
+  // In-memory cache for OG tags to prevent repetitive Firestore REST queries
+  const ogTagsCache = new Map<string, { tags: string; timestamp: number }>();
+  const OG_TAGS_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+
   // Helper to fetch movie details and generate OG tags
   const getOgTags = async (req: express.Request) => {
     const urlPath = req.originalUrl;
@@ -5541,6 +5402,12 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1") || host.includes("0.0.0.0") || host.includes("::1");
     const protocol = isLocalhost ? "http" : "https";
     const baseUrl = `${protocol}://${host}`;
+
+    const cacheKey = `${baseUrl}${urlPath}`;
+    const cachedOg = ogTagsCache.get(cacheKey);
+    if (cachedOg && Date.now() - cachedOg.timestamp < OG_TAGS_CACHE_TTL) {
+      return cachedOg.tags;
+    }
 
     const hasRef = req.query.ref || urlPath.includes("ref=");
 
@@ -5663,7 +5530,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
     const imageType = image.toLowerCase().includes(".png") ? "image/png" : "image/jpeg";
 
-    return `
+    const renderedTags = `
       <meta property="og:title" content="${title.replace(/"/g, "&quot;")}" />
       <meta property="og:description" content="${description.replace(/"/g, "&quot;").slice(0, 200)}..." />
       <meta property="og:image" content="${image}" />
@@ -5679,6 +5546,9 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       <meta name="twitter:description" content="${description.replace(/"/g, "&quot;").slice(0, 200)}..." />
       <meta name="twitter:image" content="${image}" />
     `;
+
+    ogTagsCache.set(cacheKey, { tags: renderedTags, timestamp: Date.now() });
+    return renderedTags;
   };
 
   const normalizeData = (data: any): any => {
