@@ -379,23 +379,40 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-async function fetchDirect(url: string, timeout = 12000) {
+async function fetchDirect(url: string, timeout = 7000) {
   const headers = {
     "User-Agent":
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     Accept:
-      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Cache-Control": "max-age=0",
-    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "Sec-Ch-Ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
     "Sec-Ch-Ua-Mobile": "?0",
     "Sec-Ch-Ua-Platform": '"Windows"',
     "Sec-Fetch-Dest": "document",
     "Sec-Fetch-Mode": "navigate",
-    "Sec-Fetch-Site": "none",
-    "Sec-Fetch-User": "?1",
+    "Sec-Fetch-Site": "cross-site",
     "Upgrade-Insecure-Requests": "1",
   };
+
+  // Try modern native fetch first (undici HTTP/1.1 TLS avoids CF bot-score penalties)
+  try {
+    const res = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(timeout),
+      redirect: 'follow',
+    });
+    const text = await res.text();
+    const fakeResp = {
+      data: text,
+      status: res.status,
+      headers: Object.fromEntries(res.headers.entries()),
+    };
+    if (!isCloudflareResponse(fakeResp)) {
+      return fakeResp;
+    }
+  } catch (nativeErr) {}
+
   return axios.get(url, {
     headers,
     validateStatus: () => true,
@@ -429,13 +446,13 @@ function isCloudflareResponse(response: any) {
   return false;
 }
 
-async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
+async function fetchWithApi(url: string, timeout = 7000, isVcloud = false) {
   // Try Microlink first
   try {
     const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(url)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`;
     const res = await axios.get(microlinkUrl, {
       validateStatus: () => true,
-      timeout: Math.min(timeout, 7000),
+      timeout: Math.min(timeout, 5000),
     });
     if (res.data && res.data.data && res.data.data.body && typeof res.data.data.body === "string" && res.data.data.body.length > 200) {
       const fakeResp = { data: res.data.data.body, status: 200, headers: res.headers };
@@ -450,7 +467,7 @@ async function fetchWithApi(url: string, timeout = 12000, isVcloud = false) {
       const scraperApiUrl = `http://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}`;
       const scraperRes = await axios.get(scraperApiUrl, {
         validateStatus: () => true,
-        timeout: Math.min(timeout, 8000),
+        timeout: Math.min(timeout, 6000),
         maxContentLength: 5242880,
         maxBodyLength: 5242880,
       });
@@ -465,22 +482,15 @@ async function fetchHtmlFallback(url: string, isVcloud = false) {
   return await hubcloudFetchQueue.run(async () => {
     let response;
     
-    // Try direct fetch with 12s timeout
+    // Try direct fetch with 6s timeout
     try {
-      response = await fetchDirect(url, 12000);
+      response = await fetchDirect(url, 6000);
       if (!isCloudflareResponse(response)) return response;
     } catch (err) {}
 
-    // Quick retry with small delay (many transient network or CF handshakes succeed on retry)
+    // Fallback to fetchWithApi if direct fetch encountered Cloudflare
     try {
-      await new Promise((r) => setTimeout(r, 300));
-      response = await fetchDirect(url, 12000);
-      if (!isCloudflareResponse(response)) return response;
-    } catch (err) {}
-
-    // Fallback to fetchWithApi if direct fetch failed
-    try {
-      response = await fetchWithApi(url, 14000, isVcloud);
+      response = await fetchWithApi(url, 7000, isVcloud);
       if (!isCloudflareResponse(response)) return response;
     } catch (err) {}
 

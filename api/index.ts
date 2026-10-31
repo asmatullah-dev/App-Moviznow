@@ -159,13 +159,21 @@ export function setCachedVddosCookie(url: string, cookie: string) {
   } catch (e) {}
 }
 
-export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<string, string>, timeoutMs = 12000) {
+export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<string, string>, timeoutMs = 8000) {
   const httpsAgent = new https.Agent({ rejectUnauthorized: false });
   const cachedCookie = getCachedVddosCookie(targetUrl);
-  const baseHeaders = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  const baseHeaders: Record<string, string> = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
     'Referer': targetUrl,
+    'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    'Sec-Ch-Ua-Mobile': '?0',
+    'Sec-Ch-Ua-Platform': '"Windows"',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'cross-site',
+    'Upgrade-Insecure-Requests': '1',
     ...(cachedCookie ? { 'Cookie': cachedCookie } : {}),
     ...(customHeaders || {})
   };
@@ -174,28 +182,48 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
   let html = '';
   let finalUrl = targetUrl;
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      res = await axios.get(targetUrl, {
-        headers: baseHeaders,
-        httpsAgent,
-        timeout: timeoutMs,
-        maxContentLength: 5 * 1024 * 1024,
-        validateStatus: () => true,
-        maxRedirects: 5
-      });
-      html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-      finalUrl = res.request?.res?.responseUrl || targetUrl;
-      break;
-    } catch (fetchErr: any) {
-      if (attempt === 0) {
-        await new Promise((r) => setTimeout(r, 300));
-        continue;
+  // 1. Try modern native fetch first (undici HTTP/1.1 TLS matches real Chrome and avoids CF datacenter blocking)
+  try {
+    const nativeRes = await fetch(targetUrl, {
+      headers: baseHeaders,
+      signal: AbortSignal.timeout(Math.min(timeoutMs, 6000)),
+      redirect: 'follow',
+    });
+    const nativeText = await nativeRes.text();
+    if (nativeRes.status === 200 && nativeText.length > 300 && !isCloudflareHtml(nativeRes.status, nativeText) && !nativeText.includes('vDDoS-zn') && !nativeText.includes('toNumbers')) {
+      return { html: nativeText, status: nativeRes.status, finalUrl: nativeRes.url || targetUrl };
+    }
+    // If native fetch returned a status or HTML that may be a vDDoS/Cloudflare challenge, use its output
+    html = nativeText;
+    res = { status: nativeRes.status, headers: Object.fromEntries(nativeRes.headers.entries()) };
+    finalUrl = nativeRes.url || targetUrl;
+  } catch (nativeErr) {}
+
+  // 2. Fallback to axios if native fetch failed or encountered challenges
+  if (!html || html.length < 100) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        res = await axios.get(targetUrl, {
+          headers: baseHeaders,
+          httpsAgent,
+          timeout: timeoutMs,
+          maxContentLength: 5 * 1024 * 1024,
+          validateStatus: () => true,
+          maxRedirects: 5
+        });
+        html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+        finalUrl = res.request?.res?.responseUrl || targetUrl;
+        break;
+      } catch (fetchErr: any) {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 200));
+          continue;
+        }
       }
-      throw fetchErr;
     }
   }
 
+  // 3. Cloudflare bypass fallback if challenge page detected
   if (isCloudflareHtml(res?.status || 0, html)) {
     try {
       console.log(`[fetchWithVddos] Cloudflare detected for ${targetUrl}. Falling back to fetchHtml helper.`);
@@ -208,6 +236,7 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
     }
   }
 
+  // 4. vDDoS Challenge Solver
   if (
     res?.status === 202 ||
     html.includes('vDDoS-zn') ||
@@ -222,9 +251,9 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
         cookieVal = cookieMatch[1].split(';')[0].trim();
       }
     }
-    if (res.headers['set-cookie']) {
+    if (res?.headers && res.headers['set-cookie']) {
       const setCookies = Array.isArray(res.headers['set-cookie']) ? res.headers['set-cookie'] : [res.headers['set-cookie']];
-      const sc = setCookies.map((c) => c.split(';')[0]).join('; ');
+      const sc = setCookies.map((c: string) => c.split(';')[0]).join('; ');
       cookieVal = cookieVal ? cookieVal + '; ' + sc : sc;
     }
 
@@ -242,6 +271,22 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
     } else if (!targetUrl.includes('?d=1') && !targetUrl.includes('&d=1')) {
       redirectUrl = targetUrl.includes('?') ? targetUrl + '&d=1' : targetUrl + '?d=1';
     }
+
+    try {
+      const followRes = await fetch(redirectUrl, {
+        headers: {
+          ...baseHeaders,
+          ...(cookieVal ? { 'Cookie': cookieVal } : {}),
+          'Referer': targetUrl
+        },
+        signal: AbortSignal.timeout(timeoutMs),
+        redirect: 'follow',
+      });
+      const followHtml = await followRes.text();
+      if (followRes.status === 200 && followHtml.length > 300 && !followHtml.includes('vDDoS-zn') && !followHtml.includes('toNumbers')) {
+        return { html: followHtml, status: followRes.status, finalUrl: followRes.url || redirectUrl };
+      }
+    } catch (followErr) {}
 
     for (let followAttempt = 0; followAttempt < 2; followAttempt++) {
       try {
@@ -263,7 +308,7 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
           html = followHtml;
           res = followRes;
           finalUrl = followRes.request?.res?.responseUrl || redirectUrl;
-          if (followRes.request?.res?.responseUrl) {
+          if (followRes.request?.res?.responseUrl && cookieVal) {
             setCachedVddosCookie(followRes.request.res.responseUrl, cookieVal);
           }
           break;
@@ -274,7 +319,7 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
         }
       } catch (err: any) {
         if (followAttempt === 0) {
-          await new Promise((r) => setTimeout(r, 400));
+          await new Promise((r) => setTimeout(r, 200));
           continue;
         }
         console.warn(`[fetchWithVddos] Follow redirect error for ${redirectUrl}:`, err.message);
@@ -2778,16 +2823,14 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       }
       
       // Remove sidebars, recommended/trending posts, and footers so we only extract links belonging to this specific movie
-      $("aside, .sidebar, #secondary, .widget, .related-posts, .related, .trending, .popular-posts, .popular, footer, #footer, #comments").remove();
+      $("aside, .sidebar, #secondary, .widget, .related-posts, .related, .trending, .popular-posts, .popular, footer, #footer, #comments, .thumbnail-wrapper, .home-wrapper").remove();
 
       const pageMovieTitle = $("h1").first().text().trim() || $("title").first().text().replace(/[-–|]\s*Filmy(?:Cab|Go).*$/i, '').trim();
 
-      const $mainContainer = $(".entry-content, .post-content, article, main, .entry").length > 0
-        ? $(".entry-content, .post-content, article, main, .entry")
-        : $("body");
-
       const fdlData = new Map<string, { label: string }>();
-      $mainContainer.find("a[href]").each((_, el) => {
+
+      // Scan all anchor tags across the page for FilesDL, LinkMake, HubCloud, etc.
+      $("a[href]").each((_, el) => {
         let href = $(el).attr("href") || "";
         if (!href) return;
         href = href.trim();
@@ -2814,7 +2857,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           let label = rawLabel.replace(/&#8211;/g, '-').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 
           if (!label || /^(direct\s*)?download(\s*now)?$/i.test(label) || label.length < 3) {
-            const container = $(el).closest("p, div, tr, td, li, article");
+            const container = $(el).closest("p, div, tr, td, li, article, .dlbtn");
             let containerText = container.clone().children("a").remove().end().text().trim();
             if (!containerText) {
               containerText = container.prev().text().trim() || container.text().trim();
@@ -2924,39 +2967,37 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             'Upgrade-Insecure-Requests': '1',
           };
 
-          // Attempt up to 3 times for transient vDDoS challenges or network timeouts
-          for (let fetchAttempt = 0; fetchAttempt < 3; fetchAttempt++) {
+          // 1. Try fast native fetch first (5s timeout - ultra-fast and avoids CF bot challenges)
+          try {
+            const nativeRes = await fetch(startUrl, {
+              headers: browserHeaders,
+              signal: AbortSignal.timeout(5000),
+              redirect: 'follow',
+            });
+            const text = await nativeRes.text();
+            if (nativeRes.status === 200 && text.length > 300 && !isCloudflareHtml(nativeRes.status, text) && !text.includes('vDDoS-zn') && !text.includes('toNumbers')) {
+              htmlText = text;
+              finalUrl = nativeRes.url || startUrl;
+            }
+          } catch (e1) {}
+
+          // 2. Fallback to fetchWithVddos if native fetch didn't return valid HTML
+          if (!htmlText || htmlText.length < 300 || isCloudflareHtml(200, htmlText)) {
             try {
-              const fetched = await fetchWithVddos(startUrl, browserHeaders, 9000);
+              const fetched = await fetchWithVddos(startUrl, browserHeaders, 6000);
               htmlText = fetched.html || "";
               finalUrl = fetched.finalUrl || startUrl;
-              if (htmlText.length > 300 && !htmlText.includes('vDDoS-zn') && !htmlText.includes('toNumbers')) break;
             } catch (fetchErr) {
-              if (fetchAttempt === 0) {
-                await new Promise((r) => setTimeout(r, 250));
-                continue;
-              }
               try {
                 const res = await axios.get(startUrl, {
                   headers: browserHeaders,
                   httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-                  timeout: 9000,
-                  maxRedirects: 5
+                  timeout: 6000,
+                  maxRedirects: 5,
+                  validateStatus: () => true
                 });
                 htmlText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-                if (htmlText.length > 300 && !htmlText.includes('vDDoS-zn') && !htmlText.includes('toNumbers')) break;
               } catch (e2) {}
-
-              // On Vercel, if datacenter IP encounters Cloudflare or 403/503 on filesdl.in, fall back to fetchHtml
-              if (fetchAttempt === 1) {
-                try {
-                  const bypass = await fetchHtml(startUrl, false, false);
-                  if (bypass && bypass.data && typeof bypass.data === 'string' && bypass.data.length > 300) {
-                    htmlText = bypass.data;
-                    break;
-                  }
-                } catch (e3) {}
-              }
             }
           }
 
@@ -2975,12 +3016,15 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
           // Direct match for HubCloud / VCloud / HubDrive / Mdrive / FastDL / FilePress
           const rawHubMatches: string[] = htmlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive|mdrive|fastdl|filepress|drivehub)\.[^"'\s<>\[\]]*/gi) || [];
-          const hubMatches = rawHubMatches.filter((hubUrl: string) => 
-            !hubUrl.toLowerCase().includes("failed") &&
-            !hubUrl.toLowerCase().includes("gdflix") &&
-            !hubUrl.toLowerCase().includes("please check") &&
-            !hubUrl.includes(" ")
-          );
+          const hubMatches = rawHubMatches.filter((hubUrl: string) => isHubCloudUrl(hubUrl));
+
+          // Also check Cheerio anchors for HubCloud
+          $doc("a[href]").each((_, aEl) => {
+            const h = $doc(aEl).attr("href") || "";
+            if (isHubCloudUrl(h) && !hubMatches.includes(h)) {
+              hubMatches.push(h);
+            }
+          });
 
           if (hubMatches.length > 0) {
             const sizeMatch = htmlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || 
@@ -3108,7 +3152,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                     } catch (e) {
                       resolve([]);
                     }
-                  }, i * 60);
+                  }, i * 30);
                 })
               )
             );
@@ -3163,24 +3207,26 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               } catch (e) {
                 resolve([]);
               }
-            }, idx * 100);
+            }, idx * 30);
           })
         )
       );
 
-      // Dedicated secondary retry for any link that returned empty to prevent missing resolutions on Vercel
+      // Fast single parallel retry ONLY for failed/empty entries to catch transient drops without Vercel timeouts
       const fdlEntries = Array.from(fdlData.entries());
-      for (let i = 0; i < rawResults.length; i++) {
-        if (!rawResults[i] || rawResults[i].length === 0) {
-          const [fdlUrl, data] = fdlEntries[i];
-          try {
-            console.log(`[FilmyGo] Secondary retry for unextracted quality on Vercel: ${data.label} (${fdlUrl})`);
-            const retryRes = await resolveFilmyGoLink(fdlUrl, data.label, 0, new Set([targetUrl]));
-            if (retryRes && retryRes.length > 0) {
-              rawResults[i] = retryRes;
-            }
-          } catch (retryErr) {}
-        }
+      const emptyIndices = rawResults.map((r, i) => (!r || r.length === 0 ? i : -1)).filter(i => i !== -1);
+      if (emptyIndices.length > 0 && emptyIndices.length < fdlEntries.length) {
+        await Promise.all(
+          emptyIndices.map(async (i) => {
+            const [fdlUrl, data] = fdlEntries[i];
+            try {
+              const retryRes = await resolveFilmyGoLink(fdlUrl, data.label, 0, new Set([targetUrl]));
+              if (retryRes && retryRes.length > 0) {
+                rawResults[i] = retryRes;
+              }
+            } catch (retryErr) {}
+          })
+        );
       }
 
       let finalHits = rawResults.flat().filter((hit, index, self) => 
