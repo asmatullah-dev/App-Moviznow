@@ -120,6 +120,7 @@ import {
   pickLowerSizeQualityItem,
   resolveConfirmedQuality,
   parseSizeToBytes,
+  parseSizeInGB,
   selectMoviesdriveOrHdhub4uSeriesLinks,
   isSeriesPostOrHits,
 } from '../utils/linkSelector';
@@ -3035,7 +3036,15 @@ export const LinkCheckerModal: React.FC<Props> = ({
             completedCount++;
 
             const isHubcloud = isHubcloudVariant(result.url);
-            const hasPixeldrain = isHubcloud && !!result.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain"));
+            const is4kOrLarge = (result.qualityLabel && /4k|2160p/i.test(result.qualityLabel)) ||
+                                /4k|2160p/i.test(result.url) ||
+                                /4k|2160p/i.test(result.fileName || '') ||
+                                (parseSizeInGB(result.fileSizeText) > 5) ||
+                                ((result.fileSize || 0) > 5 * 1024 * 1024 * 1024);
+            const hasPixeldrain = isHubcloud && (
+              !!result.candidates?.some(c => c.text.toLowerCase().includes("pixeldrain") || c.href.toLowerCase().includes("pixeldrain")) ||
+              (is4kOrLarge && !!result.candidates?.some(c => /fsl|10gbps|buzz|server|download|cloud/i.test(c.text)))
+            );
             const isSelectable = result.statusLabel === "WORKING" || result.statusLabel === "SMALL_FILE" || result.statusLabel === "MISSING_FILENAME" || result.statusLabel === "MISSING_METADATA" || result.statusLabel === "SIZE_MISMATCH";
 
             if (isSelectable) {

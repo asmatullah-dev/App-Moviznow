@@ -178,6 +178,14 @@ export function isHitH264OrHybrid(h: any): boolean {
 }
 
 /**
+ * Detects if a hit is an HQ (High Quality) encode (e.g. 1080p HQ).
+ */
+export function isHitHq(h: any): boolean {
+  const text = `${h.file_name || ''} ${h.fileName || ''} ${h.label || ''} ${h.quality || ''} ${h.rawQuality || ''} ${h.url || ''}`.toLowerCase();
+  return /\bhq\b|1080p[\s._-]*hq/i.test(text);
+}
+
+/**
  * Helper to identify if 4k tag is part of a DS4K / downscaled 4k / 4k source tag (not true 4K resolution)
  */
 export function isDs4kOrSource4k(text: string): boolean {
@@ -756,13 +764,13 @@ function selectStandardQualityPool(candidateHits: any[]): any[] {
   const hit1080p = getSmallestHit(pool1080p.length > 0 ? pool1080p : all1080p);
   const hit1080pHevc = getSmallestHit(pool1080pHevc.length > 0 ? pool1080pHevc : all1080pHevc);
 
-  // 4K candidates: prefer < 10GB, allow smallest available for series packs
+  // 4K candidates: prefer < 10GB, fallback to smallest available 4K
   const all4k = candidateHits.filter((h) => getHitResolution(h) === '4k');
   const cand4kUnder10GB = all4k.filter((h) => {
     const sizeGB = getHitSizeGB(h);
     return sizeGB === 0 || sizeGB < 10;
   });
-  const hit4k = getSmallestHit(cand4kUnder10GB.length > 0 ? cand4kUnder10GB : (isSeriesOrPack ? all4k : []));
+  const hit4k = getSmallestHit(cand4kUnder10GB.length > 0 ? cand4kUnder10GB : all4k);
 
   // 1. 480p selection: strictly at most ONE 480p link
   if (hit480p) {
@@ -808,16 +816,86 @@ function selectStandardQualityPool(candidateHits: any[]): any[] {
   return selected;
 }
 
+
+/**
+ * Selects all distinct quality options available on FilmyGo / FilmyCab:
+ * - 480p standard and 480p HEVC (if available)
+ * - 720p standard and 720p HEVC (both preserved when present on the page)
+ * - 1080p standard, 1080p HQ, and 1080p HEVC (all distinct tiers preserved)
+ * - 4K / 2160p (smallest available 4K link, no arbitrary 10GB drop)
+ * - Other qualities if present
+ */
+export function selectFilmygoQualityPool(candidateHits: any[]): any[] {
+  if (!candidateHits || candidateHits.length === 0) return [];
+
+  const selected: any[] = [];
+
+  // 1. 480p candidates
+  const all480p = candidateHits.filter((h) => getHitResolution(h) === '480p' && !isHitHevc(h));
+  const all480pHevc = candidateHits.filter((h) => getHitResolution(h) === '480p' && isHitHevc(h));
+  const hit480p = getSmallestHit(all480p);
+  const hit480pHevc = getSmallestHit(all480pHevc);
+
+  if (hit480p) selected.push(hit480p);
+  if (hit480pHevc && hit480pHevc !== hit480p) selected.push(hit480pHevc);
+
+  // 2. 720p candidates (preserve both standard 720p and 720p HEVC if available)
+  const all720p = candidateHits.filter((h) => getHitResolution(h) === '720p' && !isHitHevc(h));
+  const all720pHevc = candidateHits.filter((h) => getHitResolution(h) === '720p' && isHitHevc(h));
+  const hit720p = getSmallestHit(all720p);
+  const hit720pHevc = getSmallestHit(all720pHevc);
+
+  if (hit720p) selected.push(hit720p);
+  if (hit720pHevc && hit720pHevc !== hit720p) selected.push(hit720pHevc);
+
+  // 3. 1080p candidates (preserve 1080p standard, 1080p HQ, and 1080p HEVC if available)
+  const all1080pRaw = candidateHits.filter((h) => getHitResolution(h) === '1080p');
+  const all1080pHq = all1080pRaw.filter(isHitHq);
+  const all1080pHevc = all1080pRaw.filter((h) => isHitHevc(h) && !isHitHq(h));
+  const all1080pStd = all1080pRaw.filter((h) => !isHitHq(h) && !isHitHevc(h));
+
+  const hit1080pStd = getSmallestHit(all1080pStd);
+  const hit1080pHq = getSmallestHit(all1080pHq);
+  const hit1080pHevc = getSmallestHit(all1080pHevc);
+
+  if (hit1080pStd) {
+    selected.push(hit1080pStd);
+  } else if (!hit1080pHq && !hit1080pHevc) {
+    const fallback1080 = getSmallestHit(all1080pRaw);
+    if (fallback1080) selected.push(fallback1080);
+  }
+
+  if (hit1080pHq && hit1080pHq !== hit1080pStd) selected.push(hit1080pHq);
+  if (hit1080pHevc && hit1080pHevc !== hit1080pStd && hit1080pHevc !== hit1080pHq) selected.push(hit1080pHevc);
+
+  // 4. 4K / 2160p candidates (prefer < 10GB, but fall back to smallest available 4K regardless of size)
+  const all4k = candidateHits.filter((h) => getHitResolution(h) === '4k');
+  const cand4kUnder10GB = all4k.filter((h) => {
+    const sizeGB = getHitSizeGB(h);
+    return sizeGB === 0 || sizeGB < 10;
+  });
+  const hit4k = getSmallestHit(cand4kUnder10GB.length > 0 ? cand4kUnder10GB : all4k);
+  if (hit4k) selected.push(hit4k);
+
+  // 5. Any Other quality
+  const otherHits = candidateHits.filter(h => getHitResolution(h) === 'other');
+  if (otherHits.length > 0 && selected.length === 0) {
+    selected.push(...otherHits);
+  }
+
+  return selected;
+}
+
 /**
  * ============================================================================
  * FILMYGO LINK SELECTION (Strictly isolated domain logic)
  * Always selects links no matter series or movie according to selection criteria:
  * - Excludes gdflix links
  * - Prefers Hindi line if present
- * - 480p: at most 1 link (prefer non-HEVC, fallback to HEVC, smallest size)
- * - 720p: smallest size 720p; if >1.45GB also select 720p HEVC; fallback to 720p HEVC
- * - 1080p: at most 1 link < 5GB (smallest size)
- * - 4K: < 10GB
+ * - 480p: preserves available 480p and 480p HEVC
+ * - 720p: preserves available 720p and 720p HEVC
+ * - 1080p: preserves available 1080p standard, 1080p HQ, and 1080p HEVC
+ * - 4K: preserves available 4K
  * - Includes sample link if present
  * - Works consistently for single titles, multi-episodes, and packs
  * ============================================================================
@@ -886,11 +964,11 @@ export function filterFilmygoHits(hits: any[], pageUrl: string = ''): any[] {
   if (hasMultipleEpisodes) {
     // For episodic series: select standard qualities for every episode
     for (const [, epHits] of episodeMap.entries()) {
-      selected.push(...selectStandardQualityPool(epHits));
+      selected.push(...selectFilmygoQualityPool(epHits));
     }
   } else {
     // For movies, single packs, or general posts: select standard qualities
-    selected.push(...selectStandardQualityPool(candidateHits));
+    selected.push(...selectFilmygoQualityPool(candidateHits));
   }
 
   // Attach sample hit if available

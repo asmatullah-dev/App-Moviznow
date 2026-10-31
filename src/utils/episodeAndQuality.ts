@@ -1,5 +1,5 @@
 import { isEpisodeRange } from './linkScanner';
-import { parseQualityCategoryFromText } from './linkSelector';
+import { parseQualityCategoryFromText, parseSizeInGB } from './linkSelector';
 
 export type QualityCategory = '720p' | '1080p' | '480p' | '2160p' | 'Other';
 
@@ -336,7 +336,14 @@ export const hasSeriesOrZipIndicator = (hits: any[]): boolean => {
 };
 
 export const isMissingPixeldrain = (
-  r: { url?: string; candidates?: Array<{ text: string; href: string }> } | null | undefined
+  r: {
+    url?: string;
+    candidates?: Array<{ text: string; href: string }>;
+    fileSize?: number;
+    fileSizeText?: string;
+    qualityLabel?: string;
+    fileName?: string;
+  } | null | undefined
 ): boolean => {
   if (!r || !r.url) return false;
   const url = r.url.toLowerCase();
@@ -350,9 +357,27 @@ export const isMissingPixeldrain = (
     url.includes('hblinks');
   if (!isHubcloud) return false;
   if (!r.candidates || r.candidates.length === 0) return true;
-  return !r.candidates.some(
+  const hasPixeldrain = r.candidates.some(
     (c) =>
       (c.text && c.text.toLowerCase().includes('pixeldrain')) ||
       (c.href && c.href.toLowerCase().includes('pixeldrain'))
   );
+  if (hasPixeldrain) return false;
+
+  // 4K releases or large files > 5GB: Pixeldrain has 5-10GB file upload limits, so HubCloud only provides FSL / 10gbps / direct servers.
+  // If the file is 4K or > 5GB and has other valid high-speed download servers (FSL, 10gbps, Buzz, etc.), it is NOT missing.
+  const is4k = (r.qualityLabel && /4k|2160p/i.test(r.qualityLabel)) ||
+               /4k|2160p/i.test(r.url) ||
+               /4k|2160p/i.test(r.fileName || '');
+  const sizeGB = parseSizeInGB(r.fileSizeText) || ((r.fileSize || 0) / (1024 * 1024 * 1024));
+  const hasWorkingServers = r.candidates.some(c => {
+    const t = (c.text || '').toLowerCase();
+    return t.includes('fsl') || t.includes('10gbps') || t.includes('buzz') || t.includes('server') || t.includes('download') || t.includes('cloud');
+  });
+
+  if ((is4k || sizeGB > 5) && hasWorkingServers) {
+    return false;
+  }
+
+  return true;
 };
