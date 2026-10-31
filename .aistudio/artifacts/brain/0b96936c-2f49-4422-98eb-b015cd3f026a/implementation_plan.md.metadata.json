@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan to route FilesDL link resolution through the Microlink API exclusively in Vercel serverless environments, bypassing Cloudflare anti-bot blocks while maintaining native direct fetch in development and non-Vercel environments.",
-  "updatedAt":  "2026-10-31T14:43:00.165544920Z",
+  "summary":  "Implementation plan to completely eliminate ephemeral cabdownload.php and non-HubCloud fallback links across all link extraction routes in favor of strictly verified HubCloud mirrors.",
+  "updatedAt":  "2026-10-31T15:12:59.329906941Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

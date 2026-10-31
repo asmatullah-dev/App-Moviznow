@@ -2981,18 +2981,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       const isHubCloudUrl = (u: string): boolean => {
         if (!u || typeof u !== 'string') return false;
         const lower = u.toLowerCase();
-        if (lower.includes("gdflix") || lower.includes("failed") || lower.includes("please check") || lower.includes("cdn-cgi")) return false;
+        if (lower.includes("gdflix") || lower.includes("failed") || lower.includes("please check") || lower.includes("cdn-cgi") || lower.includes("cabdownload.php") || lower.includes("download.php")) return false;
         return /(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive|mdrive|fastdl|filepress|drivehub)\./i.test(lower);
       };
 
-      // Helper to check if URL is a valid downloadable hit (HubCloud or Direct R2 / cloud download link)
+      // Helper to check if URL is a valid downloadable hit (Strictly HubCloud links only, no cabdownload or broken fallbacks)
       const isValidFilmyHitUrl = (u: string): boolean => {
         if (!u || typeof u !== 'string') return false;
         const lower = u.toLowerCase();
-        if (lower.includes("gdflix") || lower.includes("failed") || lower.includes("please check") || lower.includes("cdn-cgi")) return false;
-        if (isHubCloudUrl(u)) return true;
-        if (lower.includes(".r2.dev") || lower.includes("cabdownload.php") || (lower.includes("filesdl") && lower.includes("download.php")) || lower.includes("gofile.io") || lower.includes("workers.dev")) return true;
-        return false;
+        if (lower.includes("gdflix") || lower.includes("failed") || lower.includes("please check") || lower.includes("cdn-cgi") || lower.includes("cabdownload.php") || lower.includes("download.php")) return false;
+        return isHubCloudUrl(u);
       };
 
       // Recursive multi-hop resolver for FilmyGo / FilmyCab gates (e.g. FilmyGo -> LinkMake -> FilesDL -> HubCloud)
@@ -3137,53 +3135,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             return matchedResults;
           }
 
-          // Check for direct high-speed download links (e.g. R2 / Cloudflare storage, cabdownload.php, gofile) when no Hubcloud mirror
-          const directMatches: string[] = [];
-          $doc("a[href]").each((_, aEl) => {
-            const h = ($doc(aEl).attr("href") || "").trim();
-            if (!h || h.startsWith("#") || h.startsWith("javascript:") || h.includes("gdflix") || h.includes("cdn-cgi")) return;
-            if (h.includes(".r2.dev") || h.includes("cabdownload.php") || (h.includes("filesdl") && h.includes("download.php")) || h.includes("gofile.io") || h.includes("workers.dev")) {
-              if (!directMatches.includes(h)) {
-                directMatches.push(h);
-              }
-            }
-          });
-
-          const preferredDirect = directMatches.find(u => u.includes(".r2.dev")) ||
-                                  directMatches.find(u => u.includes("cabdownload.php")) ||
-                                  directMatches[0];
-
-          if (preferredDirect) {
-            const sizeMatch = htmlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || 
-                              htmlText.match(/Size:\s*([0-9.]+\s*(?:GB|MB|KB))/i) || 
-                              htmlText.match(/Instant Download Link\s*-\s*([0-9.]+\s*(?:GB|MB|KB))/i) ||
-                              htmlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
-            const size = sizeMatch ? sizeMatch[1].toUpperCase() : null;
-
-            const cleanLabelQuality = parentLabel.replace(/^Download\s*(Now\s*)?/i, '').trim();
-            const fallbackName = pageMovieTitle ? `${pageMovieTitle} [${cleanLabelQuality}]` : parentLabel;
-            let finalName = (!pageFileName || isGenericTitle(pageFileName)) ? fallbackName : pageFileName;
-
-            if (size) {
-              const escapedSize = size.replace(/\./g, '\\.');
-              finalName = finalName.replace(new RegExp(`\\[?${escapedSize}\\]?`, 'gi'), "").trim();
-              finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
-            }
-
-            const matchedResults = [{
-              file_name: finalName || "Download Link",
-              url: preferredDirect.replace(/&amp;/g, '&'),
-              size,
-              is_direct: true,
-            }];
-
-            filesdlCache.set(startUrl, { results: matchedResults, timestamp: Date.now() });
-            filesdlCache.set(normalizeDomain(startUrl), { results: matchedResults, timestamp: Date.now() });
-
-            return matchedResults;
-          }
-
-          // Otherwise, parse HTML with Cheerio to find nested linkmake / intermediate gate links
+          // If no direct HubCloud links found on this page, parse HTML with Cheerio to find nested linkmake / intermediate gate links
           const $page = cheerio.load(htmlText);
           const nestedCandidates: Array<{ url: string; label: string }> = [];
 
@@ -3200,7 +3152,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             if (branchVisited.has(href)) return;
 
             const lowerHref = href.toLowerCase();
-            if (lowerHref.includes("gdflix") || lowerHref.includes("cdn-cgi") || lowerHref.includes("download.php")) return;
+            if (lowerHref.includes("gdflix") || lowerHref.includes("cdn-cgi") || lowerHref.includes("download.php") || lowerHref.includes("cabdownload.php")) return;
 
             const isTargetHost = href.includes("filmygo.") || href.includes("filmycab.");
             
@@ -3257,7 +3209,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             const rawMatches = htmlText.match(/https?:\/\/[^"'\s<>\[\]]*(?:filesdl|linkmake|hubcloud|vcloud|hubdrive|mdrive|fastdl|filepress)[^"'\s<>\[\]]*/gi) || [];
             for (const rawUrl of rawMatches) {
               const cleanUrl = rawUrl.replace(/&amp;/g, '&');
-              if (!branchVisited.has(cleanUrl) && !cleanUrl.toLowerCase().includes("gdflix") && !cleanUrl.toLowerCase().includes("failed") && !cleanUrl.toLowerCase().includes("download.php")) {
+              if (!branchVisited.has(cleanUrl) && !cleanUrl.toLowerCase().includes("gdflix") && !cleanUrl.toLowerCase().includes("failed") && !cleanUrl.toLowerCase().includes("download.php") && !cleanUrl.toLowerCase().includes("cabdownload.php")) {
                 nestedCandidates.push({ url: cleanUrl, label: parentLabel });
               }
             }
@@ -3687,7 +3639,8 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                 $filesdl("a[href]").each((_, el) => {
                   const h = $filesdl(el).attr("href") || "";
                   const t = $filesdl(el).text().trim();
-                  if ((h.includes("pixeldrain") || h.includes("gofile") || h.includes("download.php") || h.includes("direct") || h.includes("fast")) && !fallbackUrl) {
+                  if (h.includes("cabdownload.php") || h.includes("download.php")) return;
+                  if ((h.includes("pixeldrain") || h.includes("gofile") || h.includes("direct") || h.includes("fast")) && !fallbackUrl) {
                     fallbackUrl = h;
                     if (t) fallbackTitle = `${pageTitle} - ${t}`;
                   }
