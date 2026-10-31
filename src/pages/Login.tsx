@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth, standardizePhone } from '../contexts/AuthContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useLanguage } from '../contexts/LanguageContext';
-import { Mail, Phone, ArrowLeft, Eye, EyeOff, Lock, User as UserIcon, Loader2, Sparkles, ShieldCheck, Check } from 'lucide-react';
+import { Mail, Phone, ArrowLeft, Eye, EyeOff, Lock, User as UserIcon, Loader2, Sparkles, ShieldCheck, Check, MessageCircle, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 import { UserProfile } from '../types';
@@ -84,6 +84,7 @@ export default function Login() {
   const [resetEmailSending, setResetEmailSending] = useState(false);
   const [resetEmailSent, setResetEmailSent] = useState<string | null>(null);
   const [resetCooldown, setResetCooldown] = useState(0);
+  const [isWhatsAppResetModalOpen, setIsWhatsAppResetModalOpen] = useState(false);
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -691,13 +692,12 @@ export default function Login() {
   };
 
   const handleForgotPassword = async () => {
-    if (resetCooldown > 0 || resetEmailSending) return;
-
     const targetEmail = registeredUser?.email && !registeredUser.email.endsWith('@moviznow.com')
       ? registeredUser.email
       : (identifier && identifier.includes('@') && !identifier.endsWith('@moviznow.com') ? identifier.trim().toLowerCase() : '');
 
     if (targetEmail) {
+      if (resetCooldown > 0 || resetEmailSending) return;
       setResetEmailSending(true);
       clearError();
       setCustomError(null);
@@ -714,18 +714,11 @@ export default function Login() {
         setResetEmailSending(false);
       }
     } else {
-      if (settings?.isAdminContactEnabled === false) {
-        setCustomError(t("Password reset via admin contact is currently disabled."));
-        return;
-      }
-      // Open WhatsApp to admin
-      let supportPhone = settings?.supportNumber || '3416286423';
-      if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
-      if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
-      const adminPhone = `92${supportPhone}`;
-      const contactName = getUserDisplayName(registeredUser || { phone: identifier });
-      const message = `Assalam O Alaikum! Admin,\n\nName: ${contactName}\nEmail: ${registeredUser?.email || 'N/A'}\nPhone: ${registeredUser?.phone || identifier}\nRole & Status: ${String(registeredUser?.role || 'Unknown').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(registeredUser?.status || 'Unknown').replace(/\b\w/g, c => c.toUpperCase())}\n\n${t("Your message/question:")}\n${t("I forgot my password and need help resetting it.")}`;
-      window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+      // For WhatsApp / Phone accounts or @moviznow.com synthetic emails:
+      // Open the in-page WhatsApp Reset Request modal
+      clearError();
+      setCustomError(null);
+      setIsWhatsAppResetModalOpen(true);
     }
   };
 
@@ -1028,17 +1021,28 @@ export default function Login() {
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t("Password")}</label>
-                  {((registeredUser?.email && !registeredUser.email.endsWith('@moviznow.com')) || (identifier && identifier.includes('@'))) && (
+                  {Boolean(
+                    (registeredUser?.email && !registeredUser.email.endsWith('@moviznow.com')) ||
+                    (identifier && identifier.includes('@') && !identifier.endsWith('@moviznow.com'))
+                  ) ? (
                     <button
                       type="button"
                       onClick={handleForgotPassword}
                       disabled={resetCooldown > 0 || resetEmailSending}
-                      className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline disabled:opacity-50 disabled:no-underline font-medium inline-flex items-center gap-1"
+                      className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline disabled:opacity-50 disabled:no-underline font-medium inline-flex items-center gap-1 cursor-pointer"
                     >
                       {resetEmailSending ? (
                         <Loader2 className="w-3 h-3 animate-spin text-emerald-500" />
                       ) : null}
                       {resetCooldown > 0 ? `${t("Send again in")} ${resetCooldown}s` : t("Forgot?")}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline font-medium inline-flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>{t("Forgot Password?")}</span>
                     </button>
                   )}
                 </div>
@@ -1404,6 +1408,31 @@ export default function Login() {
                       }
                     }
 
+                    // Third: If still not authenticated and account exists in Firestore without an active password (or after admin reset):
+                    if (!authenticatedUser && registeredUser?.uid) {
+                      try {
+                        const initRes = await fetch("/api/auth/set-initial-password", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            uid: registeredUser.uid,
+                            phone: stdPhone || (!cleanId.includes('@') ? cleanId : ''),
+                            password,
+                            displayName: displayName.trim(),
+                            email: cleanEmail,
+                          }),
+                        });
+                        const initData = await safeParseJsonResponse(initRes);
+                        if (initRes.ok && initData.customToken) {
+                          const { signInWithCustomToken } = await import('firebase/auth');
+                          const cred = await signInWithCustomToken(authInstance, initData.customToken);
+                          authenticatedUser = cred.user;
+                        }
+                      } catch (initErr) {
+                        console.warn("Set initial password fallback notice:", initErr);
+                      }
+                    }
+
                     if (authenticatedUser) {
                       // Successfully authenticated with the password
                       const { doc, setDoc } = await import('firebase/firestore');
@@ -1761,6 +1790,90 @@ export default function Login() {
           )}
         </AnimatePresence>
       </motion.div>
+
+      {/* WhatsApp Password Reset Request Modal */}
+      <AnimatePresence>
+        {isWhatsAppResetModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-2xl border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-white space-y-4"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-zinc-100 dark:border-zinc-800">
+                <div className="flex items-center gap-2 text-emerald-500">
+                  <MessageCircle className="w-5 h-5" />
+                  <h3 className="font-bold text-base">Reset WhatsApp Password</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsWhatsAppResetModalOpen(false)}
+                  className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-lg transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-3 bg-zinc-50 dark:bg-zinc-950/60 rounded-2xl border border-zinc-200/60 dark:border-zinc-800/60 text-xs space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Account:</span>
+                  <span className="font-semibold">{getUserDisplayName(registeredUser || { phone: identifier })}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">WhatsApp Number:</span>
+                  <span className="font-mono font-semibold">{identifier || registeredUser?.phone || 'Your Number'}</span>
+                </div>
+              </div>
+
+              <div className="text-xs text-zinc-600 dark:text-zinc-400 space-y-2 leading-relaxed">
+                <p>
+                  For WhatsApp & phone accounts, password resets are verified directly with Admin to ensure account security.
+                </p>
+                <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-700 dark:text-emerald-400 text-[11px] space-y-1">
+                  <div className="font-bold">Simple 3-Step Reset:</div>
+                  <ol className="list-decimal pl-4 space-y-0.5">
+                    <li>Click below to message Admin on WhatsApp.</li>
+                    <li>Admin will provide a temporary password or clear your password.</li>
+                    <li>Log in with the temporary password and you will set your own new password.</li>
+                  </ol>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    let supportPhone = settings?.supportNumber || '3416286423';
+                    if (supportPhone.startsWith('92')) supportPhone = supportPhone.substring(2);
+                    if (supportPhone.startsWith('0')) supportPhone = supportPhone.substring(1);
+                    const adminPhone = `92${supportPhone}`;
+                    const contactName = getUserDisplayName(registeredUser || { phone: identifier });
+                    const phoneToDisplay = identifier || registeredUser?.phone || '';
+                    const message = `Assalam O Alaikum! Admin,\n\nName: ${contactName}\nPhone: ${phoneToDisplay}\nEmail: ${registeredUser?.email || 'N/A'}\nRole & Status: ${String(registeredUser?.role || 'User').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}, ${String(registeredUser?.status || 'Active').replace(/\b\w/g, c => c.toUpperCase())}\n\nI forgot my password for MovizNow and need help resetting it.`;
+                    window.open(`https://wa.me/${adminPhone}?text=${encodeURIComponent(message)}`, '_blank');
+                  }}
+                  className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-3 px-4 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 text-sm cursor-pointer"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span>Message Admin on WhatsApp</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsWhatsAppResetModalOpen(false);
+                    setStep('password');
+                  }}
+                  className="w-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 font-semibold py-2.5 px-4 rounded-xl text-xs transition-colors cursor-pointer"
+                >
+                  I Have My Temporary Password
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -4537,37 +4537,233 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     },
   );
 
-  // Admin Reset Password
+  // Admin Reset Password Endpoint (supports custom temporary passwords, requirePasswordReset toggle, or clearing password)
   app.post(
     ["/api/admin/reset-password", "/admin/reset-password"],
     async (req, res) => {
       try {
-        const { uid, adminUid } = req.body;
-        if (!uid || !adminUid)
+        const { uid, adminUid, newPassword, requirePasswordReset = true, clearPassword = false } = req.body;
+        if (!uid || !adminUid) {
           return res.status(400).json({ error: "Missing uid or adminUid" });
-
-        // Verify admin
-        const adminDoc = await db.collection("users").doc(adminUid).get();
-        if (
-          !adminDoc.exists ||
-          (adminDoc.data()?.role !== "admin" &&
-            adminDoc.data()?.role !== "owner")
-        ) {
-          return res.status(403).json({ error: "Unauthorized" });
         }
 
-        // Reset password to default and set flag
-        const defaultPassword = "moviznow123";
-        await admin.auth().updateUser(uid, { password: defaultPassword });
-        await db
-          .collection("users")
-          .doc(uid)
-          .update({ requirePasswordReset: true });
+        // Verify admin permissions
+        let isVerifiedAdmin = false;
+        const KNOWN_ADMIN_EMAILS = [
+          "asmatn628@gmail.com",
+          "asmatullah9327@gmail.com",
+          "kabirahmaddev@gmail.com",
+          "wamoviesstation@gmail.com",
+        ];
 
-        res.json({ success: true, message: "Password reset to moviznow123" });
-      } catch (error) {
+        if (db) {
+          try {
+            const adminDoc = await db.collection("users").doc(adminUid).get();
+            if (
+              adminDoc.exists &&
+              (adminDoc.data()?.role === "admin" || adminDoc.data()?.role === "owner")
+            ) {
+              isVerifiedAdmin = true;
+            }
+          } catch (e) {
+            console.warn("Could not check admin role via Firestore doc:", e);
+          }
+        }
+
+        if (!isVerifiedAdmin && admin.apps.length > 0) {
+          try {
+            const authUser = await admin.auth().getUser(adminUid);
+            if (authUser.email && KNOWN_ADMIN_EMAILS.includes(authUser.email.toLowerCase())) {
+              isVerifiedAdmin = true;
+            }
+          } catch (e) {}
+        }
+
+        if (!isVerifiedAdmin && db) {
+          return res.status(403).json({ error: "Unauthorized: Admin privileges required." });
+        }
+
+        if (clearPassword) {
+          // Clear password: user can set a new password on their next login
+          const randomScramble = crypto.randomBytes(16).toString("hex");
+          if (admin.apps.length > 0) {
+            try {
+              await admin.auth().updateUser(uid, { password: randomScramble });
+            } catch (err: any) {
+              console.warn("Notice updating auth user password on clear:", err?.message);
+            }
+          }
+
+          if (db) {
+            await db.collection("users").doc(uid).update({
+              hasPassword: false,
+              requirePasswordReset: false,
+              updatedAt: new Date().toISOString(),
+            });
+            // Also update chunk_meta versions
+            try {
+              await db.collection("chunk_meta").doc("versions").set({
+                users: { [uid]: Date.now() }
+              }, { merge: true });
+            } catch (e) {}
+          }
+
+          return res.json({
+            success: true,
+            action: "cleared",
+            message: "Password cleared. User will be prompted to create a new password on their next login.",
+          });
+        }
+
+        // Set password to newPassword or default
+        const tempPassword = (newPassword || "").trim() || "moviznow123";
+        if (tempPassword.length < 6) {
+          return res.status(400).json({ error: "Password must be at least 6 characters." });
+        }
+
+        if (admin.apps.length > 0) {
+          try {
+            await admin.auth().updateUser(uid, { password: tempPassword });
+          } catch (authErr: any) {
+            console.warn("Notice updating auth password:", authErr?.message);
+            // If user doesn't exist in Firebase Auth yet, try creating it with their phone dummy email
+            if (authErr?.code === 'auth/user-not-found' && db) {
+              const uDoc = await db.collection("users").doc(uid).get();
+              if (uDoc.exists) {
+                const uData = uDoc.data();
+                const phoneDigits = (uData?.phone || "").replace(/\D/g, "");
+                const candidateEmail = uData?.email && !uData.email.endsWith("@moviznow.com")
+                  ? uData.email
+                  : `${phoneDigits || uid}@moviznow.com`;
+                await admin.auth().createUser({
+                  uid,
+                  email: candidateEmail,
+                  password: tempPassword,
+                  displayName: uData?.displayName || "Movie Fan",
+                });
+              }
+            }
+          }
+        }
+
+        if (db) {
+          await db.collection("users").doc(uid).update({
+            hasPassword: true,
+            requirePasswordReset: Boolean(requirePasswordReset),
+            updatedAt: new Date().toISOString(),
+          });
+          try {
+            await db.collection("chunk_meta").doc("versions").set({
+              users: { [uid]: Date.now() }
+            }, { merge: true });
+          } catch (e) {}
+        }
+
+        res.json({
+          success: true,
+          action: "set",
+          tempPassword,
+          requirePasswordReset: Boolean(requirePasswordReset),
+          message: `Password updated successfully. ${requirePasswordReset ? "User will be asked to change password on login." : ""}`,
+        });
+      } catch (error: any) {
         console.error("Admin Reset Password Error:", error);
-        res.status(500).json({ error: "Internal Server Error" });
+        res.status(500).json({ error: error.message || "Failed to reset password" });
+      }
+    },
+  );
+
+  // Set Initial / Self-Service Password for Phone/WhatsApp Accounts
+  // Solves the issue where accounts with dummy @moviznow.com emails cannot reset via Firebase email action links
+  app.post(
+    ["/api/auth/set-initial-password", "/auth/set-initial-password"],
+    async (req, res) => {
+      try {
+        const { uid, phone, password, displayName, email } = req.body;
+        if (!uid || !password || password.length < 6) {
+          return res.status(400).json({ error: "UID and a password of at least 6 characters are required." });
+        }
+
+        if (!db) {
+          return res.status(500).json({ error: "Database service unavailable." });
+        }
+
+        const userDocRef = db.collection("users").doc(uid);
+        const userSnap = await userDocRef.get();
+        if (!userSnap.exists) {
+          return res.status(404).json({ error: "Account not found." });
+        }
+
+        const userData = userSnap.data() || {};
+
+        // Security check: only allow if user doesn't have a password or has requirePasswordReset enabled
+        const isEligible = userData.hasPassword === false || userData.requirePasswordReset === true || !userData.hasPassword;
+        if (!isEligible) {
+          return res.status(403).json({ error: "This account already has an active password. Please log in with your password or contact admin to reset." });
+        }
+
+        // 1. Update password in Firebase Auth Admin
+        if (admin.apps.length > 0) {
+          try {
+            await admin.auth().updateUser(uid, { password });
+          } catch (updateErr: any) {
+            if (updateErr?.code === "auth/user-not-found") {
+              // Create user if missing
+              const phoneDigits = (phone || userData.phone || "").replace(/\D/g, "");
+              const candidateEmail = (email && !email.endsWith("@moviznow.com"))
+                ? email
+                : (userData.email && !userData.email.endsWith("@moviznow.com"))
+                ? userData.email
+                : `${phoneDigits || uid}@moviznow.com`;
+
+              await admin.auth().createUser({
+                uid,
+                email: candidateEmail,
+                password,
+                displayName: displayName || userData.displayName || "Movie Fan",
+              });
+            } else {
+              throw updateErr;
+            }
+          }
+        }
+
+        // 2. Update Firestore user document
+        const updatePayload: any = {
+          hasPassword: true,
+          requirePasswordReset: false,
+          updatedAt: new Date().toISOString(),
+        };
+        if (displayName && (!userData.displayName || userData.displayName.startsWith("User ("))) {
+          updatePayload.displayName = displayName.trim();
+        }
+        if (phone && !userData.phone) {
+          updatePayload.phone = phone.trim();
+        }
+        if (email && !userData.email && !email.endsWith("@moviznow.com")) {
+          updatePayload.email = email.trim().toLowerCase();
+        }
+
+        await userDocRef.update(updatePayload);
+
+        // 3. Generate custom Firebase Auth token for seamless instant client-side login
+        let customToken = "";
+        if (admin.apps.length > 0) {
+          try {
+            customToken = await admin.auth().createCustomToken(uid);
+          } catch (tokErr) {
+            console.warn("Could not create custom token:", tokErr);
+          }
+        }
+
+        return res.json({
+          success: true,
+          customToken,
+          message: "Password set successfully.",
+        });
+      } catch (error: any) {
+        console.error("Set initial password error:", error);
+        return res.status(500).json({ error: error.message || "Failed to set password." });
       }
     },
   );

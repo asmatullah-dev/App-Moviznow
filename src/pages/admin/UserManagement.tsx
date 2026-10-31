@@ -49,24 +49,14 @@ import {
 } from '../../utils/expiryNotificationTracker';
 import { getUtcVersion, updateChunkMetaLocalCache } from '../../utils/chunkMeta';
 import {
-  getStoredContactsToken,
   getConnectedAccountEmail,
   isGoogleContactsAuthorized,
   ensureValidContactsToken,
-  connectGoogleContacts,
-  disconnectGoogleContacts,
-  syncSingleUserContact,
-  syncMultipleUsersContacts,
   batchSyncUsersContacts,
-  compareUsersWithGoogleContacts,
-  loadAndVerifyStoredContactsToken,
-  getPendingContactsList,
-  addToPendingContactsSync,
-  processPendingContactsQueue,
-  syncUserContactWithAutoOAuth,
-  fetchPendingContactsFromFirestore
+  syncSingleUserContact
 } from '../../services/googleContactsService';
 import { GoogleContactsCompareModal } from '../../components/GoogleContactsCompareModal';
+import { AdminPasswordResetModal } from '../../components/AdminPasswordResetModal';
 
 
 type SortField = 'createdAt' | 'displayName' | 'phone' | 'expiryDate' | 'lastActive';
@@ -85,6 +75,7 @@ export default function UserManagement() {
   const [editForm, setEditForm] = useState<Partial<UserProfile>>({});
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; message: string }>({ isOpen: false, title: '', message: '' });
   const [emailModalUser, setEmailModalUser] = useState<UserProfile | null>(null);
+  const [resetModalUser, setResetModalUser] = useState<UserProfile | null>(null);
   
   const [searchTerm, setSearchTerm] = useState(() => sessionStorage.getItem('user_mgmt_search') || '');
   const debouncedSearchTerm = useDebounce(searchTerm, 100);
@@ -162,17 +153,9 @@ export default function UserManagement() {
   const [processing, setProcessing] = useState<Record<string, boolean>>({});
   const [userReviews, setUserReviews] = useState<Record<string, {rating: number, text: string}[]>>({});
 
-  // Google Contacts State & Handlers
-  const [contactsToken, setContactsToken] = useState<string | null>(() => getStoredContactsToken());
-  const [contactsAccountEmail, setContactsAccountEmail] = useState<string | null>(() => getConnectedAccountEmail() || 'wmoviznow@gmail.com');
-  const [isContactsAuthorized, setIsContactsAuthorized] = useState<boolean>(() => isGoogleContactsAuthorized());
-  const [isContactsPanelOpen, setIsContactsPanelOpen] = useState(false);
+  // Google Contacts State
+  const [contactsAccountEmail] = useState<string | null>(() => getConnectedAccountEmail() || 'wmoviznow@gmail.com');
   const [isCompareModalOpen, setIsCompareModalOpen] = useState(false);
-  const [isConnectingContacts, setIsConnectingContacts] = useState(false);
-  const [isSyncingContacts, setIsSyncingContacts] = useState(false);
-  const [contactsSyncProgress, setContactsSyncProgress] = useState<{ current: number; total: number } | null>(null);
-  const [contactsSyncResult, setContactsSyncResult] = useState<{ title: string; message: string } | null>(null);
-  const [pendingContactsCount, setPendingContactsCount] = useState<number>(() => getPendingContactsList().length);
 
   // FCM Registration state for users
   const [fcmRegisteredUids, setFcmRegisteredUids] = useState<Set<string>>(() => {
@@ -253,21 +236,6 @@ export default function UserManagement() {
     return !isDisabled;
   }, [isUserFcmRegistered]);
 
-  // Synchronize Google Contacts local pending count from local event only
-  useEffect(() => {
-    let isMounted = true;
-    const handlePendingUpdated = (e: any) => {
-      if (!isMounted) return;
-      const count = Object.keys(e?.detail || {}).length;
-      setPendingContactsCount(count);
-    };
-    window.addEventListener('gcontacts_pending_updated', handlePendingUpdated);
-
-    return () => {
-      isMounted = false;
-      window.removeEventListener('gcontacts_pending_updated', handlePendingUpdated);
-    };
-  }, []);
 
   const isUserPhoneWhitelisted = useCallback((phone?: string | null) => {
     if (!phone) return false;
@@ -327,175 +295,19 @@ export default function UserManagement() {
     }
   }, [isUserPhoneWhitelisted, unwhitelistPhoneNumber, whitelistPhoneNumber]);
 
-  const autoSyncUserToContacts = useCallback(async (userToSync: UserProfile, interactive = false) => {
+  const autoSyncUserToContacts = useCallback(async (userToSync: UserProfile) => {
     if (!userToSync.phone && !userToSync.email) return;
-    setIsSyncingContacts(true);
+    if (!isGoogleContactsAuthorized()) return;
     try {
-      const res = await syncUserContactWithAutoOAuth(userToSync, interactive);
-      if (res.success) {
-        console.log(`[Google Contacts Auto-Sync] Synced ${userToSync.displayName || userToSync.phone || userToSync.email} -> ${res.contactName}`);
-      } else if (res.pending) {
-        console.warn(`[Google Contacts] User ${userToSync.uid} kept in pending sync queue:`, res.error);
+      const { accessToken } = await ensureValidContactsToken(false);
+      if (accessToken) {
+        await syncSingleUserContact(userToSync, accessToken);
+        console.log(`[Google Contacts Auto-Sync] Synced ${userToSync.displayName || userToSync.phone || userToSync.email}`);
       }
     } catch (err) {
       console.warn('[Google Contacts Auto-Sync Error]:', err);
-    } finally {
-      setIsSyncingContacts(false);
     }
   }, []);
-
-  const handleConnectContacts = async () => {
-    setIsConnectingContacts(true);
-    try {
-      const conn = await connectGoogleContacts(contactsAccountEmail || 'wmoviznow@gmail.com', false);
-      setContactsToken(conn.accessToken);
-      setIsContactsAuthorized(true);
-      setContactsAccountEmail(conn.email);
-
-      // Automatically flush and sync any pending contacts right after obtaining token!
-      const queueRes = await processPendingContactsQueue(conn.accessToken);
-      const pendingMsg = queueRes.total > 0
-        ? `\n\n⚡ Processed ${queueRes.synced}/${queueRes.total} pending contacts automatically.`
-        : '';
-
-      setAlertConfig({
-        isOpen: true,
-        title: 'Google Contacts Connected & Synced',
-        message: `Authorization successfully saved in Firestore for ${conn.email}.${pendingMsg}\n\nAuto-sync is active on all user edits.`
-      });
-    } catch (err: any) {
-      console.error('Failed to connect Google Contacts:', err);
-      setAlertConfig({ isOpen: true, title: 'Connection Error', message: err?.message || 'Failed to connect Google Contacts account.' });
-    } finally {
-      setIsConnectingContacts(false);
-    }
-  };
-
-  const handleRefreshContactsAuth = async () => {
-    setIsConnectingContacts(true);
-    try {
-      const refreshed = await ensureValidContactsToken(true);
-      if (refreshed.accessToken) {
-        setContactsToken(refreshed.accessToken);
-        setIsContactsAuthorized(true);
-        if (refreshed.email) setContactsAccountEmail(refreshed.email);
-
-        // Automatically sync all pending contacts now that we have a valid token
-        const queueRes = await processPendingContactsQueue(refreshed.accessToken);
-        const pendingMsg = queueRes.total > 0
-          ? `\n\n⚡ Synced ${queueRes.synced}/${queueRes.total} pending contact(s).`
-          : '';
-
-        setAlertConfig({
-          isOpen: true,
-          title: 'Authorization Verified & Synced',
-          message: `Active token refreshed and verified for ${refreshed.email || contactsAccountEmail || 'wmoviznow@gmail.com'}.${pendingMsg}`
-        });
-      } else {
-        throw new Error('Could not refresh token automatically.');
-      }
-    } catch (err: any) {
-      setAlertConfig({ isOpen: true, title: 'Refresh Error', message: err?.message || 'Could not verify token. Please click Connect to re-link account.' });
-    } finally {
-      setIsConnectingContacts(false);
-    }
-  };
-
-  const handleSyncPendingContacts = async () => {
-    setIsSyncingContacts(true);
-    try {
-      let token = contactsToken;
-      const valid = await ensureValidContactsToken(false);
-      token = valid.accessToken;
-
-      if (!token) {
-        // Trigger OAuth popup to get fresh token
-        const conn = await connectGoogleContacts(contactsAccountEmail || 'wmoviznow@gmail.com', false);
-        token = conn.accessToken;
-        setContactsToken(token);
-        setIsContactsAuthorized(true);
-        if (conn.email) setContactsAccountEmail(conn.email);
-      }
-
-      if (!token) {
-        throw new Error('Google Contacts authorization required to sync pending contacts.');
-      }
-
-      const queueRes = await processPendingContactsQueue(token, (current, total) => {
-        setContactsSyncProgress({ current, total });
-      });
-
-      setContactsSyncResult({
-        title: 'Pending Contacts Sync Result',
-        message: `Processed ${queueRes.total} pending user(s):\n• Synced successfully: ${queueRes.synced}\n• Remaining pending: ${queueRes.remaining}${queueRes.isTokenError ? '\n⚠️ Token expired during sync.' : ''}`
-      });
-    } catch (err: any) {
-      setAlertConfig({
-        isOpen: true,
-        title: 'Sync Failed',
-        message: err?.message || 'Failed to sync pending contacts.'
-      });
-    } finally {
-      setIsSyncingContacts(false);
-      setContactsSyncProgress(null);
-    }
-  };
-
-  const handleDisconnectContacts = () => {
-    disconnectGoogleContacts();
-    setContactsToken(null);
-    setIsContactsAuthorized(false);
-    setContactsAccountEmail(null);
-  };
-
-  const handleBulkSyncContacts = async (targetUids?: string[]) => {
-    const uidsToSync = targetUids && targetUids.length > 0 ? targetUids : selectedUsers;
-    if (uidsToSync.length === 0) {
-      setAlertConfig({ isOpen: true, title: 'No Users Selected', message: 'Please select users to sync to Google Contacts.' });
-      return;
-    }
-
-    // Always ensure fresh valid token (silently refreshes if expired)
-    setIsConnectingContacts(true);
-    let { accessToken } = await ensureValidContactsToken(true);
-    setIsConnectingContacts(false);
-
-    if (!accessToken) {
-      setAlertConfig({ isOpen: true, title: 'Connection Required', message: 'Please connect your Google Contacts account to sync contacts.' });
-      return;
-    }
-
-    setContactsToken(accessToken);
-    setIsContactsAuthorized(true);
-
-    const usersToSync = allUsers.filter(u => {
-      if (!uidsToSync.includes(u.uid)) return false;
-      return !!u.phone;
-    });
-    if (usersToSync.length === 0) {
-      setAlertConfig({ isOpen: true, title: 'No Eligible Users', message: 'Selected users must have a phone or WhatsApp number to sync with Google Contacts.' });
-      return;
-    }
-
-    setIsSyncingContacts(true);
-    setContactsSyncProgress({ current: 0, total: usersToSync.length });
-
-    try {
-      const res = await syncMultipleUsersContacts(usersToSync, accessToken, (current, total) => {
-        setContactsSyncProgress({ current, total });
-      });
-
-      setContactsSyncResult({
-        title: 'Google Contacts Sync Complete',
-        message: `Processed ${res.total} user(s):\n• Synced: ${res.synced} contact(s)\n  - Created: ${res.created}\n  - Updated: ${res.updated}${res.photosUpdated > 0 ? `\n  - Profile Photos Synced: ${res.photosUpdated}` : ''}${res.failed > 0 ? `\n• Failed / No Phone: ${res.failed}` : ''}`
-      });
-    } catch (err: any) {
-      setAlertConfig({ isOpen: true, title: 'Sync Error', message: err?.message || 'Failed to bulk sync contacts.' });
-    } finally {
-      setIsSyncingContacts(false);
-      setContactsSyncProgress(null);
-    }
-  };
 
   useEffect(() => {
     const loadReviews = () => {
@@ -837,22 +649,10 @@ export default function UserManagement() {
               console.log(`[Google Contacts Auto-Sync Batch Success] Synced ${batchRes.synced}/${usersWithChanges.length} users (Created: ${batchRes.created}, Updated: ${batchRes.updated})`);
             }).catch(err => {
               console.warn('[Google Contacts Auto-Sync Batch Error]:', err);
-              // Fallback to queuing each user
-              usersWithChanges.forEach(u => {
-                addToPendingContactsSync(u, 'Batch auto-sync failed');
-              });
-            });
-          } else {
-            // Token expired or not available silently, queue to pending contacts
-            usersWithChanges.forEach(u => {
-              addToPendingContactsSync(u, 'Google Contacts token needs authorization');
             });
           }
-        });
-      } else {
-        // Not authorized, move to pending contacts queue
-        usersWithChanges.forEach(u => {
-          addToPendingContactsSync(u, 'Google Contacts not connected');
+        }).catch(err => {
+          console.warn('[Google Contacts Auto-Sync Token Error]:', err);
         });
       }
     }
@@ -1012,19 +812,8 @@ export default function UserManagement() {
     setIsEditingOverlay(true);
   };
 
-  const handleResetPassword = async (userId: string) => {
-    try {
-      setProcessing(prev => ({ ...prev, [`reset_${userId}`]: true }));
-      updateUserFields(userId, {
-        requirePasswordReset: true
-      });
-      setAlertConfig({ isOpen: true, title: 'Pending Change', message: 'User has been flagged for password reset. Click "Upload Changes" to sync to server.' });
-    } catch (error: any) {
-      console.error("Error resetting password:", error);
-      setAlertConfig({ isOpen: true, title: 'Error', message: error.message || 'Failed to reset password' });
-    } finally {
-      setProcessing(prev => ({ ...prev, [`reset_${userId}`]: false }));
-    }
+  const handleResetPassword = (userToReset: UserProfile) => {
+    setResetModalUser(userToReset);
   };
 
   const handleSave = async () => {
@@ -2124,175 +1913,16 @@ export default function UserManagement() {
               title={(profile?.role === 'admin' || profile?.role === 'owner') ? 'Add User' : 'Add Pending User'}
             />
             <button
-              onClick={() => setIsContactsPanelOpen(prev => !prev)}
-              className={clsx(
-                "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer select-none",
-                pendingContactsCount > 0
-                  ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30 hover:bg-amber-500/20"
-                  : isContactsAuthorized
-                    ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/20"
-                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-              )}
-              title={
-                pendingContactsCount > 0
-                  ? `${pendingContactsCount} Contact(s) Pending Sync (Click to open & sync)`
-                  : isContactsAuthorized
-                    ? `Google Contacts Connected (${contactsAccountEmail || 'wmoviznow@gmail.com'})`
-                    : "Google Contacts Not Connected"
-              }
-            >
-              <Users className="w-4 h-4" />
-              <span className="hidden sm:inline">Contacts</span>
-              {pendingContactsCount > 0 ? (
-                <span className="flex items-center justify-center px-1.5 h-4 rounded-full bg-amber-500 text-white text-[10px] font-bold">
-                  {pendingContactsCount}
-                </span>
-              ) : isContactsAuthorized ? (
-                <span className="flex items-center justify-center w-4 h-4 rounded-full bg-emerald-500 text-white text-[10px] font-bold">
-                  ✓
-                </span>
-              ) : (
-                <span className="flex items-center justify-center w-4 h-4 rounded-full bg-amber-500 text-white text-[10px] font-bold">
-                  !
-                </span>
-              )}
-            </button>
-            <button
               onClick={() => setIsCompareModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer select-none bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/20"
-              title="Compare Google Contact formats (check AT to AV replacement, missing contacts, etc.)"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer select-none bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/30 hover:bg-indigo-500/20 shadow-sm"
+              title="Open Google Contacts Comparator & Auto-Sync (compare formats, AT to AV replacement, batch sync, re-auth)"
             >
-              <ShieldCheck className="w-4 h-4 text-emerald-500" />
-              <span className="hidden sm:inline">Compare</span>
+              <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+              <span className="hidden sm:inline">Contacts & Sync</span>
             </button>
           </div>
         )}
       </div>
-
-      {/* Google Contacts Integration Status & Sync Bar (Collapsible) */}
-      <AnimatePresence>
-        {isContactsPanelOpen && (
-          <motion.div
-            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-            animate={{ opacity: 1, height: 'auto', marginBottom: 24 }}
-            exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-            className="overflow-hidden"
-          >
-            <div className="p-4 rounded-2xl border border-indigo-500/20 bg-indigo-50/50 dark:bg-indigo-950/20 backdrop-blur-sm flex flex-col gap-4 relative">
-              <button
-                onClick={() => setIsContactsPanelOpen(false)}
-                className="absolute top-3 right-3 p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-lg transition-colors cursor-pointer"
-                title="Collapse Panel"
-              >
-                <X className="w-4 h-4" />
-              </button>
-
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3 pr-8">
-                  <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-                    <Users className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-zinc-900 dark:text-zinc-100 text-sm">Google Contacts Sync</h3>
-                      {isContactsAuthorized ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                          <CheckCircle className="w-3 h-3" /> Connected & Saved in Firestore
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-                          Not Connected
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
-                      {isContactsAuthorized
-                        ? `Connected to ${contactsAccountEmail || 'wmoviznow@gmail.com'}. Authorization is saved in Firestore and automatically renewed. Auto-sync is always active on user edits.`
-                        : 'Connect wmoviznow@gmail.com to persist authorization in Firestore and auto-sync users to Google Contacts.'}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {isContactsAuthorized ? (
-                    <>
-                      <Button
-                        onClick={() => setIsCompareModalOpen(true)}
-                        variant="secondary"
-                        className="px-3 py-1.5 text-xs text-indigo-700 dark:text-indigo-300 border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/20"
-                        icon={<ShieldCheck className="w-4 h-4 text-emerald-500" />}
-                        title="Compare Google Contact formats and auto-sync mismatches (e.g. AT to AV)"
-                      >
-                        Compare & Auto-Sync
-                      </Button>
-                      <Button
-                        onClick={() => handleBulkSyncContacts(filteredAndSortedUsers.map(u => u.uid))}
-                        variant="emerald"
-                        className="px-3 py-1.5 text-xs"
-                        loading={isSyncingContacts}
-                        icon={<RefreshCw className={`w-4 h-4 ${isSyncingContacts ? 'animate-spin' : ''}`} />}
-                      >
-                        Sync All Filtered ({filteredAndSortedUsers.length})
-                      </Button>
-                      <Button
-                        onClick={handleRefreshContactsAuth}
-                        variant="secondary"
-                        className="px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300"
-                        loading={isConnectingContacts}
-                        title="Re-verify or refresh OAuth token in Firestore"
-                      >
-                        Re-verify Auth
-                      </Button>
-                      <Button
-                        onClick={handleDisconnectContacts}
-                        variant="ghost"
-                        className="px-3 py-1.5 text-xs text-zinc-500 hover:text-red-500"
-                      >
-                        Disconnect
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      onClick={handleConnectContacts}
-                      variant="emerald"
-                      className="px-3 py-1.5 text-xs"
-                      loading={isConnectingContacts}
-                      icon={<Users className="w-4 h-4" />}
-                    >
-                      Connect wmoviznow@gmail.com
-                    </Button>
-                  )}
-                </div>
-              </div>
-
-              {/* Pending Sync Alert Box */}
-              {pendingContactsCount > 0 && (
-                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2.5">
-                    <Clock className="w-4 h-4 text-amber-500 shrink-0 animate-pulse" />
-                    <div>
-                      <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
-                        {pendingContactsCount} Contact(s) Waiting in Pending Sync
-                      </p>
-                      <p className="text-[11px] text-amber-700/80 dark:text-amber-400/80">
-                        Queued when token was expired or offline. Click to authenticate via OAuth and sync all pending contacts now.
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    onClick={handleSyncPendingContacts}
-                    variant="emerald"
-                    className="px-3 py-1 text-xs shrink-0 font-medium"
-                    loading={isSyncingContacts}
-                    icon={<RefreshCw className={`w-3.5 h-3.5 ${isSyncingContacts ? 'animate-spin' : ''}`} />}
-                  >
-                    Sync Pending ({pendingContactsCount})
-                  </Button>
-                </div>
-              )}
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* Sticky Header: Search and Filters */}
       <div className="sticky top-16 md:top-0 z-30 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 -mx-4 md:-mx-8 px-4 md:px-8 py-3 mb-6 transition-colors duration-300">
@@ -2319,7 +1949,7 @@ export default function UserManagement() {
                     onChange={(e) => {
                       if (e.target.value) {
                         if (e.target.value === 'sync_contacts') {
-                          handleBulkSyncContacts(selectedUsers);
+                          setIsCompareModalOpen(true);
                         } else if (e.target.value === 'merge') {
                           handleMergeUsers();
                         } else if (e.target.value === 'delete_selected') {
@@ -3192,13 +2822,13 @@ export default function UserManagement() {
                         <div className="text-center">
                           <div className="text-zinc-500 text-[10px] uppercase font-bold mb-0.5">Password</div>
                           <button
-                            onClick={() => handleResetPassword(selectedUser.uid)}
-                            disabled={processing[`reset_${selectedUser.uid}`] || !selectedUser.hasPassword}
-                            className="text-xs font-bold text-red-500 hover:text-red-600 transition-colors disabled:opacity-50 flex items-center gap-1 mx-auto"
-                            title={!selectedUser.hasPassword ? "User has not set a password yet" : "Force password reset"}
+                            type="button"
+                            onClick={() => handleResetPassword(selectedUser)}
+                            className="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline transition-colors flex items-center gap-1 mx-auto cursor-pointer"
+                            title="Manage or reset password for this user"
                           >
-                            {processing[`reset_${selectedUser.uid}`] ? <Loader2 className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />}
-                            Reset
+                            <Lock className="w-3.5 h-3.5" />
+                            <span>{selectedUser.hasPassword ? 'Reset' : 'Set Password'}</span>
                           </button>
                         </div>
                       )}
@@ -4375,51 +4005,6 @@ export default function UserManagement() {
       )}
     </AnimatePresence>
 
-      {/* Google Contacts Sync Progress Modal */}
-      <AnimatePresence>
-        {isSyncingContacts && contactsSyncProgress && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-hidden">
-            <motion.div
-              {...modalBackdropAnimation}
-              style={modalGpuStyle}
-              className="fixed inset-0 bg-black/80 backdrop-blur-xs transform-gpu will-change-[opacity]"
-            />
-            <motion.div
-              {...modalContainerAnimation}
-              style={modalGpuStyle}
-              className="relative z-10 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-6 w-full max-w-sm text-center space-y-4 shadow-2xl"
-            >
-              <div className="mx-auto w-12 h-12 rounded-full bg-indigo-500/10 text-indigo-500 flex items-center justify-center">
-                <RefreshCw className="w-6 h-6 animate-spin" />
-              </div>
-              <div>
-                <h3 className="font-bold text-lg text-zinc-900 dark:text-zinc-100">Syncing Google Contacts</h3>
-                <p className="text-xs text-zinc-500 mt-1">
-                  Processing {contactsSyncProgress.current} of {contactsSyncProgress.total} contacts...
-                </p>
-              </div>
-              <div className="w-full bg-zinc-100 dark:bg-zinc-800 rounded-full h-2 overflow-hidden">
-                <div
-                  className="bg-indigo-500 h-full transition-all duration-300"
-                  style={{ width: `${Math.round((contactsSyncProgress.current / contactsSyncProgress.total) * 100)}%` }}
-                />
-              </div>
-              <p className="text-[11px] text-zinc-400">Please leave this window open until sync completes.</p>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Google Contacts Sync Result Modal */}
-      {contactsSyncResult && (
-        <AlertModal
-          isOpen={!!contactsSyncResult}
-          title={contactsSyncResult.title}
-          message={contactsSyncResult.message}
-          onClose={() => setContactsSyncResult(null)}
-        />
-      )}
-
       {/* Email Notification Confirmation Modal with full preview */}
       <SendEmailConfirmModal
         isOpen={!!emailModalUser}
@@ -4437,12 +4022,23 @@ export default function UserManagement() {
         isOpen={isCompareModalOpen}
         onClose={() => setIsCompareModalOpen(false)}
         users={allUsers}
+        onRefreshUsers={refreshUsers}
         accountEmail={contactsAccountEmail}
-        onSyncCompleted={(result) => {
-          setContactsSyncResult({
-            title: 'Google Contacts Batch Sync Complete',
-            message: `Batch sync finished successfully!\n• Total Synced: ${result.synced}\n• Newly Created: ${result.created}\n• Updated / Replaced: ${result.updated}`
-          });
+      />
+
+      {/* Admin Password Reset Modal */}
+      <AdminPasswordResetModal
+        isOpen={!!resetModalUser}
+        onClose={() => setResetModalUser(null)}
+        user={resetModalUser}
+        adminUid={profile?.uid || ''}
+        onSuccess={(updatedFields) => {
+          if (resetModalUser) {
+            updateUserFields(resetModalUser.uid, updatedFields);
+            if (selectedUser?.uid === resetModalUser.uid) {
+              setSelectedUser(prev => prev ? { ...prev, ...updatedFields } : null);
+            }
+          }
         }}
       />
     </div>

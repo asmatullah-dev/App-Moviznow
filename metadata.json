@@ -1,6 +1,6 @@
 {
   "name": "MovizNow",
-  "description": "A premium streaming platform featuring HD content, WhatsApp delivery, secure membership management, and standardized UTC time versioning for real-time synchronization.",
+  "description": "A premium streaming platform featuring HD content, WhatsApp delivery, secure membership management, and standardized UTC time versioning for real-time synchronizations.",
   "requestFramePermissions": [
     "notifications",
     "web-share"

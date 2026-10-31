@@ -8,11 +8,9 @@ import {
   UserPlus,
   ArrowRight,
   Search,
-  Users,
   ShieldCheck,
   Phone,
   Zap,
-  Filter,
   Check,
   AlertCircle
 } from 'lucide-react';
@@ -37,6 +35,7 @@ interface GoogleContactsCompareModalProps {
   onClose: () => void;
   users: UserProfile[];
   accountEmail?: string | null;
+  onRefreshUsers?: () => Promise<void> | void;
   onSyncCompleted?: (result: { synced: number; created: number; updated: number }) => void;
 }
 
@@ -45,9 +44,12 @@ export function GoogleContactsCompareModal({
   onClose,
   users,
   accountEmail = 'wmoviznow@gmail.com',
+  onRefreshUsers,
   onSyncCompleted
 }: GoogleContactsCompareModalProps) {
   const [loading, setLoading] = useState(false);
+  const [isRescanning, setIsRescanning] = useState(false);
+  const [isReauthing, setIsReauthing] = useState(false);
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncProgress, setSyncProgress] = useState<{ current: number; total: number } | null>(null);
   const [report, setReport] = useState<ContactsComparisonReport | null>(null);
@@ -56,11 +58,12 @@ export function GoogleContactsCompareModal({
   const [syncingUid, setSyncingUid] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [successToast, setSuccessToast] = useState<string | null>(null);
+  const [currentEmail, setCurrentEmail] = useState<string>(() => accountEmail || 'wmoviznow@gmail.com');
 
   // Cached connections across modal lifetime
   const [cachedConnections, setCachedConnections] = useState<GoogleContactPerson[] | undefined>(undefined);
 
-  const runComparison = async (freshToken?: string) => {
+  const runComparison = async (freshToken?: string, forceFreshContacts = false, targetUsers = users) => {
     setLoading(true);
     setErrorMsg(null);
     try {
@@ -68,24 +71,77 @@ export function GoogleContactsCompareModal({
       if (!token) {
         const tokenState = await ensureValidContactsToken(false);
         token = tokenState.accessToken || undefined;
+        if (tokenState.email) setCurrentEmail(tokenState.email);
       }
 
       if (!token) {
-        throw new Error('Google Contacts authorization required. Please connect account first.');
+        throw new Error('Google Contacts authorization required. Click "Re-Auth / Verify" to connect your Google account.');
       }
 
       // Fetch all Google connections
-      const connections = await fetchAllGoogleContacts(token);
-      setCachedConnections(connections);
+      let connections = cachedConnections;
+      if (!connections || forceFreshContacts) {
+        connections = await fetchAllGoogleContacts(token);
+        setCachedConnections(connections);
+      }
 
       // Run comparison
-      const compReport = await compareUsersWithGoogleContacts(users, token, connections);
+      const compReport = await compareUsersWithGoogleContacts(targetUsers, token, connections);
       setReport(compReport);
     } catch (err: any) {
       console.error('Error running contacts comparison:', err);
       setErrorMsg(err?.message || 'Failed to compare contacts with Google Contacts.');
     } finally {
       setLoading(false);
+      setIsRescanning(false);
+    }
+  };
+
+  const handleReauthVerify = async () => {
+    setIsReauthing(true);
+    setErrorMsg(null);
+    try {
+      const emailToUse = currentEmail || 'wmoviznow@gmail.com';
+      const res = await connectGoogleContacts(emailToUse, true);
+      if (!res.accessToken) {
+        throw new Error('Could not obtain valid access token from Google.');
+      }
+      setCurrentEmail(res.email);
+
+      const testConnections = await fetchAllGoogleContacts(res.accessToken);
+      setCachedConnections(testConnections);
+
+      setSuccessToast(`Google Contacts verified & authorized for ${res.email}! (${testConnections.length} contacts found)`);
+      await runComparison(res.accessToken, true);
+    } catch (err: any) {
+      console.error('Re-auth verify failed:', err);
+      setErrorMsg(err?.message || 'Failed to verify Google Contacts authorization. Please check popups.');
+    } finally {
+      setIsReauthing(false);
+    }
+  };
+
+  const handleRescan = async () => {
+    setIsRescanning(true);
+    setErrorMsg(null);
+    try {
+      if (onRefreshUsers) {
+        await onRefreshUsers();
+      }
+      setCachedConnections(undefined);
+      const tokenState = await ensureValidContactsToken(false);
+      const token = tokenState.accessToken;
+      if (!token) {
+        throw new Error('Google Contacts authorization required. Click "Re-Auth / Verify" first.');
+      }
+      if (tokenState.email) setCurrentEmail(tokenState.email);
+      await runComparison(token, true, users);
+      setSuccessToast('Rescan complete! Refreshed user data cache and scanned latest Google Contacts.');
+    } catch (err: any) {
+      console.error('Error during rescan:', err);
+      setErrorMsg(err?.message || 'Failed to re-scan contacts.');
+    } finally {
+      setIsRescanning(false);
     }
   };
 
@@ -223,83 +279,99 @@ export function GoogleContactsCompareModal({
   const attentionCount = (report?.mismatches.length || 0) + (report?.missing.length || 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 overflow-hidden">
       {/* Backdrop */}
       <motion.div
         {...modalBackdropAnimation}
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm"
+        className="fixed inset-0 bg-black/70 backdrop-blur-xs"
         onClick={onClose}
       />
 
-      {/* Modal Dialog */}
+      {/* Modal Dialog with Flexible Full-Height Scroll Structure */}
       <motion.div
         {...modalContainerAnimation}
-        className="relative w-full max-w-5xl max-h-[92vh] flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl overflow-hidden z-10"
+        className="relative w-full max-w-5xl h-[92vh] max-h-[92vh] flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl md:rounded-3xl shadow-2xl overflow-hidden z-10"
       >
-        {/* Top Header */}
-        <div className="flex items-center justify-between p-5 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400">
-              <Zap className="w-5 h-5" />
+        {/* Compact Top Header (shrink-0) */}
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/80 shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 shrink-0">
+              <Zap className="w-4 h-4" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
-                  Google Contacts Format Comparator & Auto-Sync
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-sm sm:text-base font-bold text-zinc-900 dark:text-zinc-100 truncate">
+                  Google Contacts Comparator & Auto-Sync
                 </h2>
-                <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+                <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
                   Batch Sync
                 </span>
               </div>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                Compares phone number formats and role prefixes (e.g., AT ➔ AV replacements) against Google Contacts for {accountEmail}.
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+                Compares phone formats & role prefixes (e.g. AT ➔ AV replacement) for <span className="font-medium text-zinc-700 dark:text-zinc-300">{currentEmail}</span>
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Re-Auth / Verify Button */}
+            <Button
+              onClick={handleReauthVerify}
+              variant="secondary"
+              className="px-2.5 sm:px-3 py-1.5 text-xs font-semibold border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10"
+              loading={isReauthing}
+              title="Test & re-authenticate Google Contacts account via interactive popup"
+              icon={<ShieldCheck className={`w-3.5 h-3.5 text-emerald-500 ${isReauthing ? 'animate-spin' : ''}`} />}
+            >
+              <span className="hidden sm:inline">Re-Auth / Verify</span>
+              <span className="sm:hidden">Verify</span>
+            </Button>
+
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-xl text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
-        {/* Success / Error Alerts */}
+        {/* Success / Error Alerts (shrink-0) */}
         {successToast && (
-          <div className="mx-5 mt-4 p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-300">
-            <div className="flex items-center gap-2">
+          <div className="mx-4 sm:mx-6 mt-2.5 p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between text-xs text-emerald-700 dark:text-emerald-300 shrink-0">
+            <div className="flex items-center gap-2 truncate">
               <CheckCircle className="w-4 h-4 shrink-0" />
-              <span>{successToast}</span>
+              <span className="truncate">{successToast}</span>
             </div>
-            <button onClick={() => setSuccessToast(null)} className="p-1 hover:opacity-75">
+            <button onClick={() => setSuccessToast(null)} className="p-1 hover:opacity-75 shrink-0">
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
 
         {errorMsg && (
-          <div className="mx-5 mt-4 p-3 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-between text-xs text-red-700 dark:text-red-300">
-            <div className="flex items-center gap-2">
+          <div className="mx-4 sm:mx-6 mt-2.5 p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-between text-xs text-red-700 dark:text-red-300 shrink-0">
+            <div className="flex items-center gap-2 truncate">
               <AlertCircle className="w-4 h-4 shrink-0" />
-              <span>{errorMsg}</span>
+              <span className="truncate">{errorMsg}</span>
             </div>
-            <button onClick={() => setErrorMsg(null)} className="p-1 hover:opacity-75">
+            <button onClick={() => setErrorMsg(null)} className="p-1 hover:opacity-75 shrink-0">
               <X className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
 
-        {/* Sync Progress Banner */}
+        {/* Sync Progress Bar (shrink-0) */}
         {syncingAll && syncProgress && (
-          <div className="mx-5 mt-4 p-4 rounded-2xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-500/20">
-            <div className="flex items-center justify-between text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-2">
+          <div className="mx-4 sm:mx-6 mt-2.5 p-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-500/20 shrink-0">
+            <div className="flex items-center justify-between text-xs font-semibold text-indigo-700 dark:text-indigo-300 mb-1.5">
               <div className="flex items-center gap-2">
-                <RefreshCw className="w-4 h-4 animate-spin text-indigo-500" />
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-500" />
                 <span>Executing Batch Sync to Google Contacts...</span>
               </div>
               <span>{syncProgress.current} / {syncProgress.total}</span>
             </div>
-            <div className="w-full bg-indigo-100 dark:bg-indigo-900/50 rounded-full h-2 overflow-hidden">
+            <div className="w-full bg-indigo-100 dark:bg-indigo-900/50 rounded-full h-1.5 overflow-hidden">
               <div
                 className="bg-indigo-600 dark:bg-indigo-400 h-full rounded-full transition-all duration-300"
                 style={{
@@ -310,60 +382,71 @@ export function GoogleContactsCompareModal({
           </div>
         )}
 
-        {/* Summary Metric KPI Cards */}
-        <div className="p-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800">
-            <div className="text-zinc-500 dark:text-zinc-400 text-xs font-medium">Total Users Checked</div>
-            <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100 mt-1">
-              {loading ? '...' : (report?.totalChecked ?? 0)}
-            </div>
-            <div className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">With phone or email</div>
-          </div>
-
-          <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20">
-            <div className="text-amber-700 dark:text-amber-400 text-xs font-medium flex items-center justify-between">
-              <span>Format Mismatch</span>
+        {/* Compact KPI Stats Strip (shrink-0, takes only ~38px instead of 140px) */}
+        <div className="px-4 sm:px-6 py-2 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/40 flex items-center justify-between gap-2 overflow-x-auto scrollbar-none shrink-0 text-xs">
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+            <span className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400 font-medium">
+              Checked:
+              <span className="font-bold text-zinc-900 dark:text-zinc-100">{loading ? '...' : (report?.totalChecked ?? 0)}</span>
+            </span>
+            <span className="text-zinc-300 dark:text-zinc-700">•</span>
+            <span className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400 font-medium">
               <AlertTriangle className="w-3.5 h-3.5" />
-            </div>
-            <div className="text-2xl font-bold text-amber-700 dark:text-amber-300 mt-1">
-              {loading ? '...' : (report?.mismatches.length ?? 0)}
-            </div>
-            <div className="text-[11px] text-amber-600/80 dark:text-amber-400/80 mt-0.5">Needs replacement (e.g. AT ➔ AV)</div>
-          </div>
-
-          <div className="p-3.5 rounded-2xl bg-purple-500/10 border border-purple-500/20">
-            <div className="text-purple-700 dark:text-purple-400 text-xs font-medium flex items-center justify-between">
-              <span>Missing from Contacts</span>
+              Mismatch:
+              <span className="font-bold">{loading ? '...' : (report?.mismatches.length ?? 0)}</span>
+              <span className="text-[10px] text-amber-500/70 hidden md:inline">(AT➔AV etc.)</span>
+            </span>
+            <span className="text-zinc-300 dark:text-zinc-700">•</span>
+            <span className="flex items-center gap-1.5 text-purple-600 dark:text-purple-400 font-medium">
               <UserPlus className="w-3.5 h-3.5" />
-            </div>
-            <div className="text-2xl font-bold text-purple-700 dark:text-purple-300 mt-1">
-              {loading ? '...' : (report?.missing.length ?? 0)}
-            </div>
-            <div className="text-[11px] text-purple-600/80 dark:text-purple-400/80 mt-0.5">Not yet created in Google</div>
+              Missing:
+              <span className="font-bold">{loading ? '...' : (report?.missing.length ?? 0)}</span>
+            </span>
+            <span className="text-zinc-300 dark:text-zinc-700">•</span>
+            <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+              <CheckCircle className="w-3.5 h-3.5" />
+              Synced:
+              <span className="font-bold">{loading ? '...' : (report?.synced.length ?? 0)}</span>
+            </span>
           </div>
 
-          <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20">
-            <div className="text-emerald-700 dark:text-emerald-400 text-xs font-medium flex items-center justify-between">
-              <span>Synced & Correct</span>
-              <CheckCircle className="w-3.5 h-3.5" />
-            </div>
-            <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 mt-1">
-              {loading ? '...' : (report?.synced.length ?? 0)}
-            </div>
-            <div className="text-[11px] text-emerald-600/80 dark:text-emerald-400/80 mt-0.5">Accurate prefix & format</div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Re-Scan Button */}
+            <Button
+              onClick={handleRescan}
+              variant="secondary"
+              className="px-2.5 py-1 text-xs"
+              loading={loading || isRescanning}
+              title="Refresh user data cache and entirely re-scan Google Contacts"
+              icon={<RefreshCw className={`w-3 h-3 ${(loading || isRescanning) ? 'animate-spin' : ''}`} />}
+            >
+              Re-Scan
+            </Button>
+
+            {/* Auto-Sync Mismatched Button */}
+            <Button
+              onClick={handleAutoSyncAllMismatched}
+              variant="emerald"
+              className="px-3 py-1 text-xs font-semibold shadow-xs"
+              disabled={loading || syncingAll || attentionCount === 0}
+              loading={syncingAll}
+              icon={<Zap className="w-3 h-3" />}
+            >
+              Auto-Sync Mismatched ({attentionCount})
+            </Button>
           </div>
         </div>
 
-        {/* Action Bar & Controls */}
-        <div className="px-5 py-3 border-y border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-          {/* Filter Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
+        {/* Compact Filters & Search Bar (shrink-0, takes only ~40px) */}
+        <div className="px-4 sm:px-6 py-2 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0">
+          {/* Tabs */}
+          <div className="flex items-center gap-1 overflow-x-auto pb-0.5 sm:pb-0 scrollbar-none">
             <button
               onClick={() => setActiveTab('attention')}
               className={clsx(
-                "px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5",
+                "px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5",
                 activeTab === 'attention'
-                  ? "bg-amber-500 text-white shadow-sm"
+                  ? "bg-amber-500 text-white shadow-xs"
                   : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
               )}
             >
@@ -379,13 +462,13 @@ export function GoogleContactsCompareModal({
             <button
               onClick={() => setActiveTab('mismatches')}
               className={clsx(
-                "px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5",
+                "px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5",
                 activeTab === 'mismatches'
-                  ? "bg-amber-600 text-white shadow-sm"
+                  ? "bg-amber-600 text-white shadow-xs"
                   : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
               )}
             >
-              <span>Format Mismatch</span>
+              <span>Mismatch</span>
               <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300">
                 {report?.mismatches.length ?? 0}
               </span>
@@ -394,9 +477,9 @@ export function GoogleContactsCompareModal({
             <button
               onClick={() => setActiveTab('missing')}
               className={clsx(
-                "px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5",
+                "px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5",
                 activeTab === 'missing'
-                  ? "bg-purple-600 text-white shadow-sm"
+                  ? "bg-purple-600 text-white shadow-xs"
                   : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
               )}
             >
@@ -409,9 +492,9 @@ export function GoogleContactsCompareModal({
             <button
               onClick={() => setActiveTab('synced')}
               className={clsx(
-                "px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5",
+                "px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5",
                 activeTab === 'synced'
-                  ? "bg-emerald-600 text-white shadow-sm"
+                  ? "bg-emerald-600 text-white shadow-xs"
                   : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
               )}
             >
@@ -424,9 +507,9 @@ export function GoogleContactsCompareModal({
             <button
               onClick={() => setActiveTab('all')}
               className={clsx(
-                "px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer",
+                "px-2.5 py-1 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer",
                 activeTab === 'all'
-                  ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-sm"
+                  ? "bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 shadow-xs"
                   : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700"
               )}
             >
@@ -434,47 +517,21 @@ export function GoogleContactsCompareModal({
             </button>
           </div>
 
-          {/* Primary Batch Action and Refresh */}
-          <div className="flex items-center gap-2 shrink-0">
-            <Button
-              onClick={() => runComparison()}
-              variant="secondary"
-              className="px-3 py-1.5 text-xs"
-              loading={loading}
-              icon={<RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />}
-            >
-              Re-Scan
-            </Button>
-
-            <Button
-              onClick={handleAutoSyncAllMismatched}
-              variant="emerald"
-              className="px-4 py-1.5 text-xs font-semibold shadow-sm"
-              disabled={loading || syncingAll || attentionCount === 0}
-              loading={syncingAll}
-              icon={<Zap className="w-3.5 h-3.5" />}
-            >
-              Auto-Sync Mismatched ({attentionCount})
-            </Button>
-          </div>
-        </div>
-
-        {/* Search within Modal */}
-        <div className="px-5 pt-3 pb-2">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+          {/* Search Box */}
+          <div className="relative w-full sm:w-64 shrink-0">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
             <input
               type="text"
-              placeholder="Filter by user name, phone, prefix, or reason..."
+              placeholder="Search by name, phone, prefix, or format..."
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              className="w-full bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-800 rounded-xl pl-9 pr-4 py-1.5 text-xs focus:outline-none focus:border-indigo-500"
+              className="w-full bg-zinc-50 dark:bg-zinc-800/70 border border-zinc-200 dark:border-zinc-800 rounded-lg pl-8 pr-3 py-1 text-xs focus:outline-none focus:border-indigo-500"
             />
           </div>
         </div>
 
-        {/* Main Content Area / List */}
-        <div className="flex-1 overflow-y-auto px-5 py-3 space-y-2.5 min-h-[280px]">
+        {/* MAIN SCROLLABLE LIST (flex-1 min-h-0: gets ~75% of modal height, scrolls smoothly!) */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6 py-3 space-y-2">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3 text-zinc-500">
               <RefreshCw className="w-8 h-8 animate-spin text-indigo-500" />
