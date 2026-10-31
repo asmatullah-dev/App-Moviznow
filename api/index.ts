@@ -159,7 +159,34 @@ export function setCachedVddosCookie(url: string, cookie: string) {
   } catch (e) {}
 }
 
+export const isVercelEnv = !!(process.env.VERCEL || process.env.VERCEL_ENV || process.env.NOW_REGION);
+export const isFilesdlUrl = (u: string) => typeof u === 'string' && /filesdl\./i.test(u);
+
+export async function fetchFilesdlViaMicrolink(targetUrl: string, timeoutMs = 6000): Promise<{ html: string; status: number } | null> {
+  try {
+    const microlinkUrl = `https://api.microlink.io/?url=${encodeURIComponent(targetUrl)}&meta=false&data.body.selector=body&data.body.attr=html&force=true`;
+    const res = await fetch(microlinkUrl, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) return null;
+    const json: any = await res.json();
+    const bodyHtml = json?.data?.body;
+    if (typeof bodyHtml === 'string' && bodyHtml.length > 200 && !isCloudflareHtml(200, bodyHtml)) {
+      return { html: bodyHtml, status: 200 };
+    }
+  } catch (e: any) {
+    console.warn(`[fetchFilesdlViaMicrolink] Microlink error for ${targetUrl}:`, e?.message);
+  }
+  return null;
+}
+
 export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<string, string>, timeoutMs = 8000) {
+  // If running on Vercel and the target URL is a FilesDL domain, use Microlink directly to bypass Cloudflare
+  if (isVercelEnv && isFilesdlUrl(targetUrl)) {
+    const microResult = await fetchFilesdlViaMicrolink(targetUrl, 5500);
+    if (microResult && microResult.html) {
+      return { html: microResult.html, status: microResult.status, finalUrl: targetUrl };
+    }
+  }
+
   const httpsAgent = new https.Agent({ rejectUnauthorized: false });
   const cachedCookie = getCachedVddosCookie(targetUrl);
   const baseHeaders: Record<string, string> = {
@@ -225,6 +252,12 @@ export async function fetchWithVddos(targetUrl: string, customHeaders?: Record<s
 
   // 3. Cloudflare bypass fallback if challenge page detected
   if (isCloudflareHtml(res?.status || 0, html)) {
+    if (isFilesdlUrl(targetUrl)) {
+      const microResult = await fetchFilesdlViaMicrolink(targetUrl, 5500);
+      if (microResult && microResult.html) {
+        return { html: microResult.html, status: microResult.status, finalUrl: targetUrl };
+      }
+    }
     try {
       console.log(`[fetchWithVddos] Cloudflare detected for ${targetUrl}. Falling back to fetchHtml helper.`);
       const bypassRes = await fetchHtml(targetUrl, false, true);
@@ -1155,27 +1188,46 @@ async function startServer() {
          url = 'https://' + url;
       }
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Referer': url
-        },
-        signal: AbortSignal.timeout(7000)
-      });
+      let text = "";
+      if (isVercelEnv && isFilesdlUrl(url)) {
+        const micro = await fetchFilesdlViaMicrolink(url, 6000);
+        if (micro && micro.html) {
+          text = micro.html;
+        }
+      }
+
+      if (!text) {
+        try {
+          const response = await fetch(url, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.5',
+              'Referer': url
+            },
+            signal: AbortSignal.timeout(7000)
+          });
+          text = await response.text();
+          if (isCloudflareHtml(response.status, text) || !response.ok) {
+            const micro = await fetchFilesdlViaMicrolink(url, 6000);
+            if (micro && micro.html) {
+              text = micro.html;
+            }
+          }
+        } catch (fetchErr) {
+          const micro = await fetchFilesdlViaMicrolink(url, 6000);
+          if (micro && micro.html) {
+            text = micro.html;
+          }
+        }
+      }
       
-      // Try to read text anyway because Cloudflare might return 403 but the HTML might still contain the link or we can extract it
-      const text = await response.text();
       // Look for HubCloud links
       const hubcloudMatch = text.match(/https?:\/\/[^"'\s]*(?:hubcloud|hubcould|vcloud\.live|hubdrive)\.[^"'\s]*/i);
       
       if (hubcloudMatch) {
           res.json({ url: normalizeDomain(hubcloudMatch[0]) });
       } else {
-          if (!response.ok) {
-            throw new Error(`FilesDL returned ${response.status} and no valid link was found in response`);
-          }
           res.status(404).json({ error: 'No HubCloud link found on FilesDL page' });
       }
     } catch (error: any) {
@@ -2933,6 +2985,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         return /(?:hubcloud|hubcould|hub-cloud|vcloud\.live|vcloud|hubdrive|mdrive|fastdl|filepress|drivehub)\./i.test(lower);
       };
 
+      // Helper to check if URL is a valid downloadable hit (HubCloud or Direct R2 / cloud download link)
+      const isValidFilmyHitUrl = (u: string): boolean => {
+        if (!u || typeof u !== 'string') return false;
+        const lower = u.toLowerCase();
+        if (lower.includes("gdflix") || lower.includes("failed") || lower.includes("please check") || lower.includes("cdn-cgi")) return false;
+        if (isHubCloudUrl(u)) return true;
+        if (lower.includes(".r2.dev") || lower.includes("cabdownload.php") || (lower.includes("filesdl") && lower.includes("download.php")) || lower.includes("gofile.io") || lower.includes("workers.dev")) return true;
+        return false;
+      };
+
       // Recursive multi-hop resolver for FilmyGo / FilmyCab gates (e.g. FilmyGo -> LinkMake -> FilesDL -> HubCloud)
       async function resolveFilmyGoLink(
         startUrl: string,
@@ -2967,37 +3029,55 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             'Upgrade-Insecure-Requests': '1',
           };
 
-          // 1. Try fast native fetch first (5s timeout - ultra-fast and avoids CF bot challenges)
-          try {
-            const nativeRes = await fetch(startUrl, {
-              headers: browserHeaders,
-              signal: AbortSignal.timeout(5000),
-              redirect: 'follow',
-            });
-            const text = await nativeRes.text();
-            if (nativeRes.status === 200 && text.length > 300 && !isCloudflareHtml(nativeRes.status, text) && !text.includes('vDDoS-zn') && !text.includes('toNumbers')) {
-              htmlText = text;
-              finalUrl = nativeRes.url || startUrl;
+          // On Vercel, query Microlink immediately for FilesDL URLs to prevent Cloudflare blocks and timeouts
+          if (isVercelEnv && isFilesdlUrl(startUrl)) {
+            const microRes = await fetchFilesdlViaMicrolink(startUrl, 5500);
+            if (microRes && microRes.html && microRes.html.length > 200) {
+              htmlText = microRes.html;
             }
-          } catch (e1) {}
+          }
+
+          // 1. Try fast native fetch first (5s timeout - ultra-fast and avoids CF bot challenges)
+          if (!htmlText) {
+            try {
+              const nativeRes = await fetch(startUrl, {
+                headers: browserHeaders,
+                signal: AbortSignal.timeout(5000),
+                redirect: 'follow',
+              });
+              const text = await nativeRes.text();
+              if (nativeRes.status === 200 && text.length > 300 && !isCloudflareHtml(nativeRes.status, text) && !text.includes('vDDoS-zn') && !text.includes('toNumbers')) {
+                htmlText = text;
+                finalUrl = nativeRes.url || startUrl;
+              }
+            } catch (e1) {}
+          }
 
           // 2. Fallback to fetchWithVddos if native fetch didn't return valid HTML
           if (!htmlText || htmlText.length < 300 || isCloudflareHtml(200, htmlText)) {
-            try {
-              const fetched = await fetchWithVddos(startUrl, browserHeaders, 6000);
-              htmlText = fetched.html || "";
-              finalUrl = fetched.finalUrl || startUrl;
-            } catch (fetchErr) {
+            if (isFilesdlUrl(startUrl)) {
+              const microRes = await fetchFilesdlViaMicrolink(startUrl, 5500);
+              if (microRes && microRes.html && microRes.html.length > 200) {
+                htmlText = microRes.html;
+              }
+            }
+            if (!htmlText || htmlText.length < 300 || isCloudflareHtml(200, htmlText)) {
               try {
-                const res = await axios.get(startUrl, {
-                  headers: browserHeaders,
-                  httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-                  timeout: 6000,
-                  maxRedirects: 5,
-                  validateStatus: () => true
-                });
-                htmlText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
-              } catch (e2) {}
+                const fetched = await fetchWithVddos(startUrl, browserHeaders, 6000);
+                htmlText = fetched.html || "";
+                finalUrl = fetched.finalUrl || startUrl;
+              } catch (fetchErr) {
+                try {
+                  const res = await axios.get(startUrl, {
+                    headers: browserHeaders,
+                    httpsAgent: new https.Agent({ rejectUnauthorized: false }),
+                    timeout: 6000,
+                    maxRedirects: 5,
+                    validateStatus: () => true
+                  });
+                  htmlText = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+                } catch (e2) {}
+              }
             }
           }
 
@@ -3051,6 +3131,52 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             }));
 
             // Cache FilesDL resolution
+            filesdlCache.set(startUrl, { results: matchedResults, timestamp: Date.now() });
+            filesdlCache.set(normalizeDomain(startUrl), { results: matchedResults, timestamp: Date.now() });
+
+            return matchedResults;
+          }
+
+          // Check for direct high-speed download links (e.g. R2 / Cloudflare storage, cabdownload.php, gofile) when no Hubcloud mirror
+          const directMatches: string[] = [];
+          $doc("a[href]").each((_, aEl) => {
+            const h = ($doc(aEl).attr("href") || "").trim();
+            if (!h || h.startsWith("#") || h.startsWith("javascript:") || h.includes("gdflix") || h.includes("cdn-cgi")) return;
+            if (h.includes(".r2.dev") || h.includes("cabdownload.php") || (h.includes("filesdl") && h.includes("download.php")) || h.includes("gofile.io") || h.includes("workers.dev")) {
+              if (!directMatches.includes(h)) {
+                directMatches.push(h);
+              }
+            }
+          });
+
+          const preferredDirect = directMatches.find(u => u.includes(".r2.dev")) ||
+                                  directMatches.find(u => u.includes("cabdownload.php")) ||
+                                  directMatches[0];
+
+          if (preferredDirect) {
+            const sizeMatch = htmlText.match(/Size:<\/span>\s*<span>([^<]+)<\/span>/i) || 
+                              htmlText.match(/Size:\s*([0-9.]+\s*(?:GB|MB|KB))/i) || 
+                              htmlText.match(/Instant Download Link\s*-\s*([0-9.]+\s*(?:GB|MB|KB))/i) ||
+                              htmlText.match(/(\d+(?:\.\d+)?\s*(?:GB|MB|KB))/i);
+            const size = sizeMatch ? sizeMatch[1].toUpperCase() : null;
+
+            const cleanLabelQuality = parentLabel.replace(/^Download\s*(Now\s*)?/i, '').trim();
+            const fallbackName = pageMovieTitle ? `${pageMovieTitle} [${cleanLabelQuality}]` : parentLabel;
+            let finalName = (!pageFileName || isGenericTitle(pageFileName)) ? fallbackName : pageFileName;
+
+            if (size) {
+              const escapedSize = size.replace(/\./g, '\\.');
+              finalName = finalName.replace(new RegExp(`\\[?${escapedSize}\\]?`, 'gi'), "").trim();
+              finalName = finalName.replace(/[\[\]()\-_\s]+$/, "").trim();
+            }
+
+            const matchedResults = [{
+              file_name: finalName || "Download Link",
+              url: preferredDirect.replace(/&amp;/g, '&'),
+              size,
+              is_direct: true,
+            }];
+
             filesdlCache.set(startUrl, { results: matchedResults, timestamp: Date.now() });
             filesdlCache.set(normalizeDomain(startUrl), { results: matchedResults, timestamp: Date.now() });
 
@@ -3156,7 +3282,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                 })
               )
             );
-            const flattened = subResults.flat().filter(h => isHubCloudUrl(h.url));
+            const flattened = subResults.flat().filter(h => isValidFilmyHitUrl(h.url));
             if (flattened.length > 0) {
               filesdlCache.set(startUrl, { results: flattened, timestamp: Date.now() });
               filesdlCache.set(normalizeDomain(startUrl), { results: flattened, timestamp: Date.now() });
@@ -3164,12 +3290,12 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             }
           }
 
-          // If startUrl itself is a HubCloud URL, return it; otherwise return empty array
-          if (isHubCloudUrl(startUrl)) {
+          // If startUrl itself is a valid download URL, return it; otherwise return empty array
+          if (isValidFilmyHitUrl(startUrl)) {
             const cleanLabelQuality = parentLabel.replace(/^Download\s*(Now\s*)?/i, '').trim();
             const fallbackName = pageMovieTitle ? `${pageMovieTitle} [${cleanLabelQuality}]` : parentLabel;
             const res = [{
-              file_name: fallbackName || "HubCloud Link",
+              file_name: fallbackName || "Download Link",
               url: normalizeDomain(startUrl),
               size: null,
               is_direct: true,
@@ -3180,11 +3306,11 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           }
           return [];
         } catch (e) {
-          if (isHubCloudUrl(startUrl)) {
+          if (isValidFilmyHitUrl(startUrl)) {
             const cleanLabelQuality = parentLabel.replace(/^Download\s*(Now\s*)?/i, '').trim();
             const fallbackName = pageMovieTitle ? `${pageMovieTitle} [${cleanLabelQuality}]` : parentLabel;
             const res = [{
-              file_name: fallbackName || "HubCloud Link",
+              file_name: fallbackName || "Download Link",
               url: normalizeDomain(startUrl),
               size: null,
               is_direct: true,
@@ -3230,7 +3356,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       }
 
       let finalHits = rawResults.flat().filter((hit, index, self) => 
-        isHubCloudUrl(hit.url) &&
+        isValidFilmyHitUrl(hit.url) &&
         index === self.findIndex((t) => t.url === hit.url)
       );
 
