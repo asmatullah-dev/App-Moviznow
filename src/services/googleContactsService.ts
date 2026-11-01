@@ -3,6 +3,8 @@ import { UserProfile } from '../types';
 import { isUserExpired } from '../contexts/UsersContext';
 import { doc, updateDoc, getDoc, setDoc, deleteDoc, deleteField, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
+import { initializeApp, getApps } from 'firebase/app';
+import { getAuth, signInWithPopup, GoogleAuthProvider, browserPopupRedirectResolver } from 'firebase/auth';
 
 const CONTACTS_SCOPE = 'https://www.googleapis.com/auth/contacts';
 const STORAGE_TOKEN_KEY = 'gcontacts_access_token';
@@ -745,6 +747,7 @@ export async function refreshContactsTokenSilently(_accountEmail?: string): Prom
 export async function ensureValidContactsToken(forceInteractiveIfFailed = false): Promise<{ accessToken: string | null; email: string | null }> {
   const BUFFER_MS = 2 * 60 * 1000; // 2 minutes buffer before token expires
   const now = Date.now();
+  const REQUIRED_EMAIL = 'wmoviznow@gmail.com';
 
   // 1. Check localStorage first
   const localToken = localStorage.getItem(STORAGE_TOKEN_KEY) || sessionStorage.getItem(STORAGE_TOKEN_KEY);
@@ -754,8 +757,13 @@ export async function ensureValidContactsToken(forceInteractiveIfFailed = false)
 
   if (localToken && localExpiryStr) {
     const localExpiry = parseInt(localExpiryStr, 10);
-    if (!isNaN(localExpiry) && now < (localExpiry - BUFFER_MS)) {
-      return { accessToken: localToken, email: localEmail || 'wmoviznow@gmail.com' };
+    // If the local token was saved under a different email, invalidate it
+    if (localEmail && localEmail.toLowerCase() !== REQUIRED_EMAIL) {
+      localStorage.removeItem(STORAGE_TOKEN_KEY);
+      localStorage.removeItem(STORAGE_EXPIRY_KEY);
+      localStorage.removeItem(STORAGE_EMAIL_KEY);
+    } else if (!isNaN(localExpiry) && now < (localExpiry - BUFFER_MS)) {
+      return { accessToken: localToken, email: REQUIRED_EMAIL };
     }
   }
 
@@ -768,20 +776,21 @@ export async function ensureValidContactsToken(forceInteractiveIfFailed = false)
       firestoreAuthData = docSnap.data();
       const fToken = firestoreAuthData.accessToken;
       const fExpiry = parseInt(String(firestoreAuthData.expiry || 0), 10);
-      const fEmail = firestoreAuthData.email || localEmail || 'wmoviznow@gmail.com';
+      const fEmail = firestoreAuthData.email || localEmail || REQUIRED_EMAIL;
       const isAuthInDb = firestoreAuthData.isAuthorized !== false && (!!fToken || !!fEmail);
 
-      if (fToken && !isNaN(fExpiry) && now < (fExpiry - BUFFER_MS) && isAuthInDb) {
+      // Only accept if account matches REQUIRED_EMAIL
+      if (fEmail && fEmail.toLowerCase() === REQUIRED_EMAIL && fToken && !isNaN(fExpiry) && now < (fExpiry - BUFFER_MS) && isAuthInDb) {
         // Cache valid token from Firestore to localStorage
         try {
           localStorage.setItem(STORAGE_TOKEN_KEY, fToken);
           localStorage.setItem(STORAGE_EXPIRY_KEY, String(fExpiry));
-          localStorage.setItem(STORAGE_EMAIL_KEY, fEmail);
+          localStorage.setItem(STORAGE_EMAIL_KEY, REQUIRED_EMAIL);
           localStorage.setItem(STORAGE_AUTHORIZED_KEY, 'true');
         } catch (e) {}
-        return { accessToken: fToken, email: fEmail };
+        return { accessToken: fToken, email: REQUIRED_EMAIL };
       } else if (firestoreAuthData?.refreshToken) {
-        // Method 1: Refresh token is available! Call server to refresh the token.
+        // Method: Refresh token is available! Call server to refresh the token.
         try {
           console.log('[Google Contacts] Token expired. Requesting server-side refresh...');
           const refreshRes = await fetch('/api/orders/refresh-contacts-token', {
@@ -792,7 +801,7 @@ export async function ensureValidContactsToken(forceInteractiveIfFailed = false)
             const rData = await refreshRes.json();
             if (rData.success && rData.accessToken) {
               const newExpiry = rData.expiry;
-              const newEmail = rData.email || fEmail;
+              const newEmail = rData.email || REQUIRED_EMAIL;
               
               try {
                 localStorage.setItem(STORAGE_TOKEN_KEY, rData.accessToken);
@@ -813,33 +822,33 @@ export async function ensureValidContactsToken(forceInteractiveIfFailed = false)
     console.warn('[Google Contacts] Error reading Firestore token:', err);
   }
 
-  const savedEmail = firestoreAuthData?.email || localEmail || 'wmoviznow@gmail.com';
+  const savedEmail = firestoreAuthData?.email || localEmail || REQUIRED_EMAIL;
   const wasAuthorized = isAuthorizedLocal || firestoreAuthData?.isAuthorized === true || !!firestoreAuthData?.accessToken;
   const fallbackToken = localToken || firestoreAuthData?.accessToken;
 
   // 3. In non-interactive mode (tab open, mount, background checks):
   // NEVER open a Google popup window! Return existing token and authorization info.
   if (!forceInteractiveIfFailed) {
-    if (fallbackToken && wasAuthorized) {
-      return { accessToken: fallbackToken, email: savedEmail };
+    if (fallbackToken && wasAuthorized && (!savedEmail || savedEmail.toLowerCase() === REQUIRED_EMAIL)) {
+      return { accessToken: fallbackToken, email: REQUIRED_EMAIL };
     }
-    return { accessToken: null, email: wasAuthorized ? savedEmail : null };
+    return { accessToken: null, email: wasAuthorized ? REQUIRED_EMAIL : null };
   }
 
   // 4. Only if user explicitly clicked an action (forceInteractiveIfFailed === true):
   try {
-    const conn = await connectGoogleContacts(savedEmail || 'wmoviznow@gmail.com', false);
+    const conn = await connectGoogleContacts(REQUIRED_EMAIL, false);
     return { accessToken: conn.accessToken, email: conn.email };
   } catch (err) {
     console.warn('[Google Contacts] Interactive connect attempt failed:', err);
   }
 
   // 5. Fallback: if we have an existing token from Firestore or localStorage, return it
-  if (fallbackToken && wasAuthorized) {
-    return { accessToken: fallbackToken, email: savedEmail };
+  if (fallbackToken && wasAuthorized && (!savedEmail || savedEmail.toLowerCase() === REQUIRED_EMAIL)) {
+    return { accessToken: fallbackToken, email: REQUIRED_EMAIL };
   }
 
-  return { accessToken: null, email: savedEmail || null };
+  return { accessToken: null, email: REQUIRED_EMAIL };
 }
 
 /**
@@ -877,79 +886,145 @@ export function isGoogleContactsAuthorized(): boolean {
 }
 
 /**
- * Connects to Google Contacts via GIS Token Client and persists credentials to Firestore & localStorage.
- * Does NOT force consent dialog if user already consented.
+ * Connects to Google Contacts using Firebase Auth popup (with fallback to GIS token client).
+ * Targets wmoviznow@gmail.com by default and enforces this account.
  */
 export async function connectGoogleContacts(
   accountHint: string = 'wmoviznow@gmail.com',
   forceConsent: boolean = false
 ): Promise<{ accessToken: string; email: string }> {
-  const clientId = (firebaseConfig as any).oAuthClientId;
-  if (!clientId) {
-    throw new Error('OAuth Client ID is missing in configuration.');
+  const targetEmail = accountHint || 'wmoviznow@gmail.com';
+  let primaryError: any = null;
+
+  // 1. Primary: Use Firebase Auth popup flow (isolated secondary worker app to avoid disrupting active session)
+  try {
+    const appName = 'gcontacts-oauth-flow';
+    const oauthApp = getApps().find(a => a.name === appName) || initializeApp(firebaseConfig, appName);
+    const oauthAuth = getAuth(oauthApp);
+
+    const provider = new GoogleAuthProvider();
+    provider.addScope(CONTACTS_SCOPE);
+    provider.addScope('https://www.googleapis.com/auth/gmail.readonly');
+
+    // Set custom parameters to target wmoviznow@gmail.com and prompt for account selection
+    provider.setCustomParameters({
+      login_hint: targetEmail,
+      prompt: forceConsent ? 'consent select_account' : 'select_account'
+    });
+
+    const result = await signInWithPopup(oauthAuth, provider, browserPopupRedirectResolver);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const accessToken = credential?.accessToken;
+
+    if (!accessToken) {
+      throw new Error('Google sign-in succeeded, but no OAuth access token was returned for Google Contacts.');
+    }
+
+    const authenticatedEmail = result.user?.email || targetEmail;
+
+    // Strict account check: enforce wmoviznow@gmail.com
+    if (targetEmail.toLowerCase() === 'wmoviznow@gmail.com' && authenticatedEmail.toLowerCase() !== 'wmoviznow@gmail.com') {
+      await oauthAuth.signOut().catch(() => {});
+      throw new Error(`Account mismatch: You signed in with ${authenticatedEmail}, but Google Contacts must be connected with wmoviznow@gmail.com. Please click Re-Auth and choose wmoviznow@gmail.com.`);
+    }
+
+    const expiry = (Date.now() + 3540 * 1000).toString(); // ~1 hour
+    await saveContactsTokenToFirestore(accessToken, expiry, authenticatedEmail);
+
+    // Clean up temporary worker session
+    oauthAuth.signOut().catch(() => {});
+
+    return { accessToken, email: authenticatedEmail };
+  } catch (firebaseAuthErr: any) {
+    console.warn('[Google Contacts] Firebase Auth popup flow error:', firebaseAuthErr);
+    primaryError = firebaseAuthErr;
+
+    if (firebaseAuthErr.message && firebaseAuthErr.message.includes('Account mismatch')) {
+      throw firebaseAuthErr;
+    }
+    if (firebaseAuthErr.code === 'auth/popup-closed-by-user') {
+      throw new Error('Google authorization popup was closed before completing sign-in.');
+    }
+    if (firebaseAuthErr.code === 'auth/popup-blocked') {
+      throw new Error('The Google authorization popup was blocked by your browser. Please allow popups for this site and try again.');
+    }
   }
 
-  await loadGoogleGsiScript();
+  // 2. Secondary fallback: Google Identity Services (GIS) Token Client
+  const clientId = (firebaseConfig as any).oAuthClientId;
+  if (!clientId) {
+    throw primaryError || new Error('OAuth Client ID is missing in configuration.');
+  }
 
-  return new Promise((resolve, reject) => {
-    try {
-      const googleObj = (window as any).google;
-      if (!googleObj?.accounts?.oauth2) {
-        reject(new Error('Google Identity Services SDK is not available.'));
-        return;
-      }
-
-      const tokenClient = googleObj.accounts.oauth2.initTokenClient({
-        client_id: clientId,
-        scope: CONTACTS_SCOPE,
-        callback: async (tokenResponse: any) => {
-          if (tokenResponse.error) {
-            reject(new Error(tokenResponse.error_description || tokenResponse.error));
-            return;
-          }
-
-          const accessToken = tokenResponse.access_token;
-          if (!accessToken) {
-            reject(new Error('Could not retrieve access token for Google Contacts.'));
-            return;
-          }
-
-          // Fetch connected Google Account info if possible
-          let email = accountHint;
-          try {
-            const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-              headers: { Authorization: `Bearer ${accessToken}` }
-            });
-            if (userinfoRes.ok) {
-              const uinfo = await userinfoRes.json();
-              if (uinfo.email) email = uinfo.email;
-            }
-          } catch (e) {
-            console.warn('Could not fetch userinfo for contacts account email:', e);
-          }
-
-          const expiresIn = parseInt(tokenResponse.expires_in || '3500', 10);
-          const expiry = (Date.now() + (expiresIn - 60) * 1000).toString();
-
-          // Permanently save to Firestore and localStorage
-          await saveContactsTokenToFirestore(accessToken, expiry, email);
-
-          resolve({ accessToken, email });
-        },
-        error_callback: (err: any) => {
-          reject(new Error(err?.message || 'Google Contacts authorization popup closed or cancelled.'));
-        }
-      });
-
-      const requestOptions: any = { hint: accountHint };
-      if (forceConsent) {
-        requestOptions.prompt = 'consent';
-      }
-      tokenClient.requestAccessToken(requestOptions);
-    } catch (err) {
-      reject(err);
+  try {
+    await loadGoogleGsiScript();
+    const googleObj = (window as any).google;
+    if (!googleObj?.accounts?.oauth2) {
+      throw primaryError || new Error('Google Identity Services SDK is not available.');
     }
-  });
+
+    return await new Promise<{ accessToken: string; email: string }>((resolve, reject) => {
+      try {
+        const tokenClient = googleObj.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: `${CONTACTS_SCOPE} https://www.googleapis.com/auth/gmail.readonly`,
+          callback: async (tokenResponse: any) => {
+            if (tokenResponse.error) {
+              reject(new Error(tokenResponse.error_description || tokenResponse.error));
+              return;
+            }
+
+            const accessToken = tokenResponse.access_token;
+            if (!accessToken) {
+              reject(new Error('Could not retrieve access token for Google Contacts.'));
+              return;
+            }
+
+            // Fetch connected Google Account info if possible
+            let email = targetEmail;
+            try {
+              const userinfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                headers: { Authorization: `Bearer ${accessToken}` }
+              });
+              if (userinfoRes.ok) {
+                const uinfo = await userinfoRes.json();
+                if (uinfo.email) email = uinfo.email;
+              }
+            } catch (e) {
+              console.warn('Could not fetch userinfo for contacts account email:', e);
+            }
+
+            if (targetEmail.toLowerCase() === 'wmoviznow@gmail.com' && email.toLowerCase() !== 'wmoviznow@gmail.com') {
+              reject(new Error(`Account mismatch: You selected ${email}, but Google Contacts must connect with wmoviznow@gmail.com.`));
+              return;
+            }
+
+            const expiresIn = parseInt(tokenResponse.expires_in || '3500', 10);
+            const expiry = (Date.now() + (expiresIn - 60) * 1000).toString();
+
+            // Permanently save to Firestore and localStorage
+            await saveContactsTokenToFirestore(accessToken, expiry, email);
+
+            resolve({ accessToken, email });
+          },
+          error_callback: (err: any) => {
+            reject(new Error(err?.message || 'Google Contacts authorization popup closed or cancelled.'));
+          }
+        });
+
+        const requestOptions: any = { hint: targetEmail };
+        if (forceConsent) {
+          requestOptions.prompt = 'consent select_account';
+        }
+        tokenClient.requestAccessToken(requestOptions);
+      } catch (err) {
+        reject(err);
+      }
+    });
+  } catch (gisErr: any) {
+    console.error('[Google Contacts] Both Firebase Auth popup and GIS token client failed:', gisErr);
+    throw primaryError || gisErr;
+  }
 }
 
 /**

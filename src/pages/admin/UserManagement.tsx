@@ -295,7 +295,7 @@ export default function UserManagement() {
     }
   }, [isUserPhoneWhitelisted, unwhitelistPhoneNumber, whitelistPhoneNumber]);
 
-  const autoSyncUserToContacts = useCallback(async (userToSync: UserProfile) => {
+  const autoSyncUserToContacts = useCallback(async (userToSync: UserProfile, _force?: boolean) => {
     if (!userToSync.phone && !userToSync.email) return;
     if (!isGoogleContactsAuthorized()) return;
     try {
@@ -2361,7 +2361,7 @@ export default function UserManagement() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handleBulkSyncContacts([user.uid]);
+                          autoSyncUserToContacts(user);
                         }}
                         className="p-1.5 text-indigo-500 hover:bg-indigo-500/10 rounded-lg transition-colors"
                         title="Sync Contact to Google Contacts"
@@ -4022,7 +4022,7 @@ export default function UserManagement() {
         isOpen={isCompareModalOpen}
         onClose={() => setIsCompareModalOpen(false)}
         users={allUsers}
-        onRefreshUsers={refreshUsers}
+        onRefreshUsers={async () => { await refreshUsers(); }}
         accountEmail={contactsAccountEmail}
       />
 

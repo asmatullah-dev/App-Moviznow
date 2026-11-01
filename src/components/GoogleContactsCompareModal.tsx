@@ -320,10 +320,10 @@ export function GoogleContactsCompareModal({
               variant="secondary"
               className="px-2.5 sm:px-3 py-1.5 text-xs font-semibold border-indigo-500/30 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/10"
               loading={isReauthing}
-              title="Test & re-authenticate Google Contacts account via interactive popup"
+              title="Verify and connect wmoviznow@gmail.com Google Contacts via interactive popup"
               icon={<ShieldCheck className={`w-3.5 h-3.5 text-emerald-500 ${isReauthing ? 'animate-spin' : ''}`} />}
             >
-              <span className="hidden sm:inline">Re-Auth / Verify</span>
+              <span className="hidden sm:inline">Connect wmoviznow@gmail.com</span>
               <span className="sm:hidden">Verify</span>
             </Button>
 
@@ -536,6 +536,27 @@ export function GoogleContactsCompareModal({
             <div className="flex flex-col items-center justify-center py-16 gap-3 text-zinc-500">
               <RefreshCw className="w-8 h-8 animate-spin text-indigo-500" />
               <p className="text-sm font-medium">Fetching Google Contacts and comparing formats...</p>
+            </div>
+          ) : !report ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
+              <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-3">
+                <ShieldCheck className="w-8 h-8" />
+              </div>
+              <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                Google Contacts Authorization Required
+              </h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1.5 mb-5 leading-relaxed">
+                Connect and authorize <strong className="text-indigo-600 dark:text-indigo-400 font-semibold">wmoviznow@gmail.com</strong> to scan and compare user contacts, auto-fix prefixes, and synchronize phone formats.
+              </p>
+              <Button
+                onClick={handleReauthVerify}
+                variant="emerald"
+                loading={isReauthing}
+                className="px-5 py-2.5 text-xs font-semibold shadow-md"
+                icon={<ShieldCheck className="w-4 h-4" />}
+              >
+                Connect with wmoviznow@gmail.com
+              </Button>
             </div>
           ) : displayedItems.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
