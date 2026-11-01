@@ -40,7 +40,12 @@ const ManageModal: React.FC<Props> = ({ isOpen, title, onClose, type, items: ini
 
   useEffect(() => {
     if (isOpen) {
-      setItems([...initialItems].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)));
+      setItems([...initialItems].sort((a, b) => {
+        const aOrder = typeof a.order === 'number' ? a.order : 999;
+        const bOrder = typeof b.order === 'number' ? b.order : 999;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return (a.name || '').localeCompare(b.name || '');
+      }));
       setNewItemName('');
       setSearchTerm('');
       setEditingId(null);

@@ -9,7 +9,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useAdminContent } from '../../contexts/AdminContentContext';
 
 export default function QualityManagement() {
-  const { qualities, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem } = useAdminContent();
+  const { qualities, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem, updateAuxiliaryCollection } = useAdminContent();
   const [newQuality, setNewQuality] = useState('');
   const [newColor, setNewColor] = useState('#10b981');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -32,7 +32,7 @@ export default function QualityManagement() {
     if (!newQuality.trim()) return;
     setProcessing(prev => ({ ...prev, add: true }));
     try {
-      const maxOrder = qualities.length > 0 ? Math.max(...qualities.map(q => q.order || 0)) : 0;
+      const maxOrder = qualities.length > 0 ? Math.max(...qualities.map(q => (typeof q.order === 'number' ? q.order : 0))) : -1;
       await addAuxiliaryItem('quality', { name: newQuality.trim(), order: maxOrder + 1, color: newColor });
       setNewQuality('');
       setNewColor('#10b981');
@@ -79,10 +79,12 @@ export default function QualityManagement() {
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
-    // Batch update order using context
-    await Promise.all(items.map((item, index) => 
-      updateAuxiliaryItem('quality', item.id, { order: index })
-    ));
+    // Atomically reassign sequential order 0..N and update collection
+    const reorderedWithIndices = items.map((item, index) => ({
+      ...item,
+      order: index
+    }));
+    await updateAuxiliaryCollection('quality', reorderedWithIndices);
   };
 
   const filteredQualities = useMemo(() => {

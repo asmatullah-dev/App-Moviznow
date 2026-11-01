@@ -7,7 +7,8 @@ import {
   getStaticContentById,
   getStaticExportMetadata,
   getStaticExportCollections,
-  formatContentUpdateToast
+  formatContentUpdateToast,
+  sortAuxiliaryByOrder
 } from '../utils/staticContentLoader';
 import { Content, Genre, Language, Quality, Collection as AppCollection } from '../types';
 import { expandContent, findLocalChunkForContent } from '../utils/chunkUtils';
@@ -110,11 +111,11 @@ export function ContentProvider({ children }: { children: React.ReactNode }) {
         } catch (e) {}
       }
       const g = safeStorage.getItem('genres_cache');
-      if (g) try { setGenres(JSON.parse(g)); } catch(e) {}
+      if (g) try { setGenres(sortAuxiliaryByOrder(JSON.parse(g))); } catch(e) {}
       const l = safeStorage.getItem('languages_cache');
-      if (l) try { setLanguages(JSON.parse(l)); } catch(e) {}
+      if (l) try { setLanguages(sortAuxiliaryByOrder(JSON.parse(l))); } catch(e) {}
       const q = safeStorage.getItem('qualities_cache');
-      if (q) try { setQualities(JSON.parse(q)); } catch(e) {}
+      if (q) try { setQualities(sortAuxiliaryByOrder(JSON.parse(q))); } catch(e) {}
       const c = safeStorage.getItem('collections_cache');
       if (c) try { setCollections(JSON.parse(c)); } catch(e) {}
     };

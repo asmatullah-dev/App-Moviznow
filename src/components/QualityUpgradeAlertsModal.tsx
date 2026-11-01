@@ -202,7 +202,7 @@ export const QualityUpgradeAlertsModal: React.FC<Props> = ({
     }
   };
 
-  const CONCURRENCY = 6;
+  const CONCURRENCY = 15;
 
   const handleScanAll = async () => {
     if (candidates.length === 0 || isScanningAll) return;

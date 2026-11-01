@@ -165,6 +165,15 @@ export const checkHasPendingChanges = (): boolean => {
   return false;
 };
 
+export const sortAuxiliaryByOrder = <T extends { order?: number; name?: string }>(items: T[]): T[] => {
+  return [...items].sort((a, b) => {
+    const oA = typeof a.order === 'number' ? a.order : 999;
+    const oB = typeof b.order === 'number' ? b.order : 999;
+    if (oA !== oB) return oA - oB;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+};
+
 export function AdminContentProvider({ children }: { children: React.ReactNode }) {
   const { user, profile, loading: authProfileLoading, refreshProfile } = useAuth();
   const { users: allUsers, finalizeUserChanges } = useUsers();
@@ -194,7 +203,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       try {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.sort((a: any, b: any) => (a.order || 999) - (b.order || 999));
+          return sortAuxiliaryByOrder(parsed);
         }
       } catch (e) {}
     }
@@ -206,7 +215,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       try {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.sort((a: any, b: any) => (a.order || 999) - (b.order || 999));
+          return sortAuxiliaryByOrder(parsed);
         }
       } catch (e) {}
     }
@@ -218,7 +227,7 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
       try {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.sort((a: any, b: any) => (a.order || 999) - (b.order || 999));
+          return sortAuxiliaryByOrder(parsed);
         }
       } catch (e) {}
     }
@@ -269,11 +278,11 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
 
       // 3. Load auxiliary from admin cache
       const g = safeStorage.getItem('admin_genres_cache');
-      if (g) try { setGenres(JSON.parse(g).sort((a: any, b: any) => (a.order || 999) - (b.order || 999))); } catch(e) {}
+      if (g) try { setGenres(sortAuxiliaryByOrder(JSON.parse(g))); } catch(e) {}
       const l = safeStorage.getItem('admin_languages_cache');
-      if (l) try { setLanguages(JSON.parse(l).sort((a: any, b: any) => (a.order || 999) - (b.order || 999))); } catch(e) {}
+      if (l) try { setLanguages(sortAuxiliaryByOrder(JSON.parse(l))); } catch(e) {}
       const q = safeStorage.getItem('admin_qualities_cache');
-      if (q) try { setQualities(JSON.parse(q).sort((a: any, b: any) => (a.order || 999) - (b.order || 999))); } catch(e) {}
+      if (q) try { setQualities(sortAuxiliaryByOrder(JSON.parse(q))); } catch(e) {}
 
       setLoading(false);
 
@@ -561,9 +570,9 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
         }
 
         if (metadataPending) {
-            const mGenres = JSON.parse(safeStorage.getItem('admin_genres_cache') || '[]');
-            const mLanguages = JSON.parse(safeStorage.getItem('admin_languages_cache') || '[]');
-            const mQualities = JSON.parse(safeStorage.getItem('admin_qualities_cache') || '[]');
+            const mGenres = sortAuxiliaryByOrder(JSON.parse(safeStorage.getItem('admin_genres_cache') || '[]'));
+            const mLanguages = sortAuxiliaryByOrder(JSON.parse(safeStorage.getItem('admin_languages_cache') || '[]'));
+            const mQualities = sortAuxiliaryByOrder(JSON.parse(safeStorage.getItem('admin_qualities_cache') || '[]'));
             
             addBatchOp((batch) => {
                 batch.set(doc(db, 'content_chunks', 'metadata'), {
@@ -1174,16 +1183,25 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
             const chunksLanguages = data.languages || [];
             const chunksQualities = data.qualities || [];
 
-            safeStorage.setItem('admin_genres_cache', JSON.stringify(chunksGenres));
-            safeStorage.setItem('admin_languages_cache', JSON.stringify(chunksLanguages));
-            safeStorage.setItem('admin_qualities_cache', JSON.stringify(chunksQualities));
+            const sortedG = sortAuxiliaryByOrder<Genre>(chunksGenres);
+            const sortedL = sortAuxiliaryByOrder<Language>(chunksLanguages);
+            const sortedQ = sortAuxiliaryByOrder<Quality>(chunksQualities);
+
+            safeStorage.setItem('admin_genres_cache', JSON.stringify(sortedG));
+            safeStorage.setItem('admin_languages_cache', JSON.stringify(sortedL));
+            safeStorage.setItem('admin_qualities_cache', JSON.stringify(sortedQ));
+            safeStorage.setItem('genres_cache', JSON.stringify(sortedG));
+            safeStorage.setItem('languages_cache', JSON.stringify(sortedL));
+            safeStorage.setItem('qualities_cache', JSON.stringify(sortedQ));
+
             if (metadataVersion) {
               localMeta.metadata = metadataVersion;
               safeStorage.setItem('admin_chunk_meta_versions', JSON.stringify(localMeta));
             }
-            setGenres([...chunksGenres].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
-            setLanguages([...chunksLanguages].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
-            setQualities([...chunksQualities].sort((a: any, b: any) => (a.order || 999) - (b.order || 999)));
+            setGenres(sortedG);
+            setLanguages(sortedL);
+            setQualities(sortedQ);
+            window.dispatchEvent(new CustomEvent('content_updated_locally'));
             updatedSomething = true;
           }
         } catch (e) {
@@ -1693,15 +1711,23 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   const updateAuxiliaryCollection = async (type: 'genre' | 'language' | 'quality', items: any[]) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     const cacheKey = `admin_${type === 'quality' ? 'qualities_cache' : `${type}s_cache`}`;
+    const userCacheKey = type === 'quality' ? 'qualities_cache' : `${type}s_cache`;
     
-    // items should already correctly have their 'order' values adjusted by the caller
-    safeStorage.setItem(cacheKey, JSON.stringify(items));
-    if (type === 'genre') setGenres(items);
-    if (type === 'language') setLanguages(items);
-    if (type === 'quality') setQualities(items);
+    // Ensure items strictly retain their order numbers and are sorted reliably
+    const sorted = sortAuxiliaryByOrder(items).map((item, index) => ({
+      ...item,
+      order: typeof item.order === 'number' ? item.order : index
+    }));
+    
+    safeStorage.setItem(cacheKey, JSON.stringify(sorted));
+    safeStorage.setItem(userCacheKey, JSON.stringify(sorted));
+    if (type === 'genre') setGenres(sorted);
+    if (type === 'language') setLanguages(sorted);
+    if (type === 'quality') setQualities(sorted);
     
     safeStorage.setItem('admin_pending_metadata_updates', 'true');
     setHasPendingChanges(checkHasPendingChanges());
+    window.dispatchEvent(new CustomEvent('content_updated_locally'));
   };
 
   const bumpCollectionsVersion = async () => {
@@ -1830,50 +1856,93 @@ export function AdminContentProvider({ children }: { children: React.ReactNode }
   const addAuxiliaryItem = async (type: 'genre' | 'language' | 'quality', item: any) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     const cacheKey = `admin_${type === 'quality' ? 'qualities_cache' : `${type}s_cache`}`;
+    const userCacheKey = type === 'quality' ? 'qualities_cache' : `${type}s_cache`;
     let current = JSON.parse(safeStorage.getItem(cacheKey) || '[]');
-    const newItem = { ...item, id: item.id || Date.now().toString() };
+    const nextOrder = current.length > 0 ? Math.max(...current.map((c: any) => (typeof c.order === 'number' ? c.order : 0))) + 1 : 0;
+    const newItem = { ...item, id: item.id || Date.now().toString(), order: typeof item.order === 'number' ? item.order : nextOrder };
     current.push(newItem);
     
-    safeStorage.setItem(cacheKey, JSON.stringify(current));
-    if (type === 'genre') setGenres(current);
-    if (type === 'language') setLanguages(current);
-    if (type === 'quality') setQualities(current);
+    if (type === 'genre') {
+      const sorted = sortAuxiliaryByOrder<Genre>(current);
+      safeStorage.setItem(cacheKey, JSON.stringify(sorted));
+      safeStorage.setItem(userCacheKey, JSON.stringify(sorted));
+      setGenres(sorted);
+    } else if (type === 'language') {
+      const sorted = sortAuxiliaryByOrder<Language>(current);
+      safeStorage.setItem(cacheKey, JSON.stringify(sorted));
+      safeStorage.setItem(userCacheKey, JSON.stringify(sorted));
+      setLanguages(sorted);
+    } else if (type === 'quality') {
+      const sorted = sortAuxiliaryByOrder<Quality>(current);
+      safeStorage.setItem(cacheKey, JSON.stringify(sorted));
+      safeStorage.setItem(userCacheKey, JSON.stringify(sorted));
+      setQualities(sorted);
+    }
     
     safeStorage.setItem('admin_pending_metadata_updates', 'true');
     setHasPendingChanges(true);
+    window.dispatchEvent(new CustomEvent('content_updated_locally'));
   };
 
   const updateAuxiliaryItem = async (type: 'genre' | 'language' | 'quality', id: string, updates: any) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     const cacheKey = `admin_${type === 'quality' ? 'qualities_cache' : `${type}s_cache`}`;
+    const userCacheKey = type === 'quality' ? 'qualities_cache' : `${type}s_cache`;
     let current = JSON.parse(safeStorage.getItem(cacheKey) || '[]');
     const idx = current.findIndex((i: any) => i.id === id);
     if (idx !== -1) {
         current[idx] = { ...current[idx], ...updates };
-        safeStorage.setItem(cacheKey, JSON.stringify(current));
         
-        if (type === 'genre') setGenres(current);
-        if (type === 'language') setLanguages(current);
-        if (type === 'quality') setQualities(current);
+        if (type === 'genre') {
+          const sorted = sortAuxiliaryByOrder<Genre>(current);
+          safeStorage.setItem(cacheKey, JSON.stringify(sorted));
+          safeStorage.setItem(userCacheKey, JSON.stringify(sorted));
+          setGenres(sorted);
+        } else if (type === 'language') {
+          const sorted = sortAuxiliaryByOrder<Language>(current);
+          safeStorage.setItem(cacheKey, JSON.stringify(sorted));
+          safeStorage.setItem(userCacheKey, JSON.stringify(sorted));
+          setLanguages(sorted);
+        } else if (type === 'quality') {
+          const sorted = sortAuxiliaryByOrder<Quality>(current);
+          safeStorage.setItem(cacheKey, JSON.stringify(sorted));
+          safeStorage.setItem(userCacheKey, JSON.stringify(sorted));
+          setQualities(sorted);
+        }
         
         safeStorage.setItem('admin_pending_metadata_updates', 'true');
         setHasPendingChanges(true);
+        window.dispatchEvent(new CustomEvent('content_updated_locally'));
     }
   };
 
   const deleteAuxiliaryItem = async (type: 'genre' | 'language' | 'quality', id: string) => {
     if (!['owner', 'admin', 'content_manager', 'editor', 'manager'].includes(profile?.role || '')) return;
     const cacheKey = `admin_${type === 'quality' ? 'qualities_cache' : `${type}s_cache`}`;
+    const userCacheKey = type === 'quality' ? 'qualities_cache' : `${type}s_cache`;
     let current = JSON.parse(safeStorage.getItem(cacheKey) || '[]');
     current = current.filter((i: any) => i.id !== id);
     
-    safeStorage.setItem(cacheKey, JSON.stringify(current));
-    if (type === 'genre') setGenres(current);
-    if (type === 'language') setLanguages(current);
-    if (type === 'quality') setQualities(current);
+    if (type === 'genre') {
+      const sorted = sortAuxiliaryByOrder<Genre>(current);
+      safeStorage.setItem(cacheKey, JSON.stringify(sorted));
+      safeStorage.setItem(userCacheKey, JSON.stringify(sorted));
+      setGenres(sorted);
+    } else if (type === 'language') {
+      const sorted = sortAuxiliaryByOrder<Language>(current);
+      safeStorage.setItem(cacheKey, JSON.stringify(sorted));
+      safeStorage.setItem(userCacheKey, JSON.stringify(sorted));
+      setLanguages(sorted);
+    } else if (type === 'quality') {
+      const sorted = sortAuxiliaryByOrder<Quality>(current);
+      safeStorage.setItem(cacheKey, JSON.stringify(sorted));
+      safeStorage.setItem(userCacheKey, JSON.stringify(sorted));
+      setQualities(sorted);
+    }
     
     safeStorage.setItem('admin_pending_metadata_updates', 'true');
     setHasPendingChanges(true);
+    window.dispatchEvent(new CustomEvent('content_updated_locally'));
   };
 
   const deleteContent = async (id: string, chunkId?: string) => {

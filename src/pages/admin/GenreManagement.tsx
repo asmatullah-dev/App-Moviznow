@@ -9,7 +9,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useAdminContent } from '../../contexts/AdminContentContext';
 
 export default function GenreManagement() {
-  const { genres, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem } = useAdminContent();
+  const { genres, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem, updateAuxiliaryCollection } = useAdminContent();
   const [newGenre, setNewGenre] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -30,7 +30,7 @@ export default function GenreManagement() {
     if (!newGenre.trim()) return;
     setProcessing(prev => ({ ...prev, add: true }));
     try {
-      const maxOrder = genres.length > 0 ? Math.max(...genres.map(g => g.order || 0)) : 0;
+      const maxOrder = genres.length > 0 ? Math.max(...genres.map(g => (typeof g.order === 'number' ? g.order : 0))) : -1;
       await addAuxiliaryItem('genre', { name: newGenre.trim(), order: maxOrder + 1 });
       setNewGenre('');
     } finally {
@@ -74,10 +74,12 @@ export default function GenreManagement() {
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
-    // Batch update order using context
-    await Promise.all(items.map((item, index) => 
-      updateAuxiliaryItem('genre', item.id, { order: index })
-    ));
+    // Atomically reassign sequential order 0..N and update collection
+    const reorderedWithIndices = items.map((item, index) => ({
+      ...item,
+      order: index
+    }));
+    await updateAuxiliaryCollection('genre', reorderedWithIndices);
   };
 
   const filteredGenres = useMemo(() => {

@@ -333,7 +333,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [isReviewingBatch, setIsReviewingBatch] = useState(false);
-  const [batchSearchStatus, setBatchSearchStatus] = useState<{ completed: number; total: number; currentTitle?: string } | null>(null);
+  const [batchSearchStatus, setBatchSearchStatus] = useState<{ completed: number; total: number; currentTitle?: string; activeCount?: number } | null>(null);
   const [batchReviewItems, setBatchReviewItems] = useState<{
     key: string;
     title: string;
@@ -922,6 +922,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   // MoviesDrive Search Results & Pagination State
   const [moviesdriveSearchUrl, setMoviesdriveSearchUrl] = useState<string | null>(null);
+  const [moviesdriveInitialSearchUrl, setMoviesdriveInitialSearchUrl] = useState<string | null>(null);
+  const visitedCatalogUrlsRef = React.useRef<Set<string>>(new Set());
+  const permanentlyIgnoredCatalogUrlsRef = React.useRef<Set<string>>(new Set());
   const [moviesdriveSearchPosts, setMoviesdriveSearchPosts] = useState<{ title: string; url: string; image?: string }[]>([]);
   const [moviesdriveSelectedUrls, setMoviesdriveSelectedUrls] = useState<Set<string>>(new Set());
   const [allAccumulatedPosts, setAllAccumulatedPosts] = useState<Map<string, { title: string; url: string; image?: string }>>(new Map());
@@ -929,6 +932,23 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [moviesdriveSearchQuery, setMoviesdriveSearchQuery] = useState<string>("");
   const [moviesdrivePageLoading, setMoviesdrivePageLoading] = useState<boolean>(false);
   const [customPageInput, setCustomPageInput] = useState<string>("");
+
+  const resetCatalogSearch = useCallback(() => {
+    setMoviesdriveSearchUrl(null);
+    setMoviesdriveInitialSearchUrl(null);
+    visitedCatalogUrlsRef.current.clear();
+    setMoviesdriveSearchPosts([]);
+    setAllAccumulatedPosts(new Map());
+    setMoviesdriveSelectedUrls(new Set());
+    setHasUserInteractedSelection(false);
+    setMoviesdriveSearchQuery("");
+    setSkymoviesTotalFound(0);
+    setSkymoviesHasMore(false);
+    setSkymoviesLoadingMore(false);
+    setSkymoviesVisibleLimit(500);
+    setMoviesdrivePageLoading(false);
+    setCustomPageInput("");
+  }, []);
 
   // Direct MoviesDrive Search Input State
   const [showMoviesdriveSearchInput, setShowMoviesdriveSearchInput] = useState<boolean>(false);
@@ -1472,6 +1492,67 @@ export const LinkCheckerModal: React.FC<Props> = ({
     });
   };
 
+  const isCatalogSearchUrl = useCallback((urlStr: string): boolean => {
+    if (!urlStr) return false;
+    const trimmed = urlStr.trim();
+    if (!trimmed) return false;
+
+    // 1. Direct or normalized match against current or initial search URL
+    if (trimmed === moviesdriveSearchUrl || (moviesdriveInitialSearchUrl && trimmed === moviesdriveInitialSearchUrl)) return true;
+    const norm = normalizeUrl(trimmed);
+    if (moviesdriveSearchUrl && (norm === normalizeUrl(moviesdriveSearchUrl) || norm.includes(normalizeUrl(moviesdriveSearchUrl)) || normalizeUrl(moviesdriveSearchUrl).includes(norm))) return true;
+    if (moviesdriveInitialSearchUrl && (norm === normalizeUrl(moviesdriveInitialSearchUrl) || norm.includes(normalizeUrl(moviesdriveInitialSearchUrl)) || normalizeUrl(moviesdriveInitialSearchUrl).includes(norm))) return true;
+
+    // 2. Visited URLs during this pagination session or previously completed
+    if (visitedCatalogUrlsRef.current.has(trimmed) || visitedCatalogUrlsRef.current.has(norm)) return true;
+    if (permanentlyIgnoredCatalogUrlsRef.current.has(trimmed) || permanentlyIgnoredCatalogUrlsRef.current.has(norm)) return true;
+
+    // 3. Raw search query match (if user entered pure text query or search title)
+    const { query, isSkyMovies, isFilmygo, isHdhub4u, isFilmyfly } = moviesdrivePageInfo;
+    if (query && trimmed.toLowerCase() === query.toLowerCase()) return true;
+
+    // 4. Structural catalog search URL check (same domain & search path / query)
+    try {
+      const u = new URL(trimmed.startsWith('http') ? trimmed : `https://${trimmed}`);
+      const host = u.hostname.toLowerCase();
+      const isSameSource =
+        (isHdhub4u && (host.includes('hdhub4u') || host.includes('hdhub'))) ||
+        (isFilmygo && (host.includes('filmygo') || host.includes('filmycab'))) ||
+        (isFilmyfly && host.includes('filmyfly')) ||
+        (isSkyMovies && (host.includes('skymovies') || host.includes('sky'))) ||
+        host.includes('moviesdrive') || host.includes('mdrive');
+
+      if (!isSameSource) return false;
+
+      const path = u.pathname.toLowerCase();
+      const isSearchOrCatalogPath =
+        path.includes('search') ||
+        path.includes('site-search') ||
+        path === '/' ||
+        path.startsWith('/page/');
+
+      if (!isSearchOrCatalogPath) return false;
+
+      if (query) {
+        const lineQuery = u.searchParams.get("to-search") ||
+                          u.searchParams.get("search") ||
+                          u.searchParams.get("q") ||
+                          u.searchParams.get("s") || "";
+        if (lineQuery.toLowerCase() === query.toLowerCase() || decodeURIComponent(lineQuery).toLowerCase() === query.toLowerCase()) {
+          return true;
+        }
+        if (u.search.toLowerCase().includes(encodeURIComponent(query).toLowerCase()) ||
+            u.search.toLowerCase().includes(query.toLowerCase())) {
+          return true;
+        }
+      } else {
+        return true;
+      }
+    } catch (e) {}
+
+    return false;
+  }, [moviesdriveSearchUrl, moviesdriveInitialSearchUrl, moviesdrivePageInfo]);
+
   const handleMoviesdrivePageChange = async (targetPage: number) => {
     if (targetPage < 1 || !moviesdriveSearchUrl) return;
     const { query, origin, isSkyMovies, isFilmygo, isHdhub4u, isFilmyfly } = moviesdrivePageInfo;
@@ -1521,7 +1602,26 @@ export const LinkCheckerModal: React.FC<Props> = ({
       const data = await res.json();
       if (data.is_search && Array.isArray(data.posts)) {
         setMoviesdriveSearchUrl(newUrl);
+        visitedCatalogUrlsRef.current.add(newUrl);
+        visitedCatalogUrlsRef.current.add(normalizeUrl(newUrl));
         setMoviesdriveSearchPosts(data.posts);
+
+        // Keep input field aligned with the active page URL so user sees current page
+        setInput(prev => {
+          const lines = prev.split('\n');
+          let changed = false;
+          const updated = lines.map(line => {
+            const t = line.trim();
+            if (t && isCatalogSearchUrl(t)) {
+              changed = true;
+              return newUrl;
+            }
+            return line;
+          });
+          const next = changed ? updated.join('\n') : prev;
+          inputRef.current = next;
+          return next;
+        });
         
         const postsCount = data.posts.length;
         const total = typeof data.total_found === 'number' ? data.total_found : (typeof data.found === 'number' ? data.found : postsCount);
@@ -1645,13 +1745,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     // Clear cache & active search overlays for fresh search
     processedExtractionsRef.current.delete(normalizeUrl(targetUrl));
     processedExtractionsRef.current.delete(targetUrl);
-    setMoviesdriveSearchUrl(null);
-    setMoviesdriveSearchPosts([]);
-    setCatalogTotalFound(0);
-    setCatalogExplicitTotalPages(1);
-    setCatalogHasMore(false);
-    setAllAccumulatedPosts(new Map());
-    setMoviesdriveSelectedUrls(new Set());
+    resetCatalogSearch();
+    setMoviesdriveInitialSearchUrl(targetUrl);
+    visitedCatalogUrlsRef.current = new Set([targetUrl, normalizeUrl(targetUrl)]);
 
     setInput(targetUrl);
     setShowMoviesdriveSearchInput(false);
@@ -1685,13 +1781,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     // Clear cache & active search overlays for fresh search
     processedExtractionsRef.current.delete(normalizeUrl(targetUrl));
     processedExtractionsRef.current.delete(targetUrl);
-    setMoviesdriveSearchUrl(null);
-    setMoviesdriveSearchPosts([]);
-    setCatalogTotalFound(0);
-    setCatalogExplicitTotalPages(1);
-    setCatalogHasMore(false);
-    setAllAccumulatedPosts(new Map());
-    setMoviesdriveSelectedUrls(new Set());
+    resetCatalogSearch();
+    setMoviesdriveInitialSearchUrl(targetUrl);
+    visitedCatalogUrlsRef.current = new Set([targetUrl, normalizeUrl(targetUrl)]);
 
     setInput(targetUrl);
     setShowSkymoviesSearchInput(false);
@@ -1719,13 +1811,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     // Clear cache & active search overlays for fresh search
     processedExtractionsRef.current.delete(normalizeUrl(targetUrl));
     processedExtractionsRef.current.delete(targetUrl);
-    setMoviesdriveSearchUrl(null);
-    setMoviesdriveSearchPosts([]);
-    setCatalogTotalFound(0);
-    setCatalogExplicitTotalPages(1);
-    setCatalogHasMore(false);
-    setAllAccumulatedPosts(new Map());
-    setMoviesdriveSelectedUrls(new Set());
+    resetCatalogSearch();
+    setMoviesdriveInitialSearchUrl(targetUrl);
+    visitedCatalogUrlsRef.current = new Set([targetUrl, normalizeUrl(targetUrl)]);
 
     setInput(targetUrl);
     setShowFilmygoSearchInput(false);
@@ -1753,13 +1841,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     // Clear cache & active search overlays for fresh search
     processedExtractionsRef.current.delete(normalizeUrl(targetUrl));
     processedExtractionsRef.current.delete(targetUrl);
-    setMoviesdriveSearchUrl(null);
-    setMoviesdriveSearchPosts([]);
-    setCatalogTotalFound(0);
-    setCatalogExplicitTotalPages(1);
-    setCatalogHasMore(false);
-    setAllAccumulatedPosts(new Map());
-    setMoviesdriveSelectedUrls(new Set());
+    resetCatalogSearch();
+    setMoviesdriveInitialSearchUrl(targetUrl);
+    visitedCatalogUrlsRef.current = new Set([targetUrl, normalizeUrl(targetUrl)]);
 
     setInput(targetUrl);
     setShowHdhubSearchInput(false);
@@ -1788,13 +1872,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
     // Clear cache & active search overlays for fresh search
     processedExtractionsRef.current.delete(normalizeUrl(targetUrl));
     processedExtractionsRef.current.delete(targetUrl);
-    setMoviesdriveSearchUrl(null);
-    setMoviesdriveSearchPosts([]);
-    setCatalogTotalFound(0);
-    setCatalogExplicitTotalPages(1);
-    setCatalogHasMore(false);
-    setAllAccumulatedPosts(new Map());
-    setMoviesdriveSelectedUrls(new Set());
+    resetCatalogSearch();
+    setMoviesdriveInitialSearchUrl(targetUrl);
+    visitedCatalogUrlsRef.current = new Set([targetUrl, normalizeUrl(targetUrl)]);
 
     setInput(targetUrl);
     setShowFilmyflySearchInput(false);
@@ -1810,14 +1890,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
   const handleClose = useCallback(() => {
     if (moviesdriveSearchUrl) {
-      setMoviesdriveSearchUrl(null);
-      setMoviesdriveSearchPosts([]);
-      setAllAccumulatedPosts(new Map());
-      setMoviesdriveSelectedUrls(new Set());
-      setHasUserInteractedSelection(false);
-      setMoviesdriveSearchQuery("");
-      setMoviesdrivePageLoading(false);
-      setCustomPageInput("");
+      resetCatalogSearch();
     } else if (mdriveUrl) {
       setMdriveUrl(null);
       setMdriveResults([]);
@@ -1829,7 +1902,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     } else {
       onClose();
     }
-  }, [moviesdriveSearchUrl, mdriveUrl, onClose]);
+  }, [moviesdriveSearchUrl, mdriveUrl, onClose, resetCatalogSearch]);
 
   useModalBehavior(isOpen, handleClose);
 
@@ -2271,60 +2344,85 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
       const newLinksText = selectedPosts.map(p => p.url).join('\n');
       
-      processedExtractionsRef.current.add(moviesdriveSearchUrl);
+      // Mark all search URLs as permanently ignored and processed so they can never be re-extracted
+      if (moviesdriveSearchUrl) {
+        permanentlyIgnoredCatalogUrlsRef.current.add(moviesdriveSearchUrl);
+        permanentlyIgnoredCatalogUrlsRef.current.add(normalizeUrl(moviesdriveSearchUrl));
+        processedExtractionsRef.current.add(moviesdriveSearchUrl);
+        processedExtractionsRef.current.add(normalizeUrl(moviesdriveSearchUrl));
+      }
+      if (moviesdriveInitialSearchUrl) {
+        permanentlyIgnoredCatalogUrlsRef.current.add(moviesdriveInitialSearchUrl);
+        permanentlyIgnoredCatalogUrlsRef.current.add(normalizeUrl(moviesdriveInitialSearchUrl));
+        processedExtractionsRef.current.add(moviesdriveInitialSearchUrl);
+        processedExtractionsRef.current.add(normalizeUrl(moviesdriveInitialSearchUrl));
+      }
+      for (const u of visitedCatalogUrlsRef.current) {
+        permanentlyIgnoredCatalogUrlsRef.current.add(u);
+        permanentlyIgnoredCatalogUrlsRef.current.add(normalizeUrl(u));
+        processedExtractionsRef.current.add(u);
+        processedExtractionsRef.current.add(normalizeUrl(u));
+      }
 
       const currentInput = inputRef.current;
-      const targetSearchNorm = normalizeUrl(moviesdriveSearchUrl);
-
       let replaced = false;
       const lines = currentInput.split('\n');
-      const newLines = lines.map(line => {
+      const newLines: string[] = [];
+
+      for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed) return line;
-        if (trimmed === moviesdriveSearchUrl || normalizeUrl(trimmed) === targetSearchNorm || normalizeUrl(trimmed).includes(targetSearchNorm)) {
-          replaced = true;
-          return newLinksText;
+        if (isCatalogSearchUrl(trimmed) || permanentlyIgnoredCatalogUrlsRef.current.has(trimmed) || permanentlyIgnoredCatalogUrlsRef.current.has(normalizeUrl(trimmed))) {
+          if (!replaced) {
+            newLines.push(newLinksText);
+            replaced = true;
+          }
+          // Any other duplicate search URLs in the input are cleanly removed!
+        } else {
+          newLines.push(line);
         }
-        return line;
-      });
+      }
 
       let nextInput = newLines.join('\n');
       if (!replaced) {
-        const baseLink = moviesdriveSearchUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
-        const escapedBase = baseLink.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}/?`, 'gi');
-        nextInput = currentInput.replace(regex, newLinksText);
-      }
-
-      if (nextInput === currentInput) {
-        if (currentInput.includes(moviesdriveSearchUrl)) {
-          nextInput = currentInput.replace(moviesdriveSearchUrl, newLinksText);
-        } else {
-          nextInput = currentInput.trim() ? `${currentInput.trim()}\n${newLinksText}` : newLinksText;
+        // Fallback: replace using base URL regex or replace first line if it looks like a search
+        const baseLink = (moviesdriveInitialSearchUrl || moviesdriveSearchUrl || "").replace(/^https?:\/\//, '').replace(/\/$/, '');
+        if (baseLink) {
+          const escapedBase = baseLink.split('?')[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(`(https?://)?(www\\.)?${escapedBase}[^\\s\\n]*`, 'gi');
+          if (regex.test(currentInput)) {
+            nextInput = currentInput.replace(regex, newLinksText);
+            replaced = true;
+          }
+        }
+        if (!replaced) {
+          // Guarantee that the catalog search URL is NEVER kept in input:
+          // Filter out any line that could be the search URL or matches the catalog host/path
+          const nonSearchLines = lines.filter(line => {
+            const t = line.trim();
+            if (!t) return false;
+            return !isCatalogSearchUrl(t) && !permanentlyIgnoredCatalogUrlsRef.current.has(t) && !permanentlyIgnoredCatalogUrlsRef.current.has(normalizeUrl(t));
+          });
+          nextInput = nonSearchLines.length > 0 ? `${newLinksText}\n${nonSearchLines.join('\n')}` : newLinksText;
         }
       }
-      
-      console.log("Catalog Search Page Replacement:", { from: moviesdriveSearchUrl, count: selectedPosts.length, replaced: nextInput !== currentInput });
+
+      console.log("Catalog Search Page Replacement:", {
+        fromInitial: moviesdriveInitialSearchUrl,
+        fromCurrent: moviesdriveSearchUrl,
+        count: selectedPosts.length,
+        replaced: nextInput !== currentInput
+      });
+
       setInput(nextInput);
-      
-      setMoviesdriveSearchUrl(null);
-      setMoviesdriveSearchPosts([]);
-      setAllAccumulatedPosts(new Map());
-      setMoviesdriveSelectedUrls(new Set());
-      setHasUserInteractedSelection(false);
-      setMoviesdriveSearchQuery("");
-      
+      inputRef.current = nextInput;
+
+      resetCatalogSearch();
+
       setTimeout(() => {
         handleCheck(undefined, nextInput);
       }, 400);
     } else if (moviesdriveSearchUrl) {
-      processedExtractionsRef.current.add(moviesdriveSearchUrl);
-      setMoviesdriveSearchUrl(null);
-      setMoviesdriveSearchPosts([]);
-      setAllAccumulatedPosts(new Map());
-      setMoviesdriveSelectedUrls(new Set());
-      setHasUserInteractedSelection(false);
-      setMoviesdriveSearchQuery("");
+      resetCatalogSearch();
     }
   };
 
@@ -2332,6 +2430,11 @@ export const LinkCheckerModal: React.FC<Props> = ({
     setError(null);
     if (depth === 0) {
       processedExtractionsRef.current.clear();
+      // Re-seed permanently ignored catalog URLs so completed catalog search queries are NEVER re-scanned!
+      for (const u of permanentlyIgnoredCatalogUrlsRef.current) {
+        processedExtractionsRef.current.add(u);
+        processedExtractionsRef.current.add(normalizeUrl(u));
+      }
     }
     if (depth > 10) {
       console.warn("Max check depth reached, stopping recursion.");
@@ -2346,6 +2449,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     let currentLinks = (onlyUrls || splitLinks(currentInputSnapshot).map(normalizeUrl).filter(Boolean)).filter(u => {
       const norm = normalizeUrl(u);
       if (!norm || seenLinks.has(norm)) return false;
+      if (permanentlyIgnoredCatalogUrlsRef.current.has(u) || permanentlyIgnoredCatalogUrlsRef.current.has(norm)) return false;
       seenLinks.add(norm);
       return true;
     });
@@ -2434,22 +2538,32 @@ export const LinkCheckerModal: React.FC<Props> = ({
             return { index: idx, searchTitle, searchYear, searchType };
           });
 
-          setBatchSearchStatus({ completed: 0, total: itemsToProcess.length });
+          // Concurrent batch search: process 5 to 15 titles simultaneously at once (for 4 movies, search all 4 at once)
+          const BATCH_CONCURRENCY = 15;
+          const initialActiveCount = Math.min(BATCH_CONCURRENCY, itemsToProcess.length);
+          setBatchSearchStatus({ completed: 0, total: itemsToProcess.length, activeCount: initialActiveCount });
 
-          const BATCH_CONCURRENCY = 3;
           let queueIdx = 0;
           let completed = 0;
+          const activeTitles = new Set<string>();
+
+          const updateBatchStatus = () => {
+            const list = Array.from(activeTitles);
+            setBatchSearchStatus({
+              completed,
+              total: itemsToProcess.length,
+              currentTitle: list.slice(0, 4).join(', ') + (list.length > 4 ? ` (+${list.length - 4} more)` : ''),
+              activeCount: list.length,
+            });
+          };
 
           const worker = async () => {
             while (queueIdx < itemsToProcess.length) {
               const item = itemsToProcess[queueIdx++];
               if (!item) break;
 
-              setBatchSearchStatus({
-                completed,
-                total: itemsToProcess.length,
-                currentTitle: item.searchTitle,
-              });
+              activeTitles.add(item.searchTitle);
+              updateBatchStatus();
 
               try {
                 const res = await runWaterfallLinkSearch({
@@ -2480,12 +2594,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
               } catch (err) {
                 console.error(`Error searching bulk title "${item.searchTitle}":`, err);
               } finally {
+                activeTitles.delete(item.searchTitle);
                 completed++;
-                setBatchSearchStatus({
-                  completed,
-                  total: itemsToProcess.length,
-                  currentTitle: item.searchTitle,
-                });
+                updateBatchStatus();
               }
             }
           };
@@ -2645,6 +2756,8 @@ export const LinkCheckerModal: React.FC<Props> = ({
               markProcessed(res.original);
               if (Array.isArray(res.data?.posts) && res.data.posts.length > 0) {
                 setMoviesdriveSearchUrl(res.original);
+                setMoviesdriveInitialSearchUrl(res.original);
+                visitedCatalogUrlsRef.current = new Set([res.original, normalizeUrl(res.original)]);
                 setMoviesdriveSearchPosts(res.data.posts);
                 const postsCount = res.data.posts.length;
                 const total = typeof res.data.total_found === 'number' ? res.data.total_found : (typeof res.data.found === 'number' ? res.data.found : postsCount);
@@ -4115,17 +4228,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         <button 
                           type="button"
                           onClick={() => {
-                            processedExtractionsRef.current.add(moviesdriveSearchUrl);
-                            setMoviesdriveSearchUrl(null);
-                            setMoviesdriveSearchPosts([]);
-                            setAllAccumulatedPosts(new Map());
-                            setMoviesdriveSelectedUrls(new Set());
-                            setHasUserInteractedSelection(false);
-                            setMoviesdriveSearchQuery("");
-                            setSkymoviesTotalFound(0);
-                            setSkymoviesHasMore(false);
-                            setSkymoviesLoadingMore(false);
-                            setSkymoviesVisibleLimit(500);
+                            if (moviesdriveSearchUrl) processedExtractionsRef.current.add(moviesdriveSearchUrl);
+                            if (moviesdriveInitialSearchUrl) processedExtractionsRef.current.add(moviesdriveInitialSearchUrl);
+                            resetCatalogSearch();
                           }}
                           className="text-xs font-bold text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-700 transition cursor-pointer"
                         >
@@ -4481,16 +4586,9 @@ export const LinkCheckerModal: React.FC<Props> = ({
                         <button 
                           type="button"
                           onClick={() => {
-                            setMoviesdriveSearchUrl(null);
-                            setMoviesdriveSearchPosts([]);
-                            setAllAccumulatedPosts(new Map());
-                            setMoviesdriveSelectedUrls(new Set());
-                            setHasUserInteractedSelection(false);
-                            setMoviesdriveSearchQuery("");
-                            setSkymoviesTotalFound(0);
-                            setSkymoviesHasMore(false);
-                            setSkymoviesLoadingMore(false);
-                            setSkymoviesVisibleLimit(500);
+                            if (moviesdriveSearchUrl) processedExtractionsRef.current.add(moviesdriveSearchUrl);
+                            if (moviesdriveInitialSearchUrl) processedExtractionsRef.current.add(moviesdriveInitialSearchUrl);
+                            resetCatalogSearch();
                           }}
                           className="px-3.5 py-2 rounded-xl text-xs font-bold text-zinc-500 hover:text-zinc-700 dark:hover:text-white transition-colors bg-zinc-100 dark:bg-zinc-800 cursor-pointer"
                         >
@@ -5505,7 +5603,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                 />
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <button onClick={() => handleCheck()} disabled={loading} className="inline-flex items-center justify-center rounded-xl gap-1.5 bg-cyan-500 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-cyan-600 dark:hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm">{loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{loading ? (batchSearchStatus ? `Batch Checking (${batchSearchStatus.completed}/${batchSearchStatus.total})...` : (titleImportWaterfall && !links.length ? "Searching Waterfall..." : "Checking...")) : links.length > 0 ? `Check ${links.length} Link${links.length > 1 ? "s" : ""}` : (titleImportWaterfall ? "Search Waterfall" : "Check Links")}</button>
+                  <button onClick={() => handleCheck()} disabled={loading} className="inline-flex items-center justify-center rounded-xl gap-1.5 bg-cyan-500 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-cyan-600 dark:hover:bg-cyan-400 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm">{loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}{loading ? (batchSearchStatus ? `Batch Checking (${batchSearchStatus.completed}/${batchSearchStatus.total}${batchSearchStatus.activeCount ? ` • ${batchSearchStatus.activeCount} active` : ''})...` : (titleImportWaterfall && !links.length ? "Searching Waterfall..." : "Checking...")) : links.length > 0 ? `Check ${links.length} Link${links.length > 1 ? "s" : ""}` : (titleImportWaterfall ? "Search Waterfall" : "Check Links")}</button>
                   <button 
                     onClick={() => {
                       const trimmedInput = input.trim();
@@ -5677,14 +5775,14 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
                 {loading && batchSearchStatus && (
                   <div className="w-full bg-indigo-500/10 border border-indigo-500/30 rounded-2xl p-4 flex flex-col gap-2.5 animate-in fade-in duration-200">
-                    <div className="flex items-center justify-between text-xs font-bold">
+                    <div className="flex items-center justify-between text-xs font-bold gap-2 flex-wrap">
                       <span className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Batch Waterfall Search: {batchSearchStatus.completed} of {batchSearchStatus.total} checked in parallel
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                        Batch Waterfall Search: {batchSearchStatus.completed} of {batchSearchStatus.total} completed ({batchSearchStatus.activeCount !== undefined ? `${batchSearchStatus.activeCount} searching at once` : 'searching in parallel'})
                       </span>
                       {batchSearchStatus.currentTitle && (
-                        <span className="text-zinc-600 dark:text-zinc-300 truncate max-w-[260px]">
-                          Checking: {batchSearchStatus.currentTitle}
+                        <span className="text-zinc-600 dark:text-zinc-300 truncate max-w-[360px]" title={batchSearchStatus.currentTitle}>
+                          Searching: {batchSearchStatus.currentTitle}
                         </span>
                       )}
                     </div>

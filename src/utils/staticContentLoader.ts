@@ -169,12 +169,21 @@ export function getCachedContentData(includeStatic: boolean = true): {
   };
 }
 
+export function sortAuxiliaryByOrder<T extends { order?: number; name?: string }>(items: T[]): T[] {
+  return [...items].sort((a, b) => {
+    const aOrder = typeof a.order === 'number' ? a.order : 999;
+    const bOrder = typeof b.order === 'number' ? b.order : 999;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+}
+
 function getCachedGenres(includeStatic: boolean = true): Genre[] {
   const g = safeStorage.getItem('genres_cache');
   if (g) {
     try {
       const parsed = JSON.parse(g);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) return sortAuxiliaryByOrder(parsed);
     } catch (e) {}
   }
   if (includeStatic) {
@@ -182,10 +191,10 @@ function getCachedGenres(includeStatic: boolean = true): Genre[] {
     if (sg) {
       try {
         const parsed = JSON.parse(sg);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return sortAuxiliaryByOrder(parsed);
       } catch (e) {}
     }
-    return getStaticExportMetadata().genres;
+    return sortAuxiliaryByOrder(getStaticExportMetadata().genres);
   }
   return [];
 }
@@ -195,7 +204,7 @@ function getCachedLanguages(includeStatic: boolean = true): Language[] {
   if (l) {
     try {
       const parsed = JSON.parse(l);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) return sortAuxiliaryByOrder(parsed);
     } catch (e) {}
   }
   if (includeStatic) {
@@ -203,10 +212,10 @@ function getCachedLanguages(includeStatic: boolean = true): Language[] {
     if (sl) {
       try {
         const parsed = JSON.parse(sl);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return sortAuxiliaryByOrder(parsed);
       } catch (e) {}
     }
-    return getStaticExportMetadata().languages;
+    return sortAuxiliaryByOrder(getStaticExportMetadata().languages);
   }
   return [];
 }
@@ -216,7 +225,7 @@ function getCachedQualities(includeStatic: boolean = true): Quality[] {
   if (q) {
     try {
       const parsed = JSON.parse(q);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) return sortAuxiliaryByOrder(parsed);
     } catch (e) {}
   }
   if (includeStatic) {
@@ -224,10 +233,10 @@ function getCachedQualities(includeStatic: boolean = true): Quality[] {
     if (sq) {
       try {
         const parsed = JSON.parse(sq);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) return sortAuxiliaryByOrder(parsed);
       } catch (e) {}
     }
-    return getStaticExportMetadata().qualities;
+    return sortAuxiliaryByOrder(getStaticExportMetadata().qualities);
   }
   return [];
 }
@@ -576,9 +585,9 @@ export function getStaticExportMetadata(): {
   qualities: Quality[];
 } {
   return {
-    genres: (staticMetadataData.genres || []) as Genre[],
-    languages: (staticMetadataData.languages || []) as Language[],
-    qualities: (staticMetadataData.qualities || []) as Quality[]
+    genres: sortAuxiliaryByOrder((staticMetadataData.genres || []) as Genre[]),
+    languages: sortAuxiliaryByOrder((staticMetadataData.languages || []) as Language[]),
+    qualities: sortAuxiliaryByOrder((staticMetadataData.qualities || []) as Quality[])
   };
 }
 

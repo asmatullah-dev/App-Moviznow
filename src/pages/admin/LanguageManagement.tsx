@@ -9,7 +9,7 @@ import { useModalBehavior } from '../../hooks/useModalBehavior';
 import { useAdminContent } from '../../contexts/AdminContentContext';
 
 export default function LanguageManagement() {
-  const { languages, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem } = useAdminContent();
+  const { languages, addAuxiliaryItem, updateAuxiliaryItem, deleteAuxiliaryItem, updateAuxiliaryCollection } = useAdminContent();
   const [newLanguage, setNewLanguage] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -30,7 +30,7 @@ export default function LanguageManagement() {
     if (!newLanguage.trim()) return;
     setProcessing(prev => ({ ...prev, add: true }));
     try {
-      const maxOrder = languages.length > 0 ? Math.max(...languages.map(l => l.order || 0)) : 0;
+      const maxOrder = languages.length > 0 ? Math.max(...languages.map(l => (typeof l.order === 'number' ? l.order : 0))) : -1;
       await addAuxiliaryItem('language', { name: newLanguage.trim(), order: maxOrder + 1 });
       setNewLanguage('');
     } finally {
@@ -74,10 +74,12 @@ export default function LanguageManagement() {
     const [reorderedItem] = items.splice(result.source.index, 1);
     items.splice(result.destination.index, 0, reorderedItem);
 
-    // Batch update order using context
-    await Promise.all(items.map((item, index) => 
-      updateAuxiliaryItem('language', item.id, { order: index })
-    ));
+    // Atomically reassign sequential order 0..N and update collection
+    const reorderedWithIndices = items.map((item, index) => ({
+      ...item,
+      order: index
+    }));
+    await updateAuxiliaryCollection('language', reorderedWithIndices);
   };
 
   const filteredLanguages = useMemo(() => {
