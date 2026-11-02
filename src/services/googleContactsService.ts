@@ -582,33 +582,32 @@ export function formatContactName(user: UserProfile, existingContactName?: strin
   const isAdminOrOwner = roleLower === 'admin' || roleLower === 'owner';
   const isUserRole = !isVip && !isBasic && !isTrial && !isSelectedContent && !isContentManager && !isUserManager && !isManager && !isAdminOrOwner;
 
-  // User (Role) with Pending Status: AUPending [Name] ([City])
-  // A = App, U = User (Role), Pending = Status (no expiry date needed because of pending status)
-  const isPending = isUserRole && (user.status === 'pending' || !user.status);
+  let prefixCode = 'AU';
+  if (isVip) {
+    prefixCode = 'AV';
+  } else if (isBasic) {
+    prefixCode = 'AB';
+  } else if (isTrial) {
+    prefixCode = 'AT';
+  } else if (isSelectedContent) {
+    prefixCode = 'ASC';
+  } else if (isContentManager) {
+    prefixCode = 'ACM';
+  } else if (isUserManager) {
+    prefixCode = 'AUM';
+  } else if (isManager) {
+    prefixCode = 'AM';
+  } else if (isAdminOrOwner) {
+    prefixCode = 'AA';
+  }
+
+  // Any role with status 'pending' (or if status missing for default user role) is pending
+  const isPending = user.status === 'pending' || (isUserRole && !user.status);
 
   let newPrefix = '';
   if (isPending) {
-    newPrefix = 'AUPending';
+    newPrefix = `${prefixCode}Pending`;
   } else {
-    let prefixCode = 'AU';
-    if (isVip) {
-      prefixCode = 'AV';
-    } else if (isBasic) {
-      prefixCode = 'AB';
-    } else if (isTrial) {
-      prefixCode = 'AT';
-    } else if (isSelectedContent) {
-      prefixCode = 'ASC';
-    } else if (isContentManager) {
-      prefixCode = 'ACM';
-    } else if (isUserManager) {
-      prefixCode = 'AUM';
-    } else if (isManager) {
-      prefixCode = 'AM';
-    } else if (isAdminOrOwner) {
-      prefixCode = 'AA';
-    }
-
     const expired = user.status === 'expired' || (!!user.expiryDate && user.expiryDate !== 'Lifetime' && isUserExpired(user.expiryDate));
     const statusPrefix = expired ? 'Exd ' : '';
 
@@ -2000,6 +1999,8 @@ export async function compareUsersWithGoogleContacts(
 
         if (oldPrefixClean.includes('PENDING') && !newPrefixClean.includes('PENDING')) {
           reason = `Activated: ${oldPrefix} ➔ ${newPrefix}`;
+        } else if (!oldPrefixClean.includes('PENDING') && newPrefixClean.includes('PENDING')) {
+          reason = `Pending status: ${oldPrefix} ➔ ${newPrefix}`;
         } else if (oldTier && newTier && oldTier !== newTier) {
           reason = `Role prefix replacement: ${oldTier} ➔ ${newTier} (${user.role.toUpperCase()})`;
         } else if (!oldPrefixClean.startsWith('EXD') && newPrefixClean.startsWith('EXD')) {
