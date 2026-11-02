@@ -232,8 +232,19 @@ export const isPreciseTitleMatch = (postCleanTitle: string, contentRawTitle: str
   // Exact token match
   if (pTokens.join(' ') === cTokens.join(' ')) return true;
 
-  // Token containment: all core target tokens are present in post tokens in order
-  if (cTokens.length >= 1 && pTokens.length >= cTokens.length) {
+  // Single-word target title (e.g. "Haq", "Don", "Hero", "War", "Leo", "PK"):
+  // Must match exactly or with sequel tag (e.g. "Don 2") - never arbitrary multi-word titles!
+  if (cTokens.length === 1) {
+    if (pTokens.length === 1 && pTokens[0] === cTokens[0]) return true;
+    if (pTokens.length === 2 && pTokens[0] === cTokens[0] && (pSeq || !isNaN(Number(pTokens[1])))) {
+      return pSeq === cSeq;
+    }
+    return false;
+  }
+
+  // Token containment for multi-word target titles:
+  // All core target tokens must be present in order and post cannot have more than 2-3 extra words
+  if (cTokens.length >= 2 && pTokens.length >= cTokens.length && pTokens.length - cTokens.length <= 3) {
     let cIdx = 0;
     for (let i = 0; i < pTokens.length; i++) {
       if (pTokens[i] === cTokens[cIdx]) {

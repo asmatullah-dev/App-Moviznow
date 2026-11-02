@@ -3780,8 +3780,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         window.localStorage.removeItem("last_known_logged_in_user");
       } catch (e) {}
     }
+
+    const leavingUid = auth.currentUser?.uid;
+    // Clear device user owner cache so next login or guest doesn't assume old user identity
+    try {
+      safeStorage.removeItem("device_fcm_user_owner");
+      safeStorage.removeItem("device_fcm_synced_token");
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem("device_fcm_user_owner");
+        window.localStorage.removeItem("device_fcm_synced_token");
+      }
+    } catch (e) {}
+
+    const activeToken = safeStorage.getItem("active_fcm_token") || (typeof window !== "undefined" && window.localStorage ? window.localStorage.getItem("active_fcm_token") : null);
+    if (activeToken) {
+      // Transition device back to guest in background so user's private alerts stop on this device
+      fetch("/api/notifications/transition-to-guest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: activeToken,
+          userId: leavingUid,
+          deviceId: safeStorage.getItem("moviznow_device_id") || (typeof window !== "undefined" && window.localStorage ? window.localStorage.getItem("moviznow_device_id") : undefined)
+        })
+      }).catch(() => {});
+    }
+
     persistProfileCache(null);
-    purgeAllUserDataCache(auth.currentUser?.uid, profile?.email);
+    purgeAllUserDataCache(leavingUid, profile?.email);
     setProfile(null);
     setUser(null);
 

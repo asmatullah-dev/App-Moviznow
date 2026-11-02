@@ -436,8 +436,9 @@ async function sendFcmExpiryNotification(userId: string, expiryDateStr: string) 
             if (directTokens.length >= 5) break;
           }
 
-          if (directTokens.length > 0) {
-            const tokenMessages = directTokens.map(token => ({
+          const uniqueTokens = Array.from(new Set(directTokens));
+          if (uniqueTokens.length > 0) {
+            const tokenMessages = uniqueTokens.map(token => ({
               ...message,
               token,
               topic: undefined,
@@ -1117,8 +1118,9 @@ export async function sendMembershipUpdateNotification(params: MembershipUpdateP
             if (directTokens.length >= 5) break;
           }
 
-          if (directTokens.length > 0) {
-            const tokenMessages = directTokens.map(token => ({
+          const uniqueTokens = Array.from(new Set(directTokens));
+          if (uniqueTokens.length > 0) {
+            const tokenMessages = uniqueTokens.map(token => ({
               ...message,
               token,
               topic: undefined,
@@ -1126,7 +1128,7 @@ export async function sendMembershipUpdateNotification(params: MembershipUpdateP
             const directRes = await admin.messaging().sendEach(tokenMessages);
             if (directRes.successCount > 0) {
               fcmSent = true;
-              console.log(`[Membership Update] FCM direct tokens delivered (${directRes.successCount}/${directTokens.length}) for user ${userId}`);
+              console.log(`[Membership Update] FCM direct tokens delivered (${directRes.successCount}/${uniqueTokens.length}) for user ${userId}`);
             }
           }
         } catch (tokenErr: any) {

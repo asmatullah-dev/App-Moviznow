@@ -111,46 +111,133 @@ export const checkIsBrowserFcmCapable = (): boolean => {
 export const analyticsPromise: Promise<any> = Promise.resolve(null);
 export let analytics: any = null;
 
-export const getGuestDeviceId = (): string => {
-  if (typeof window === 'undefined') return 'guest_server';
-  let guestId = safeStorage.getItem('guest_device_id');
-  if (!guestId) {
-    guestId = 'guest_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString(36);
-    safeStorage.setItem('guest_device_id', guestId);
+export const getDeviceId = (): string => {
+  if (typeof window === 'undefined') return 'device_server';
+  let deviceId = safeStorage.getItem('moviznow_device_id');
+  if (!deviceId && window.localStorage) {
+    try {
+      deviceId = window.localStorage.getItem('moviznow_device_id') || window.localStorage.getItem('guest_device_id');
+    } catch (e) {}
   }
-  return guestId;
+  if (!deviceId) {
+    deviceId = safeStorage.getItem('guest_device_id');
+  }
+  if (!deviceId) {
+    deviceId = 'dev_' + Math.random().toString(36).substring(2, 11) + '_' + Date.now().toString(36);
+  }
+  safeStorage.setItem('moviznow_device_id', deviceId);
+  safeStorage.setItem('guest_device_id', deviceId);
+  try {
+    window.localStorage.setItem('moviznow_device_id', deviceId);
+    window.localStorage.setItem('guest_device_id', deviceId);
+  } catch (e) {}
+  return deviceId;
 };
 
-// Function to safely merge / update a guest FCM token to a logged-in user upon login
+export const getGuestDeviceId = getDeviceId;
+
+// Function to safely merge / update a guest or device FCM token to a logged-in user upon login
 export const syncGuestFcmToUser = async (userId: string, userEmail?: string) => {
   if (typeof window === 'undefined') return;
   try {
-    const guestToken = safeStorage.getItem('guest_fcm_token');
-    // Fast exit: if no guest token waiting to be merged, do 0 requests and 0 reads/writes
-    if (!guestToken) {
+    const activeToken = safeStorage.getItem('active_fcm_token')
+      || (window.localStorage ? window.localStorage.getItem('active_fcm_token') : null)
+      || safeStorage.getItem('guest_fcm_token')
+      || (window.localStorage ? window.localStorage.getItem('guest_fcm_token') : null);
+
+    // If no token exists on this device yet, nothing to sync
+    if (!activeToken) {
       return;
     }
-    const guestId = safeStorage.getItem('guest_device_id');
-    
-    // 1. Notify backend to transition FCM topic subscriptions
+
+    const deviceId = getDeviceId();
+    const lastSyncedUser = safeStorage.getItem('device_fcm_user_owner') || (window.localStorage ? window.localStorage.getItem('device_fcm_user_owner') : null);
+    const lastSyncedToken = safeStorage.getItem('device_fcm_synced_token') || (window.localStorage ? window.localStorage.getItem('device_fcm_synced_token') : null);
+
+    // Fast path: If this token was already confirmed synced to this exact user, skip redundant calls
+    if (lastSyncedUser === userId && lastSyncedToken === activeToken) {
+      return;
+    }
+
+    // 1. Notify backend to transition token in registry from guest (or old user) to this user & update topics
     try {
       await fetch('/api/notifications/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          token: guestToken,
+          token: activeToken,
           userId: userId,
+          email: userEmail || auth.currentUser?.email || undefined,
           isGuest: false,
-          previousGuestId: guestId || undefined
+          deviceId: deviceId
         })
       });
-    } catch (e) {}
+    } catch (e) {
+      console.warn("Could not transition FCM token to user via API:", e);
+    }
 
-    // Clear guest-specific flags immediately so this never runs again
+    // 2. Clear guest-specific flags and record current user ownership for this device token
     safeStorage.removeItem('guest_fcm_token');
     safeStorage.removeItem('guest_fcm_registered');
+    safeStorage.setItem('device_fcm_user_owner', userId);
+    safeStorage.setItem('device_fcm_synced_token', activeToken);
+    try {
+      window.localStorage.removeItem('guest_fcm_token');
+      window.localStorage.removeItem('guest_fcm_registered');
+      window.localStorage.setItem('device_fcm_user_owner', userId);
+      window.localStorage.setItem('device_fcm_synced_token', activeToken);
+    } catch (e) {}
+
     const CACHE_KEY = `fcm_token_v4_last_update_${userId}`;
-    safeStorage.setItem(CACHE_KEY, JSON.stringify({ token: guestToken, timestamp: Date.now(), userId, isGuest: false }));
+    const cachePayload = JSON.stringify({ token: activeToken, timestamp: Date.now(), userId, isGuest: false });
+    safeStorage.setItem(CACHE_KEY, cachePayload);
+    try {
+      window.localStorage.setItem(CACHE_KEY, cachePayload);
+    } catch (e) {}
+
+    // 3. Ensure user document in Firestore has fcmToken set
+    try {
+      const userDocRef = doc(db, 'users', userId);
+      await runWithNetwork(() => setDoc(userDocRef, {
+        fcmToken: activeToken,
+        fcmTokenUpdatedAt: new Date().toISOString(),
+        notification: 'yes',
+        isFcmDisabled: false
+      }, { merge: true })).catch(() => {});
+    } catch (e) {}
+
+    // 4. Update fcm_tokens/registry directly to ensure guest token becomes user token
+    try {
+      const nowPkt = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
+      const registryDocRef = doc(db, 'fcm_tokens', 'registry');
+      await runWithNetwork(() => setDoc(registryDocRef, {
+        tokens: {
+          [activeToken]: {
+            u: userId,
+            e: userEmail || auth.currentUser?.email || 'n',
+            d: nowPkt,
+            did: deviceId
+          }
+        },
+        updatedAt: new Date().toISOString()
+      }, { merge: true })).catch(() => {});
+    } catch (e) {}
+
+    // 4. Update profile cache
+    try {
+      const cachedStr = safeStorage.getItem('profile_cache') || (window.localStorage ? window.localStorage.getItem('profile_cache') : null);
+      if (cachedStr) {
+        const profileCache = JSON.parse(cachedStr);
+        profileCache.notification = 'yes';
+        profileCache.fcmToken = activeToken;
+        profileCache.isFcmDisabled = false;
+        const json = JSON.stringify(profileCache);
+        safeStorage.setItem('profile_cache', json);
+        try { window.localStorage.setItem('profile_cache', json); } catch (e) {}
+        window.dispatchEvent(new CustomEvent('user_profile_updated', { detail: profileCache }));
+        window.dispatchEvent(new Event('profile_cache_updated'));
+      }
+    } catch (e) {}
   } catch (err) {
     console.warn("Error syncing guest FCM to logged in user:", err);
   }
@@ -181,8 +268,9 @@ export const requestNotificationPermission = async (force: boolean = false): Pro
       const permission = await Notification.requestPermission();
       if (permission === 'granted') {
         const isUser = !!auth.currentUser?.uid;
-        const guestId = !isUser ? getGuestDeviceId() : null;
+        const deviceId = getDeviceId();
         const currentUserId = auth.currentUser?.uid || 'guest';
+        const currentUserEmail = auth.currentUser?.email || undefined;
         const CACHE_KEY = `fcm_token_v4_last_update_${currentUserId}`;
         let lastUpdate = safeStorage.getItem(CACHE_KEY);
         if (!lastUpdate && typeof window !== 'undefined' && window.localStorage) {
@@ -197,8 +285,12 @@ export const requestNotificationPermission = async (force: boolean = false): Pro
 
         // Fast path before doing network / SW lookups if we already have an active token cached
         const activeLocalToken = safeStorage.getItem('active_fcm_token') || (typeof window !== 'undefined' ? window.localStorage?.getItem('active_fcm_token') : null);
+        const lastSyncedUser = safeStorage.getItem('device_fcm_user_owner') || (typeof window !== 'undefined' && window.localStorage ? window.localStorage.getItem('device_fcm_user_owner') : null);
+
         if (!force && activeLocalToken && parsedCache && parsedCache.token === activeLocalToken && (now - (parsedCache.timestamp || 0) < 30 * 24 * 60 * 60 * 1000)) {
-          return activeLocalToken;
+          if (!isUser || lastSyncedUser === currentUserId) {
+            return activeLocalToken;
+          }
         }
 
         // Register and await active service worker
@@ -231,6 +323,8 @@ export const requestNotificationPermission = async (force: boolean = false): Pro
           tokenOptions.vapidKey = vapidKey;
         }
 
+        const previousToken = safeStorage.getItem('active_fcm_token') || (typeof window !== 'undefined' && window.localStorage ? window.localStorage.getItem('active_fcm_token') : null);
+
         let token: string | null = null;
         try {
           token = await getToken(messaging, tokenOptions);
@@ -247,9 +341,25 @@ export const requestNotificationPermission = async (force: boolean = false): Pro
           // Cache active FCM token locally
           safeStorage.setItem('active_fcm_token', token);
           try { window.localStorage.setItem('active_fcm_token', token); } catch (e) {}
+
           if (!isUser) {
             safeStorage.setItem('guest_fcm_token', token);
             safeStorage.setItem('guest_fcm_registered', 'true');
+            try {
+              window.localStorage.setItem('guest_fcm_token', token);
+              window.localStorage.setItem('guest_fcm_registered', 'true');
+            } catch (e) {}
+          } else {
+            safeStorage.setItem('device_fcm_user_owner', currentUserId);
+            safeStorage.setItem('device_fcm_synced_token', token);
+            safeStorage.removeItem('guest_fcm_token');
+            safeStorage.removeItem('guest_fcm_registered');
+            try {
+              window.localStorage.setItem('device_fcm_user_owner', currentUserId);
+              window.localStorage.setItem('device_fcm_synced_token', token);
+              window.localStorage.removeItem('guest_fcm_token');
+              window.localStorage.removeItem('guest_fcm_registered');
+            } catch (e) {}
           }
 
           // Fast path: If token is already cached for this user/device, skip all Firestore reads and writes
@@ -272,9 +382,10 @@ export const requestNotificationPermission = async (force: boolean = false): Pro
               body: JSON.stringify({ 
                 token, 
                 userId: isUser ? auth.currentUser!.uid : undefined,
-                email: isUser ? auth.currentUser?.email : undefined,
+                email: isUser ? currentUserEmail : undefined,
                 isGuest: !isUser,
-                guestId: !isUser ? guestId : undefined
+                deviceId: deviceId,
+                previousToken: (previousToken && previousToken !== token) ? previousToken : undefined
               })
             });
             if (res.ok) apiSubscribed = true;
@@ -286,18 +397,23 @@ export const requestNotificationPermission = async (force: boolean = false): Pro
           if (!apiSubscribed) {
             try {
               const nowPkt = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
-              const tokenEntry = {
+              const tokenEntry: Record<string, any> = {
                 u: isUser ? auth.currentUser!.uid : 'guest',
                 e: isUser && auth.currentUser?.email ? auth.currentUser.email : 'n',
-                d: nowPkt
+                d: nowPkt,
+                did: deviceId
               };
               const registryDocRef = doc(db, 'fcm_tokens', 'registry');
-              await runWithNetwork(() => setDoc(registryDocRef, {
+              const updates: Record<string, any> = {
                 tokens: {
                   [token]: tokenEntry
                 },
                 updatedAt: new Date().toISOString()
-              }, { merge: true }));
+              };
+              if (previousToken && previousToken !== token) {
+                updates[`tokens.${previousToken}`] = deleteField();
+              }
+              await runWithNetwork(() => setDoc(registryDocRef, updates, { merge: true }));
             } catch (docErr) {
               console.warn("Could not write FCM token directly to Firestore:", docErr);
             }

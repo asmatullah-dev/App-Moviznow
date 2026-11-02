@@ -470,6 +470,7 @@ export async function checkContentViaLinkChecker(
   const {
     title = '',
     year,
+    type = 'movie',
     input = '',
     languages = [],
     qualities = [],
@@ -509,7 +510,7 @@ export async function checkContentViaLinkChecker(
           if (signal?.aborted) break;
           const posts = await scrapeFilmygoPosts(q, 1, signal);
           if (!posts.length) continue;
-          const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, year);
+          const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, year, type);
 
           for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
             if (signal?.aborted) break;
@@ -537,7 +538,7 @@ export async function checkContentViaLinkChecker(
           if (signal?.aborted) break;
           const posts = await scrapeHdhub4uPosts(q, signal);
           if (!posts.length) continue;
-          const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, year);
+          const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, year, type);
 
           for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
             if (signal?.aborted) break;
@@ -565,7 +566,7 @@ export async function checkContentViaLinkChecker(
           if (signal?.aborted) break;
           const posts = await scrapeSkymoviesPosts(q, signal);
           if (!posts.length) continue;
-          const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, year);
+          const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, year, type);
 
           for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
             if (signal?.aborted) break;
@@ -593,7 +594,7 @@ export async function checkContentViaLinkChecker(
           if (signal?.aborted) break;
           const posts = await scrapeMoviesdrivePosts(q, 1, signal);
           if (!posts.length) continue;
-          const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, year);
+          const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, year, type);
 
           for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
             if (signal?.aborted) break;
@@ -621,7 +622,7 @@ export async function checkContentViaLinkChecker(
           if (signal?.aborted) break;
           const posts = await scrapeFilmyflyPosts(q, 1, signal);
           if (!posts.length) continue;
-          const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, year);
+          const verifiedPosts = rankAndVerifyPosts(posts, cleanTitle, year, type);
 
           for (const p of verifiedPosts.slice(0, maxPostsPerProvider)) {
             if (signal?.aborted) break;
@@ -721,6 +722,66 @@ export async function checkContentViaLinkChecker(
   validResults.forEach((r, idx) => {
     const sourceText = `${r.fileName || ''} ${r.finalUrl || r.url || ''}`.toLowerCase();
     const isSample = Boolean(r.isSample || (r as any).is_sample || /\bsample\b/i.test(sourceText));
+
+    // 1. Strict Type Verification: If searching for movie, reject series/season/episode links
+    const hasSeriesMarkers = Boolean(
+      r.season !== undefined ||
+      r.episode !== undefined ||
+      r.isFullSeasonMKV ||
+      r.isFullSeasonZIP ||
+      /\b(s\d+|season\s*\d+|episodes?|ep\s*\d+|e\d+|complete\s*(web\s*)?series|web\s*series)\b/i.test(sourceText)
+    );
+
+    if (type === 'movie' && hasSeriesMarkers) {
+      return;
+    }
+    if (type === 'series' && !hasSeriesMarkers) {
+      if (/\b(full\s*movie|the\s*movie)\b/i.test(sourceText)) {
+        return;
+      }
+    }
+
+    // 2. Strict Title Verification if fileName is present
+    if (r.fileName && title) {
+      const fnParsed = extractTitleAndYear(r.fileName);
+      const isTitleMatched =
+        isPreciseTitleMatch(fnParsed.title, title) ||
+        isPreciseTitleMatch(r.fileName, title);
+
+      // If filename has an identifiable title and it does not match target title, reject!
+      if (!isTitleMatched && fnParsed.title && fnParsed.title.length > 1) {
+        return;
+      }
+    }
+
+    // 3. Strict Year Verification
+    if (year) {
+      const linkText = `${r.fileName || ''} ${r.finalUrl || r.url || ''}`;
+      const yearMatches = linkText.match(/\b(19\d{2}|20[0-2]\d)\b/g);
+      if (yearMatches && yearMatches.length > 0) {
+        const yearsFound = yearMatches.map((y) => parseInt(y, 10));
+        const exactMatch = yearsFound.includes(year);
+        if (!exactMatch) {
+          const hasFutureYear = yearsFound.some((y) => y > year);
+          const hasDistantYear = yearsFound.some((y) => Math.abs(y - year) > 1);
+          if (hasFutureYear || hasDistantYear) {
+            return;
+          }
+
+          // Past 1-year diff allowed only with verified title match
+          const hasPreviousYear = yearsFound.some((y) => y === year - 1);
+          if (hasPreviousYear) {
+            const fnParsed = r.fileName ? extractTitleAndYear(r.fileName) : null;
+            const isExactTitle = fnParsed?.title ? isPreciseTitleMatch(fnParsed.title, title) : false;
+            if (!isExactTitle) {
+              return;
+            }
+          } else {
+            return;
+          }
+        }
+      }
+    }
 
     const qCategory = getItemQualityCategory(r);
     const qualityStr = r.qualityLabel || qCategory;

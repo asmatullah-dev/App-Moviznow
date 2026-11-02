@@ -1,5 +1,10 @@
 import { Language, Quality, QualityLinks, LinkDef } from '../types';
 import { LinkCheckResult } from './linkScanner';
+import {
+  extractTitleAndYear,
+  isPreciseTitleMatch,
+  normalizeCleanForMatch,
+} from './titleMatcher';
 
 export type QualityCategory = '480p' | '720p' | '1080p' | '2160p' | 'Other';
 
@@ -1512,130 +1517,22 @@ export function deduplicateQualityLinks(
   }
 }
 
-/**
- * Extracts clean title, year, season, episode from text.
- */
-export function extractTitleAndYear(text: string): {
-  title?: string;
-  year?: number;
-  season?: number;
-  episode?: number;
-  isEpisodeRange?: boolean;
-} {
-  let year: number | undefined;
-  let title: string | undefined;
-  let season: number | undefined;
-  let episode: number | undefined;
-
-  let cleanText = text.trim();
-  cleanText = cleanText.replace(/^(?:sample|sample[-_.\s]+)/i, '').trim();
-  cleanText = cleanText.replace(/^(download|watch|stream|movie|series)\b\s*/i, '');
-
-  const isEpRange = isEpisodeRange(cleanText);
-
-  // Extract season and episode
-  const combinedMatch = cleanText.match(/\bs(\d+)e(\d+)(?![a-z0-9])/i) ||
-                        cleanText.match(/season\s*(\d+).*?episode\s*(\d+)/i) ||
-                        cleanText.match(/\bs(\d+)\s*e(\d+)\b/i);
-  if (combinedMatch) {
-    season = parseInt(combinedMatch[1], 10);
-    episode = parseInt(combinedMatch[2], 10);
-  } else {
-    const sMatch = cleanText.match(/\bs(\d+)\b/i) || cleanText.match(/season\s*(\d+)/i) || cleanText.match(/ss\s*(\d+)/i);
-    const eMatch = cleanText.match(/\be(\d+)\b/i) || cleanText.match(/episode\s*(\d+)\b/i) || cleanText.match(/ep\s*(\d+)\b/i);
-    if (sMatch) season = parseInt(sMatch[1], 10);
-    if (eMatch && !isEpRange) episode = parseInt(eMatch[1], 10);
-  }
-
-  // Detect year - look for bracketed year first (e.g. (2024), [2024]), or 4 digits (19xx or 20xx)
-  const bracketYearMatch = cleanText.match(/[\(\[]\s*(19\d{2}|20[0-2]\d)\s*[\)\]]/);
-  const yearPattern = /(?:\D|^)(19\d{2}|20[0-2]\d)(?:\D|$)/;
-  const yearMatch = bracketYearMatch || cleanText.match(yearPattern);
-
-  if (yearMatch) {
-    year = parseInt(yearMatch[1], 10);
-    const yearIndex = cleanText.indexOf(yearMatch[1]);
-    title = cleanText.substring(0, yearIndex).trim();
-  } else {
-    const noiseMarkers = [
-      '\\d{3,4}p', '[0-9]k', 'web[-.\\s_]?(dl|rip)',
-      'hd[-.\\s_]?rip', 'blu[-.\\s_]?ray', 'bd[-.\\s_]?rip',
-      'br[-.\\s_]?rip', 'v\\d+[-.\\s_]?hdtc', 'v\\d+', 'hq[-.\\s_]?hdtc', 'hdtc', 'hdcam', 'dvdrip', 'webrip',
-      'lines?', 'line',
-      'hq', 'proper', 'repack', 'internal', 'hevc', 'x264', 'x265', 'aac', 'ac3',
-      'dual[-.\\s_]?audio', 'multi[-.\\s_]?audio',
-      'hindi', 'english', 'tamil', 'telugu', 'malayalam', 'kannada', 'urdu', 'punjabi',
-      's\\d+e\\d+', 's\\d+', 'season', 'episode'
-    ];
-    const markerRegex = new RegExp(`\\b(${noiseMarkers.join('|')})\\b`, 'i');
-    const markerMatch = cleanText.match(markerRegex);
-
-    if (markerMatch) {
-      title = cleanText.substring(0, markerMatch.index).trim();
-    } else {
-      title = cleanText.trim();
-    }
-  }
-
-  if (title) {
-    title = title
-      .replace(/\.(mkv|mp4|zip|rar|avi|mov|wmv|flv|ts)$/i, '')
-      .replace(/[\[\]\(\)\{\}\.\-_/]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    title = title.replace(/^[🎬\s*]+/, '');
-
-    title = title
-      .replace(/\b(seasons?|s)\s*[-_]?\s*\d{1,2}\b/gi, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    title = title
-      .split(' ')
-      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-      .join(' ');
-
-    return { title: title || undefined, year, season, episode, isEpisodeRange: isEpRange };
-  }
-
-  return { title: undefined, year, season, episode, isEpisodeRange: isEpRange };
-}
-
-/**
- * Checks precise title match between two strings.
- */
-export function isPreciseTitleMatch(postTitle: string, targetTitle: string): boolean {
-  if (!postTitle || !targetTitle) return false;
-  const normalize = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-  const normPost = normalize(postTitle);
-  const normTarget = normalize(targetTitle);
-
-  if (normPost === normTarget) return true;
-  if (normPost.startsWith(normTarget) || normPost.includes(normTarget)) return true;
-
-  // Check word containment
-  const targetWords = normTarget.split(' ').filter((w) => w.length > 2);
-  if (targetWords.length > 0 && targetWords.every((w) => normPost.includes(w))) {
-    return true;
-  }
-
-  return false;
-}
+// Re-export canonical title extraction and matching utilities
+export { extractTitleAndYear, isPreciseTitleMatch };
 
 /**
  * Ranks and verifies posts discovered by title-only search:
  * - Checks exact or precise title match
- * - Verifies against expected release year when present (gives high priority to matching year)
- * - Penalizes posts with heavily conflicting release years
+ * - Enforces content type matching (strictly rejects series posts when searching for movie, and vice-versa)
+ * - Verifies against expected release year when present (giving highest priority to exact matching year)
+ * - Penalizes posts with conflicting release years or future mismatch years
  */
-export function rankAndVerifyPosts(posts: any[], targetTitle: string, expectedYear?: number): any[] {
+export function rankAndVerifyPosts(
+  posts: any[],
+  targetTitle: string,
+  expectedYear?: number,
+  expectedType: 'movie' | 'series' = 'movie'
+): any[] {
   if (!posts || posts.length === 0) return [];
 
   const cleanTarget = targetTitle
@@ -1650,8 +1547,25 @@ export function rankAndVerifyPosts(posts: any[], targetTitle: string, expectedYe
     const parsed = extractTitleAndYear(postTitle);
     const postCleanTitle = parsed.title || postTitle;
 
-    const isMatch = isPreciseTitleMatch(postCleanTitle, cleanTarget);
-    
+    // Detect Series indicators
+    const isSeries = Boolean(
+      parsed.season !== undefined ||
+      parsed.episode !== undefined ||
+      parsed.isEpisodeRange ||
+      /\b(season|seasons|s\d+|s\d+e\d+|series|web[-_\s]*series|tv[-_\s]*series|completed\s*web\s*series|episodes|ep\s*\d+|e\d+)\b/i.test(postTitle) ||
+      /\b(season|seasons|s\d+|series|tv-series|web-series)\b/i.test(p.url || '') ||
+      p.is_series || p.isSeries
+    );
+
+    let typeConflict = false;
+    if (expectedType === 'movie' && isSeries) {
+      typeConflict = true;
+    } else if (expectedType === 'series' && !isSeries && /\b(full\s*movie|movie|film)\b/i.test(postTitle) && !/\b(season|s\d+)\b/i.test(postTitle)) {
+      typeConflict = true;
+    }
+
+    const isMatch = !typeConflict && isPreciseTitleMatch(postCleanTitle, cleanTarget);
+
     let yearScore = 0;
     let yearConflict = false;
 
@@ -1670,38 +1584,58 @@ export function rankAndVerifyPosts(posts: any[], targetTitle: string, expectedYe
         if (diff === 0) {
           yearScore = 100;
         } else if (diff === 1) {
-          yearScore = 80;
+          // If title is exact, allow 1 year variance only if detectedYear <= expectedYear
+          // (e.g. 2024 movie released on OTT in 2025).
+          // But a 2025 movie being matched to a future 2026 series is a strict CONFLICT!
+          const isExactTitle = isPreciseTitleMatch(postCleanTitle, cleanTarget) &&
+            normalizeCleanForMatch(postCleanTitle) === normalizeCleanForMatch(cleanTarget);
+          if (isExactTitle && detectedYear <= expectedYear) {
+            yearScore = 75;
+          } else {
+            yearScore = -100;
+            yearConflict = true;
+          }
         } else {
           yearScore = -100;
           yearConflict = true;
         }
       } else {
         // No year detected in post title or URL
-        yearScore = 0;
+        yearScore = 50;
       }
     }
 
     return {
       post: p,
       isMatch,
+      typeConflict,
       yearScore,
       yearConflict,
       parsed,
     };
   });
 
-  // Filter out any post that is not a precise title match or has conflicting year
-  const matchingPosts = scored.filter((s) => s.isMatch && !s.yearConflict);
+  // Filter out any post that is not a precise title match, has conflicting type, or has conflicting year
+  const matchingPosts = scored.filter((s) => s.isMatch && !s.yearConflict && !s.typeConflict);
   if (matchingPosts.length === 0) {
     return [];
   }
 
   // When expectedYear is specified: strictly confirm with year!
-  // Only accept posts that confirmed the year (exact match or diff <= 1).
-  // If no post on the current page confirmed the year, return [] so the waterfall search
-  // continues searching subsequent pages (page 2, 3, etc.) or fallback queries until correctly found.
   if (expectedYear) {
-    const confirmedYearPosts = matchingPosts.filter((s) => s.yearScore >= 80);
+    // 1. Give highest priority to posts with exact matching release year (yearScore === 100)
+    const exactYearPosts = matchingPosts.filter((s) => s.yearScore === 100);
+    if (exactYearPosts.length > 0) {
+      exactYearPosts.sort((a, b) => {
+        const aExact = a.parsed.title?.toLowerCase() === cleanTarget.toLowerCase() ? 1 : 0;
+        const bExact = b.parsed.title?.toLowerCase() === cleanTarget.toLowerCase() ? 1 : 0;
+        return bExact - aExact;
+      });
+      return exactYearPosts.map((s) => s.post);
+    }
+
+    // 2. Fallback to posts with yearScore >= 75 only if no exact year post was found on this page
+    const confirmedYearPosts = matchingPosts.filter((s) => s.yearScore >= 75);
     if (confirmedYearPosts.length > 0) {
       confirmedYearPosts.sort((a, b) => b.yearScore - a.yearScore);
       return confirmedYearPosts.map((s) => s.post);

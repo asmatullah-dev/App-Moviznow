@@ -265,16 +265,62 @@ async function scanAndVerifyCandidates(
     const sourceText = `${r.fileName || ''} ${r.finalUrl || r.url || ''}`.toLowerCase();
     const isSample = Boolean(r.isSample || (r as any).is_sample || /\bsample\b/i.test(sourceText));
 
-    // If expected release year is specified, reject any link whose filename/URL explicitly conflicts with the year
+    // 1. Strict Type Verification: If searching for movie, reject series/season/episode links
+    const hasSeriesMarkers = Boolean(
+      r.season !== undefined ||
+      r.episode !== undefined ||
+      r.isFullSeasonMKV ||
+      r.isFullSeasonZIP ||
+      /\b(s\d+|season\s*\d+|episodes?|ep\s*\d+|e\d+|complete\s*(web\s*)?series|web\s*series)\b/i.test(sourceText)
+    );
+
+    if (type === 'movie' && hasSeriesMarkers) {
+      return;
+    }
+    if (type === 'series' && !hasSeriesMarkers) {
+      if (/\b(full\s*movie|the\s*movie)\b/i.test(sourceText)) {
+        return;
+      }
+    }
+
+    // 2. Strict Title Verification if fileName is present
+    if (r.fileName && title) {
+      const fnParsed = extractTitleAndYear(r.fileName);
+      const isTitleMatched =
+        isPreciseTitleMatch(fnParsed.title, title) ||
+        isPreciseTitleMatch(r.fileName, title);
+
+      // If filename has an identifiable title and it does not match target title, reject!
+      if (!isTitleMatched && fnParsed.title && fnParsed.title.length > 1) {
+        return;
+      }
+    }
+
+    // 3. Strict Year Verification
     if (year) {
       const linkText = `${r.fileName || ''} ${r.finalUrl || r.url || ''}`;
       const yearMatches = linkText.match(/\b(19\d{2}|20[0-2]\d)\b/g);
       if (yearMatches && yearMatches.length > 0) {
-        const yearsFound = yearMatches.map(y => parseInt(y, 10));
-        const hasMatchingYear = yearsFound.some(y => Math.abs(y - year) <= 1);
-        const hasConflictingYear = yearsFound.some(y => Math.abs(y - year) > 1);
-        if (!hasMatchingYear && hasConflictingYear) {
-          return;
+        const yearsFound = yearMatches.map((y) => parseInt(y, 10));
+        const exactMatch = yearsFound.includes(year);
+        if (!exactMatch) {
+          const hasFutureYear = yearsFound.some((y) => y > year);
+          const hasDistantYear = yearsFound.some((y) => Math.abs(y - year) > 1);
+          if (hasFutureYear || hasDistantYear) {
+            return;
+          }
+
+          // Past 1-year diff (e.g. 2024 film on OTT in 2025) allowed only with verified title match
+          const hasPreviousYear = yearsFound.some((y) => y === year - 1);
+          if (hasPreviousYear) {
+            const fnParsed = r.fileName ? extractTitleAndYear(r.fileName) : null;
+            const isExactTitle = fnParsed?.title ? isPreciseTitleMatch(fnParsed.title, title) : false;
+            if (!isExactTitle) {
+              return;
+            }
+          } else {
+            return;
+          }
         }
       }
     }
@@ -683,7 +729,7 @@ export async function runWaterfallLinkSearch(
         try {
           const posts = await searchFn(q, page, signal);
           if (posts && posts.length > 0) {
-            const verified = rankAndVerifyPosts(posts, cleanTitle, searchYear);
+            const verified = rankAndVerifyPosts(posts, cleanTitle, searchYear, type);
             if (verified && verified.length > 0) {
               log(`✓ [${providerName}] Found ${verified.length} confirmed post(s) matching "${cleanTitle}"${searchYear ? ` (${searchYear})` : ''} on page ${page}.`);
               return verified;

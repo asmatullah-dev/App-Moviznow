@@ -4092,29 +4092,122 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
   // In-memory cache to prevent duplicate Firestore reads and writes for identical FCM token registrations
   const syncedTokensMemoryCache = new Map<string, string>();
 
+  // Full registry deduplicator ensuring 1 token per user and 1 token per device
+  async function deduplicateFcmRegistry(firestoreDb: FirebaseFirestore.Firestore) {
+    try {
+      const fcmSnap = await firestoreDb.collection("fcm_tokens").get();
+      const seenTokens = new Map<string, { docId: string; entry: any }>();
+      const userTokens = new Map<string, string>(); // userId -> latest token
+      const deviceTokens = new Map<string, string>(); // did -> latest token
+
+      const docsData: Record<string, { ref: FirebaseFirestore.DocumentReference; tokens: Record<string, any>; count: number }> = {};
+
+      for (const d of fcmSnap.docs) {
+        if (!d.id.startsWith("registry")) continue;
+        const tokensMap = d.data()?.tokens || {};
+        docsData[d.id] = {
+          ref: d.ref,
+          tokens: { ...tokensMap },
+          count: d.data()?.count || Object.keys(tokensMap).length || 0
+        };
+
+        for (const [tKey, entry] of Object.entries(tokensMap)) {
+          const entryObj = (entry && typeof entry === 'object') ? (entry as any) : {};
+          if (seenTokens.has(tKey)) {
+            delete docsData[d.id].tokens[tKey];
+          } else {
+            seenTokens.set(tKey, { docId: d.id, entry: entryObj });
+          }
+        }
+      }
+
+      // Check duplicate user tokens (ensure 1 token per user)
+      // Check duplicate device tokens (ensure 1 token per device)
+      for (const [tKey, { docId, entry }] of seenTokens.entries()) {
+        const uid = entry?.u;
+        const did = entry?.did;
+
+        if (uid && uid !== 'guest' && uid !== 'anonymous') {
+          if (userTokens.has(uid)) {
+            const prevToken = userTokens.get(uid)!;
+            const prevDocId = seenTokens.get(prevToken)?.docId;
+            if (prevDocId && docsData[prevDocId]?.tokens[prevToken]) {
+              delete docsData[prevDocId].tokens[prevToken];
+            }
+          }
+          userTokens.set(uid, tKey);
+        }
+
+        if (did) {
+          if (deviceTokens.has(did)) {
+            const prevToken = deviceTokens.get(did)!;
+            const prevDocId = seenTokens.get(prevToken)?.docId;
+            if (prevDocId && docsData[prevDocId]?.tokens[prevToken]) {
+              delete docsData[prevDocId].tokens[prevToken];
+            }
+          }
+          deviceTokens.set(did, tKey);
+        }
+      }
+
+      // Write back any cleaned documents
+      let totalCleaned = 0;
+      for (const [docId, data] of Object.entries(docsData)) {
+        const origTokens = fcmSnap.docs.find(d => d.id === docId)?.data()?.tokens || {};
+        const origKeys = Object.keys(origTokens);
+        const newKeys = Object.keys(data.tokens);
+        if (origKeys.length !== newKeys.length) {
+          const deletes: Record<string, any> = {};
+          for (const k of origKeys) {
+            if (!data.tokens[k]) {
+              deletes[`tokens.${k}`] = admin.firestore.FieldValue.delete();
+              totalCleaned++;
+            }
+          }
+          deletes['count'] = newKeys.length;
+          deletes['updatedAt'] = new Date().toISOString();
+          await data.ref.update(deletes);
+        }
+      }
+
+      if (totalCleaned > 0) {
+        console.log(`[FCM Registry Deduplication] Cleaned up ${totalCleaned} duplicate/redundant tokens.`);
+      }
+      return { success: true, cleaned: totalCleaned };
+    } catch (e) {
+      console.warn("[FCM Registry Deduplication Error]:", e);
+      return { success: false, error: String(e) };
+    }
+  }
+
   async function saveFcmTokenToRegistry(
     firestoreDb: FirebaseFirestore.Firestore,
     token: string,
     userId?: string,
-    userEmail?: string
+    userEmail?: string,
+    deviceId?: string,
+    previousToken?: string
   ) {
     const isUserLoggedIn = !!userId && userId !== 'guest' && userId !== 'anonymous';
     // Format YYYY-MM-DD in PKT (+05:00)
     const nowPkt = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Karachi' });
     const userIdentifier = isUserLoggedIn ? userId : 'guest';
     const emailIdentifier = isUserLoggedIn && userEmail ? userEmail : 'n';
-    const cacheKey = `${userIdentifier}:${emailIdentifier}`;
+    const cacheKey = `${userIdentifier}:${emailIdentifier}:${deviceId || ''}`;
 
-    // 0. MEMORY DEDUPLICATION: If token was already synced with identical user/email in this server instance, exit with 0 Firestore operations!
-    if (syncedTokensMemoryCache.get(token) === cacheKey) {
+    // 0. MEMORY DEDUPLICATION: If token was already synced with identical user/email/deviceId and no previousToken cleanup needed, exit with 0 Firestore operations!
+    if (syncedTokensMemoryCache.get(token) === cacheKey && !previousToken) {
       return;
     }
 
-    const tokenEntry = {
+    const tokenEntry: Record<string, any> = {
       u: userIdentifier,
       e: emailIdentifier,
-      d: nowPkt
+      d: nowPkt,
     };
+    if (deviceId) {
+      tokenEntry.did = deviceId;
+    }
 
     try {
       const fcmSnap = await firestoreDb.collection("fcm_tokens").get();
@@ -4125,6 +4218,13 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       let isAlreadyUpToDate = false;
       let existingTokensCount = 0;
       let tokenAlreadyInDoc = false;
+
+      // Track any tokens that need to be removed to enforce:
+      // 1) One token per device (if deviceId matched or previousToken)
+      // 2) One token per user (if isUserLoggedIn and userId matched another token)
+      // 3) Token uniqueness across chunks (if token exists in more than 1 chunk)
+      const tokensToUnsubscribe: string[] = [];
+      const tokensToUnsubscribeUser: string[] = [];
 
       for (const d of fcmSnap.docs) {
         if (!d.id.startsWith("registry")) continue;
@@ -4138,25 +4238,92 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           latestDocCount = docCount;
         }
 
-        if (tokensMap[token]) {
-          targetDocRef = d.ref;
-          existingTokensCount = docCount;
-          tokenAlreadyInDoc = true;
-          const existingEntry = tokensMap[token];
-          // Check if token already contains the exact same user identity
-          if (existingEntry && (existingEntry as any).u === tokenEntry.u && (existingEntry as any).e === tokenEntry.e) {
-            isAlreadyUpToDate = true;
+        const docDeletes: Record<string, any> = {};
+        let docDeletedCount = 0;
+
+        for (const [tKey, entry] of Object.entries(tokensMap)) {
+          const entryObj = (entry && typeof entry === 'object') ? (entry as any) : {};
+
+          // Check if this is the target token
+          if (tKey === token) {
+            if (!targetDocRef) {
+              // First time finding target token across all chunks
+              targetDocRef = d.ref;
+              existingTokensCount = docCount;
+              tokenAlreadyInDoc = true;
+              if (
+                entryObj.u === tokenEntry.u &&
+                entryObj.e === tokenEntry.e &&
+                (!deviceId || entryObj.did === deviceId)
+              ) {
+                isAlreadyUpToDate = true;
+              }
+            } else {
+              // Token already stored in an earlier doc! Delete duplicate occurrence from this secondary doc
+              docDeletes[`tokens.${tKey}`] = admin.firestore.FieldValue.delete();
+              docDeletedCount++;
+            }
+            continue;
           }
-          break;
+
+          // Case A: Previous token explicitly passed from this client device
+          const isPreviousDeviceToken = previousToken && tKey === previousToken;
+
+          // Case B: Same device ID registered a new token (Enforces ONE token per device)
+          const isSameDeviceDifferentToken = !!deviceId && entryObj.did === deviceId;
+
+          // Case C: Same logged-in user registered a new token (Enforces ONE token per user)
+          const isSameUserDifferentToken = isUserLoggedIn && entryObj.u === userId;
+
+          if (isPreviousDeviceToken || isSameDeviceDifferentToken || isSameUserDifferentToken) {
+            docDeletes[`tokens.${tKey}`] = admin.firestore.FieldValue.delete();
+            docDeletedCount++;
+            tokensToUnsubscribe.push(tKey);
+            if (isSameUserDifferentToken && userId) {
+              tokensToUnsubscribeUser.push(tKey);
+            }
+            syncedTokensMemoryCache.delete(tKey);
+          }
+        }
+
+        // Apply any cleanup updates to this registry document
+        if (docDeletedCount > 0) {
+          const updatedDocCount = Math.max(0, docCount - docDeletedCount);
+          docDeletes['count'] = updatedDocCount;
+          docDeletes['updatedAt'] = new Date().toISOString();
+          await d.ref.update(docDeletes).catch((delErr) => {
+            console.warn(`[FCM Registry Cleanup Error] doc ${d.id}:`, delErr);
+          });
+          if (targetDocRef && targetDocRef.id === d.id) {
+            existingTokensCount = updatedDocCount;
+          }
+          if (latestDocRef && latestDocRef.id === d.id) {
+            latestDocCount = updatedDocCount;
+          }
         }
       }
 
-      // If document already contains the exact same token with the same user & email, SKIP WRITE completely (0 writes!)
-      if (isAlreadyUpToDate) {
+      // Unsubscribe any purged tokens from FCM topics in the background
+      if (admin.apps.length > 0 && tokensToUnsubscribe.length > 0) {
+        for (const oldToken of tokensToUnsubscribe) {
+          try { await admin.messaging().unsubscribeFromTopic(oldToken, "all_users"); } catch (e) {}
+          try { await admin.messaging().unsubscribeFromTopic(oldToken, "guest_users"); } catch (e) {}
+          try { await admin.messaging().unsubscribeFromTopic(oldToken, "registered_users"); } catch (e) {}
+        }
+        if (userId) {
+          for (const oldToken of tokensToUnsubscribeUser) {
+            try { await admin.messaging().unsubscribeFromTopic(oldToken, `user_${userId}`); } catch (e) {}
+          }
+        }
+      }
+
+      // If document already contains the exact same token with the same user, email & deviceId, exit
+      if (isAlreadyUpToDate && tokenAlreadyInDoc) {
         syncedTokensMemoryCache.set(token, cacheKey);
         return;
       }
 
+      // If token wasn't in any doc, find the right chunk or create the next one
       if (!targetDocRef) {
         if (latestDocRef && latestDocCount < MAX_TOKENS_PER_REGISTRY) {
           targetDocRef = latestDocRef;
@@ -4171,7 +4338,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
       const newCount = tokenAlreadyInDoc ? existingTokensCount : (existingTokensCount + 1);
 
-      // Single atomic write containing token, updatedAt AND count (avoids extra get() read and extra update() write!)
+      // Single atomic write containing token, count, and timestamp
       await targetDocRef.set({
         tokens: {
           [token]: tokenEntry
@@ -4181,6 +4348,34 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       }, { merge: true });
 
       syncedTokensMemoryCache.set(token, cacheKey);
+
+      // If logged in, update users/{userId} and ensure no other user doc has this exact token
+      if (isUserLoggedIn && userId) {
+        try {
+          await firestoreDb.collection("users").doc(userId).set({
+            fcmToken: token,
+            fcmTokenUpdatedAt: new Date().toISOString(),
+            notification: 'yes',
+            isFcmDisabled: false
+          }, { merge: true });
+
+          // Clear this token from any other user doc where it might have been saved previously
+          const conflictingUsers = await firestoreDb.collection("users")
+            .where("fcmToken", "==", token)
+            .get();
+          
+          for (const cUser of conflictingUsers.docs) {
+            if (cUser.id !== userId) {
+              await cUser.ref.update({
+                fcmToken: admin.firestore.FieldValue.delete(),
+                fcmTokenUpdatedAt: new Date().toISOString()
+              }).catch(() => {});
+            }
+          }
+        } catch (uErr) {
+          console.warn("[saveFcmTokenToRegistry user doc update warning]:", uErr);
+        }
+      }
     } catch (err) {
       console.warn("[saveFcmTokenToRegistry Warning]:", err);
     }
@@ -4213,7 +4408,6 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         if (deletedKeysCount > 0) {
           updatesToField['count'] = Math.max(0, currentCount - deletedKeysCount);
           updatesToField['updatedAt'] = new Date().toISOString();
-          // Single atomic update without re-fetching the document!
           await d.ref.update(updatesToField);
         }
       }
@@ -4227,35 +4421,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
     ["/api/notifications/subscribe", "/notifications/subscribe"],
     async (req, res) => {
       try {
-        const { token, userId, email, isGuest } = req.body;
+        const { token, userId, email, isGuest, deviceId, previousToken, previousGuestId } = req.body;
         if (!token) return res.status(400).json({ error: "Token required" });
 
         const isUserLoggedIn = !!userId && userId !== 'guest' && userId !== 'anonymous';
+        const effectiveDeviceId = deviceId || previousGuestId;
 
         // 1. GUARANTEED STORAGE: Save to minified fcm_tokens registry chunk (max 3000 tokens per chunk)
+        // Deduplicates across user and device, transitions guest to logged-in without double tokens
         if (db) {
-          await saveFcmTokenToRegistry(db, token, userId, email);
-          if (isUserLoggedIn && userId) {
-            try {
-              await db.collection("users").doc(userId).set({
-                fcmToken: token,
-                fcmTokenUpdatedAt: new Date().toISOString(),
-                notification: 'yes',
-                isFcmDisabled: false,
-                notificationPreferences: {
-                  fcm: {
-                    enabled: true,
-                    newContent: true,
-                    membershipAlerts: true,
-                    membershipExpiry: true,
-                    orders: true
-                  }
-                }
-              }, { merge: true });
-            } catch (userDocErr) {
-              console.warn("Could not update user doc with FCM token:", userDocErr);
-            }
-          }
+          await saveFcmTokenToRegistry(db, token, userId, email, effectiveDeviceId, previousToken);
         }
 
         // 2. TOPIC SUBSCRIPTION: Subscribe to relevant FCM topics if Firebase Admin is available
@@ -4270,6 +4445,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               try { await admin.messaging().subscribeToTopic(token, `user_${userId}`); } catch (e) {}
             } else {
               // Guest FCM token registration - subscribe to all_users and guest_users topics
+              try { await admin.messaging().unsubscribeFromTopic(token, "registered_users"); } catch (e) {}
               try { await admin.messaging().subscribeToTopic(token, "all_users"); } catch (e) {}
               try { await admin.messaging().subscribeToTopic(token, "guest_users"); } catch (e) {}
             }
@@ -4295,6 +4471,58 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
       }
     },
   );
+
+  // Transition device to guest on logout
+  app.post(
+    ["/api/notifications/transition-to-guest", "/notifications/transition-to-guest"],
+    async (req, res) => {
+      try {
+        const { token, userId, deviceId } = req.body;
+        if (!token) return res.status(400).json({ error: "Token required" });
+
+        if (db) {
+          await saveFcmTokenToRegistry(db, token, undefined, undefined, deviceId);
+        }
+
+        if (admin.apps.length > 0) {
+          try { await admin.messaging().unsubscribeFromTopic(token, "registered_users"); } catch (e) {}
+          if (userId) {
+            try { await admin.messaging().unsubscribeFromTopic(token, `user_${userId}`); } catch (e) {}
+          }
+          try { await admin.messaging().subscribeToTopic(token, "all_users"); } catch (e) {}
+          try { await admin.messaging().subscribeToTopic(token, "guest_users"); } catch (e) {}
+        }
+
+        res.json({ success: true, isGuest: true });
+      } catch (error) {
+        console.error("Error transitioning to guest:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+      }
+    }
+  );
+
+  // Endpoint to run full deduplication on FCM registry
+  app.post(
+    ["/api/notifications/deduplicate-registry", "/notifications/deduplicate-registry"],
+    async (req, res) => {
+      try {
+        if (!db) return res.status(500).json({ error: "Database unavailable" });
+        const result = await deduplicateFcmRegistry(db);
+        res.json(result);
+      } catch (err) {
+        res.status(500).json({ error: String(err) });
+      }
+    }
+  );
+
+  // Self-heal and deduplicate registry once on startup in background (deferred by 15s)
+  if (db) {
+    setTimeout(() => {
+      if (db) {
+        deduplicateFcmRegistry(db).catch((e) => console.warn("[Startup FCM Deduplication Warning]:", e));
+      }
+    }, 15000);
+  }
 
   // Unsubscribe FCM token / remove tokens on logout or user deletion
   app.post(
