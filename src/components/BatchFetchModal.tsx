@@ -4,7 +4,7 @@ import { X, Loader2, CheckCircle2, XCircle, Search, RefreshCw } from 'lucide-rea
 import { useModalBehavior } from '../hooks/useModalBehavior';
 import { LinkCheckResult, performFullLinkScan, guessLinkType } from '../utils/linkScanner';
 import { searchTMDBByTitle, fetchTMDBDetails, fetchSeriesSeasons, fetchIMDbRating, getBestTrailer, searchYouTubeTrailer, fetchKinoCheckTrailer, getBestAlternativeTitle } from './MediaModal';
-import { normalizeOttPlatformName, extractOttPlatformFromTMDBDetails, fetchMovieDigitalReleaseDate, predictOttPlatformWithAI } from '../services/tmdb';
+import { extractOttPlatformFromTMDBDetails } from '../services/tmdb';
 import { useAdminContent } from '../contexts/AdminContentContext';
 import {
   modalBackdropAnimation,
@@ -206,75 +206,59 @@ export const BatchFetchModal: React.FC<Props> = ({
             if (fetchFields.posterUrl && details.poster_path) updates.posterUrl = `https://image.tmdb.org/t/p/w500${details.poster_path}`;
             if (fetchFields.backdropUrl && details.backdrop_path) updates.backdropUrl = `https://image.tmdb.org/t/p/original${details.backdrop_path}`;
             
-            let detectedOtt = extractOttPlatformFromTMDBDetails(details, bestMatch.type);
-            if (!detectedOtt && details.id && bestMatch.type === 'movie') {
-              const { platformNote } = await fetchMovieDigitalReleaseDate(details.id);
-              if (platformNote) detectedOtt = platformNote;
-            }
-            if (!detectedOtt) {
-              detectedOtt = await predictOttPlatformWithAI(
-                data.title || bestMatch.item.title || bestMatch.item.name || '',
-                bestMatch.type === 'tv' ? 'tv' : 'movie',
-                (details.release_date || details.first_air_date || '').split('-')[0],
-                details.overview,
-                details.genres?.map((g: any) => g.name),
-                details.original_title || details.original_name,
-                details.production_countries?.map((c: any) => c.name).join(', ')
-              );
-            }
+            // Fast, synchronous OTT extraction from TMDB details (0 extra network calls, no Gemini AI rate-limits)
+            const detectedOtt = extractOttPlatformFromTMDBDetails(details, bestMatch.type);
             if (detectedOtt) updates.ottPlatform = detectedOtt;
-            
+
+            // Fast prioritized trailer retrieval: TMDB First -> KinoCheck Second -> YouTube Third
+            if (fetchFields.trailerUrl) {
+              let trailerUrl = getBestTrailer(details.videos) || '';
+
+              if (!trailerUrl) {
+                try {
+                  trailerUrl = (await fetchKinoCheckTrailer(bestMatch.item.id, bestMatch.type)) || '';
+                } catch {}
+              }
+
+              if (!trailerUrl) {
+                try {
+                  const ytResults = await searchYouTubeTrailer(details.title || details.name, bestMatch.type);
+                  if (ytResults && ytResults.length > 0) {
+                    const titleNorm = normalizeStr(details.title || details.name);
+                    const strictMatch = ytResults.find((yt: any) => {
+                      const ytTitleNorm = normalizeStr(yt.title);
+                      return ytTitleNorm.includes(titleNorm) && 
+                             ytTitleNorm.includes('official') && 
+                             ytTitleNorm.includes('trailer');
+                    });
+                    if (strictMatch) {
+                      trailerUrl = strictMatch.url;
+                    }
+                  }
+                } catch {}
+              }
+              if (trailerUrl) updates.trailerUrl = trailerUrl;
+            }
+
+            // Parallel auxiliary fetch: IMDb Rating and TV Seasons
             const parallelOps: Promise<any>[] = [];
             let imdbPromiseIdx = -1;
             let seasonsPromiseIdx = -1;
-            let kinocheckPromiseIdx = -1;
-
-            if (fetchFields.trailerUrl) {
-               parallelOps.push(fetchKinoCheckTrailer(bestMatch.item.id, bestMatch.type));
-               kinocheckPromiseIdx = parallelOps.length - 1;
-            }
 
             if (fetchFields.imdbRating && details.external_ids?.imdb_id) {
-               parallelOps.push(fetchIMDbRating(details.external_ids.imdb_id));
-               imdbPromiseIdx = parallelOps.length - 1;
+              parallelOps.push(fetchIMDbRating(details.external_ids.imdb_id).catch(() => null));
+              imdbPromiseIdx = parallelOps.length - 1;
             }
 
             if (bestMatch.type === 'tv' && fetchFields.seasons) {
-               parallelOps.push(fetchSeriesSeasons(bestMatch.item.id, details.seasons));
-               seasonsPromiseIdx = parallelOps.length - 1;
+              parallelOps.push(fetchSeriesSeasons(bestMatch.item.id, details.seasons).catch(() => []));
+              seasonsPromiseIdx = parallelOps.length - 1;
             }
 
-            const parallelResults = await Promise.all(parallelOps);
-
-            if (kinocheckPromiseIdx !== -1) {
-               // Flow: TMDB First -> KinoCheck Second -> YouTube Third
-               let trailerUrl = getBestTrailer(details.videos) || '';
-               
-               if (!trailerUrl) {
-                  trailerUrl = parallelResults[kinocheckPromiseIdx] || '';
-               }
-               
-               if (!trailerUrl) {
-                  const ytResults = await searchYouTubeTrailer(details.title || details.name, bestMatch.type);
-                  if (ytResults && ytResults.length > 0) {
-                      const titleNorm = normalizeStr(details.title || details.name);
-                      const strictMatch = ytResults.find((yt: any) => {
-                          const ytTitleNorm = normalizeStr(yt.title);
-                          return ytTitleNorm.includes(titleNorm) && 
-                                 ytTitleNorm.includes('official') && 
-                                 ytTitleNorm.includes('trailer');
-                      });
-                      
-                      if (strictMatch) {
-                          trailerUrl = strictMatch.url;
-                      }
-                  }
-               }
-               if (trailerUrl) updates.trailerUrl = trailerUrl;
-            }
+            const parallelResults = parallelOps.length > 0 ? await Promise.all(parallelOps) : [];
 
             if (imdbPromiseIdx !== -1 && parallelResults[imdbPromiseIdx]) {
-               updates.imdbRating = parallelResults[imdbPromiseIdx].rating;
+              updates.imdbRating = parallelResults[imdbPromiseIdx].rating;
             }
 
             if (bestMatch.type === 'tv') {
@@ -442,15 +426,40 @@ export const BatchFetchModal: React.FC<Props> = ({
        }
     };
 
-    const CONCURRENCY_LIMIT = 15;
-    for (let i = 0; i < selectedContentIds.length; i += CONCURRENCY_LIMIT) {
-        if (!isOpen) {
-            isCancelled = true;
-            break;
+    const queue = [...selectedContentIds];
+    const WORKER_COUNT = 5; // Optimal steady concurrency: prevents TMDB 429 rate limits while maximizing throughput
+
+    const processItemWithTimeout = async (id: string) => {
+      let timer: any;
+      const timeoutPromise = new Promise<{ timedOut: true }>((resolve) => {
+        timer = setTimeout(() => resolve({ timedOut: true }), 15000);
+      });
+
+      try {
+        const result = await Promise.race([
+          processSingleItem(id),
+          timeoutPromise,
+        ]);
+        if (result && typeof result === 'object' && 'timedOut' in result) {
+          updateResult(id, 'error', 'Timed out (>15s)');
+          completedCount++;
+          setProgress((completedCount / selectedContentIds.length) * 100);
         }
-        const chunk = selectedContentIds.slice(i, i + CONCURRENCY_LIMIT);
-        await Promise.all(chunk.map(id => processSingleItem(id)));
-    }
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    const workers = Array.from({ length: Math.min(WORKER_COUNT, queue.length) }, async () => {
+      while (queue.length > 0) {
+        if (!isOpen || isCancelled) break;
+        const nextId = queue.shift();
+        if (!nextId) break;
+        await processItemWithTimeout(nextId);
+      }
+    });
+
+    await Promise.all(workers);
     
     setIsProcessing(false);
   };

@@ -41,7 +41,10 @@ export async function searchYouTubeTrailer(title: string, type: string) {
     const typeLabel = type === 'tv' || type === 'series' ? 'Series' : 'Movie';
     const query = `${title} ${typeLabel} Hindi Trailer`;
     const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&key=${YOUTUBE_API_KEY}&maxResults=10`;
-    const res = await fetch(url);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
     const data = await res.json();
     if (data.items) {
       return data.items.map((item: any) => ({
