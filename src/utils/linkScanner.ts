@@ -64,8 +64,8 @@ export function normalizeUrl(input: string) {
     const url = new URL(trimmed);
     const host = url.hostname.toLowerCase().replace(/^www\./, "");
 
-    // Route old or legacy hubcloud domains (hubcloud.one, hubcloud.foo, hubcould, hubcloud.cx) to active domain hubcloud.ist
-    if (host.includes("hubcloud.one") || host.includes("hubcloud.foo") || host.includes("hubcould") || host === "hubcloud.club" || host === "hubcloud.lol" || host === "hubcloud.cx") {
+    // Route old or legacy hubcloud domains (hubcloud.art, hubcloud.one, hubcloud.foo, hubcould, hubcloud.cx, hubcloud.club, etc.) to active domain hubcloud.ist
+    if ((host.includes("hubcloud") || host.includes("hubcould")) && host !== "hubcloud.ist") {
       url.hostname = "hubcloud.ist";
     }
 
@@ -130,8 +130,8 @@ export function normalizeUrl(input: string) {
       trimmed.includes("pixel.drain/") ||
       trimmed.includes("pixeldra.in/");
 
-    if (trimmed.includes("hubcloud.one") || trimmed.includes("hubcloud.foo") || trimmed.includes("hubcould") || trimmed.includes("hubcloud.cx")) {
-      trimmed = trimmed.replace(/https?:\/\/(?:www\.)?(?:hubcloud\.one|hubcloud\.foo|hubcould\.\w+|hubcloud\.cx)/i, "https://hubcloud.ist");
+    if (/(?:hubcloud|hubcould)\.[a-z0-9]+/i.test(trimmed)) {
+      trimmed = trimmed.replace(/https?:\/\/(?:www\.)?(?:hubcloud|hubcould)\.[a-z0-9]+/i, "https://hubcloud.ist");
     }
 
     if (trimmed.includes("hubcloud") || trimmed.includes("vcloud") || trimmed.includes("hubdrive")) {

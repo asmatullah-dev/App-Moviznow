@@ -47,6 +47,8 @@ export interface ScrapedLinkItem {
   status?: string;
   fileName?: string;
   finalUrl?: string;
+  hasPixeldrain?: boolean;
+  candidates?: Array<{ text: string; href: string }>;
 }
 
 /**
@@ -1279,7 +1281,42 @@ export function pickLowerSizeQualityItem(a: ScrapedLinkItem, b: ScrapedLinkItem)
   if (aWork && !bWork) return a;
   if (!aWork && bWork) return b;
 
-  // 1. Strict provider sequence: FilmyGo (1) > MoviesDrive (2) > HDHub4U (3) > SkyMoviesHD (4) > FilmyFly (5)
+  // 1. Critical requirement: Strongly prefer link with confirmed Pixeldrain download availability
+  const checkPixel = (item: ScrapedLinkItem): boolean => {
+    if (item.hasPixeldrain === true) return true;
+    const u = (item.finalUrl || item.url || '').toLowerCase();
+    if (
+      u.includes('pixeldrain.com') ||
+      u.includes('pixeldrain.dev') ||
+      u.includes('pixeldrain.net') ||
+      u.includes('pixel.drain') ||
+      u.includes('pixeldra.in')
+    ) {
+      return true;
+    }
+    if (item.candidates && item.candidates.length > 0) {
+      return item.candidates.some((c) => {
+        const text = (c?.text || '').toLowerCase();
+        const href = (c?.href || '').toLowerCase();
+        return (
+          text.includes('pixeldrain') ||
+          text.includes('pixel.drain') ||
+          text.includes('pixeldra.in') ||
+          href.includes('pixeldrain') ||
+          href.includes('pixel.drain') ||
+          href.includes('pixeldra.in')
+        );
+      });
+    }
+    return false;
+  };
+
+  const aPixel = checkPixel(a);
+  const bPixel = checkPixel(b);
+  if (aPixel && !bPixel) return a;
+  if (!aPixel && bPixel) return b;
+
+  // 2. Strict provider sequence: FilmyGo (1) > MoviesDrive (2) > HDHub4U (3) > SkyMoviesHD (4) > FilmyFly (5)
   const rankA = getProviderRank(a.source);
   const rankB = getProviderRank(b.source);
   if (rankA !== rankB) {

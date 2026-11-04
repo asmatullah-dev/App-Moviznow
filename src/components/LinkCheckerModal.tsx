@@ -957,7 +957,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
   // Direct SkyMoviesHD Search Input State & Pagination Limit
   const [showSkymoviesSearchInput, setShowSkymoviesSearchInput] = useState<boolean>(false);
   const [skymoviesSearchTerm, setSkymoviesSearchTerm] = useState<string>("");
-  const [skymoviesVisibleLimit, setSkymoviesVisibleLimit] = useState<number>(500);
+  const [skymoviesVisibleLimit, setSkymoviesVisibleLimit] = useState<number>(25);
   // Catalog Pagination & Scroll State
   const catalogScrollRef = React.useRef<HTMLDivElement>(null);
   const [catalogTotalFound, setCatalogTotalFound] = useState<number>(0);
@@ -984,7 +984,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
   const [filmyflySearchTerm, setFilmyflySearchTerm] = useState<string>("");
 
   React.useEffect(() => {
-    setSkymoviesVisibleLimit(500);
+    setSkymoviesVisibleLimit(25);
   }, [moviesdriveSearchUrl]);
 
   const moviesdrivePageInfo = useMemo(() => {
@@ -1011,7 +1011,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
 
       let p = parseInt(u.searchParams.get("to-page") || u.searchParams.get("page") || u.searchParams.get("p") || u.searchParams.get("pg") || "1", 10) || 1;
       if (!u.searchParams.get("page") && !u.searchParams.get("p") && !u.searchParams.get("to-page") && !u.searchParams.get("pg")) {
-        const pageMatch = u.pathname.match(/\/page\/(\d+)/i);
+        const pageMatch = u.pathname.match(/\/page\/(\d+)/i) || u.pathname.match(/\/category\/[^/]+\/(\d+)\.html/i);
         if (pageMatch) p = parseInt(pageMatch[1], 10);
       }
       return { query: q, page: p, origin: u.origin || (isFilmyfly ? filmyflyDomain : isHdhub ? hdhubDomain : isFilmy ? filmyDomain : isSky ? skyDomain : mdDomain), isSkyMovies: isSky, isFilmygo: isFilmy, isHdhub4u: isHdhub, isFilmyfly: isFilmyfly };
@@ -1559,7 +1559,12 @@ export const LinkCheckerModal: React.FC<Props> = ({
     let newUrl = "";
     let endpoint = "";
     if (isSkyMovies) {
-      newUrl = `${origin}/search.php?search=${encodeURIComponent(query)}&cat=All&page=${targetPage}`;
+      if (moviesdriveSearchUrl && moviesdriveSearchUrl.includes('/category/')) {
+        const catBase = moviesdriveSearchUrl.replace(/\/\d+\.html$/, '').replace(/\.html$/, '');
+        newUrl = targetPage === 1 ? `${catBase}.html` : `${catBase}/${targetPage}.html`;
+      } else {
+        newUrl = `${origin}/search.php?search=${encodeURIComponent(query)}&cat=All&page=${targetPage}`;
+      }
       endpoint = `/api/skymovieshd?url=${encodeURIComponent(newUrl)}`;
     } else if (isFilmygo) {
       if (query) {
@@ -1673,7 +1678,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
     // If there are already loaded filtered posts that haven't been displayed yet:
     if (skymoviesVisibleLimit < moviesdriveFilteredPosts.length) {
       const nextIdx = skymoviesVisibleLimit;
-      setSkymoviesVisibleLimit(prev => prev + 500);
+      setSkymoviesVisibleLimit(prev => Math.min(prev + 25, moviesdriveFilteredPosts.length));
       setTimeout(() => {
         const el = document.getElementById(`skymovies-post-item-${nextIdx}`);
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1681,7 +1686,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       return;
     }
 
-    // Otherwise fetch the next 500 results from the backend
+    // Otherwise fetch the next results batch from the backend
     setSkymoviesLoadingMore(true);
     try {
       const currentCount = moviesdriveSearchPosts.length;
@@ -1694,7 +1699,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
         cleanUrl = u.toString();
       } catch (e) {}
 
-      const endpoint = `/api/skymovieshd?url=${encodeURIComponent(cleanUrl)}&offset=${currentCount}&limit=500`;
+      const endpoint = `/api/skymovieshd?url=${encodeURIComponent(cleanUrl)}&offset=${currentCount}&limit=100`;
       const res = await fetch(endpoint);
       if (!res.ok) throw new Error('Catalog load more failed');
       const data = await res.json();
@@ -1714,7 +1719,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
         const total = data.total_found || data.found || (currentCount + newPosts.length);
         setSkymoviesTotalFound(total);
         setSkymoviesHasMore(Boolean(data.has_more) || (total > currentCount + newPosts.length));
-        setSkymoviesVisibleLimit(prev => prev + 500);
+        setSkymoviesVisibleLimit(prev => prev + 25);
 
         setTimeout(() => {
           const el = document.getElementById(`skymovies-post-item-${currentCount}`);
@@ -2538,71 +2543,66 @@ export const LinkCheckerModal: React.FC<Props> = ({
             return { index: idx, searchTitle, searchYear, searchType };
           });
 
-          // Concurrent batch search: process 5 to 15 titles simultaneously at once (for 4 movies, search all 4 at once)
-          const BATCH_CONCURRENCY = 15;
-          const initialActiveCount = Math.min(BATCH_CONCURRENCY, itemsToProcess.length);
-          setBatchSearchStatus({ completed: 0, total: itemsToProcess.length, activeCount: initialActiveCount });
+          // True chunked parallel batching: process 5 to 15 titles at once simultaneously
+          // (e.g. for 4 movies, all 4 are launched concurrently in parallel at the exact same moment)
+          const BATCH_CHUNK_SIZE = 15;
+          const batches: typeof itemsToProcess[] = [];
+          for (let i = 0; i < itemsToProcess.length; i += BATCH_CHUNK_SIZE) {
+            batches.push(itemsToProcess.slice(i, i + BATCH_CHUNK_SIZE));
+          }
 
-          let queueIdx = 0;
           let completed = 0;
-          const activeTitles = new Set<string>();
+          for (const currentBatch of batches) {
+            const activeBatchTitles = new Set(currentBatch.map(item => item.searchTitle));
+            const syncStatus = () => {
+              const list = Array.from(activeBatchTitles);
+              setBatchSearchStatus({
+                completed,
+                total: itemsToProcess.length,
+                currentTitle: list.slice(0, 4).join(', ') + (list.length > 4 ? ` (+${list.length - 4} more)` : ''),
+                activeCount: list.length,
+              });
+            };
+            syncStatus();
 
-          const updateBatchStatus = () => {
-            const list = Array.from(activeTitles);
-            setBatchSearchStatus({
-              completed,
-              total: itemsToProcess.length,
-              currentTitle: list.slice(0, 4).join(', ') + (list.length > 4 ? ` (+${list.length - 4} more)` : ''),
-              activeCount: list.length,
-            });
-          };
-
-          const worker = async () => {
-            while (queueIdx < itemsToProcess.length) {
-              const item = itemsToProcess[queueIdx++];
-              if (!item) break;
-
-              activeTitles.add(item.searchTitle);
-              updateBatchStatus();
-
-              try {
-                const res = await runWaterfallLinkSearch({
-                  title: item.searchTitle,
-                  year: item.searchYear,
-                  type: item.searchType as any,
-                  languages,
-                  qualities,
-                });
-
-                if (res.links.length > 0) {
-                  allFoundCheckResults.push(...res.results);
-                  batchItems.push({
-                    key: `bulk-${item.index}-${item.searchTitle}-${Date.now()}`,
-                    title: res.metadata?.title || item.searchTitle,
-                    year: res.metadata?.year ? String(res.metadata.year) : (item.searchYear ? String(item.searchYear) : ''),
-                    links: res.qualityLinks,
-                    metadata: {
-                      ...res.metadata,
-                      languages: res.metadata?.languages || [],
-                      sampleUrl: res.sample?.url || res.metadata?.sampleUrl,
-                      type: res.metadata?.type || item.searchType,
-                      tmdbData: res.tmdbData,
-                      isTitleSearch: true,
-                    }
+            await Promise.all(
+              currentBatch.map(async (item) => {
+                try {
+                  const res = await runWaterfallLinkSearch({
+                    title: item.searchTitle,
+                    year: item.searchYear,
+                    type: item.searchType as any,
+                    languages,
+                    qualities,
                   });
-                }
-              } catch (err) {
-                console.error(`Error searching bulk title "${item.searchTitle}":`, err);
-              } finally {
-                activeTitles.delete(item.searchTitle);
-                completed++;
-                updateBatchStatus();
-              }
-            }
-          };
 
-          const activeWorkers = Math.min(BATCH_CONCURRENCY, itemsToProcess.length);
-          await Promise.all(Array.from({ length: activeWorkers }, () => worker()));
+                  if (res.links.length > 0) {
+                    allFoundCheckResults.push(...res.results);
+                    batchItems.push({
+                      key: `bulk-${item.index}-${item.searchTitle}-${Date.now()}`,
+                      title: res.metadata?.title || item.searchTitle,
+                      year: res.metadata?.year ? String(res.metadata.year) : (item.searchYear ? String(item.searchYear) : ''),
+                      links: res.qualityLinks,
+                      metadata: {
+                        ...res.metadata,
+                        languages: res.metadata?.languages || [],
+                        sampleUrl: res.sample?.url || res.metadata?.sampleUrl,
+                        type: res.metadata?.type || item.searchType,
+                        tmdbData: res.tmdbData,
+                        isTitleSearch: true,
+                      }
+                    });
+                  }
+                } catch (err) {
+                  console.error(`Error searching bulk title "${item.searchTitle}":`, err);
+                } finally {
+                  activeBatchTitles.delete(item.searchTitle);
+                  completed++;
+                  syncStatus();
+                }
+              })
+            );
+          }
           setBatchSearchStatus(null);
 
           if (batchItems.length > 0) {
@@ -2769,7 +2769,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                 setCatalogHasMore(Boolean(res.data.has_more) || (explicitPages > 1) || (total > postsCount));
                 const isSky = res.type === 'skymovieshd' || res.original.includes('skymovies');
                 if (isSky) {
-                  setSkymoviesVisibleLimit(500);
+                  setSkymoviesVisibleLimit(25);
                 }
                 const initialLimit = isSky ? 10 : Math.min(res.data.posts.length, 25);
 
@@ -3637,7 +3637,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
         autoStartedInputRef.current = autoTarget;
         if (initialLinks.length > 0) {
           handleCheck(initialLinks, autoTarget);
-        } else if (initialTitle) {
+        } else if (autoTarget) {
           handleCheck(undefined, autoTarget);
         }
       }
@@ -4534,7 +4534,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                               )}
 
                               {moviesdrivePageInfo.isSkyMovies && (skymoviesVisibleLimit < moviesdriveFilteredPosts.length || skymoviesHasMore || (skymoviesTotalFound > moviesdriveSearchPosts.length)) && (
-                                <div className="pt-3 pb-1 flex justify-center">
+                                <div className="pt-3 pb-1 flex justify-center items-center gap-2.5 flex-wrap">
                                   <button
                                     type="button"
                                     id="skymovies-load-more-btn"
@@ -4545,15 +4545,25 @@ export const LinkCheckerModal: React.FC<Props> = ({
                                     {skymoviesLoadingMore ? (
                                       <>
                                         <Loader2 className="w-4 h-4 animate-spin" />
-                                        Loading Next 500 Results...
+                                        Loading Results...
                                       </>
                                     ) : (
                                       <>
                                         <ChevronDown className="w-4 h-4" />
-                                        Load More (Next 500) — Showing {moviesdriveDisplayedPosts.length} of {skymoviesTotalFound ? skymoviesTotalFound.toLocaleString() : moviesdriveFilteredPosts.length}
+                                        Load More (+25) — Showing {moviesdriveDisplayedPosts.length} of {skymoviesTotalFound ? skymoviesTotalFound.toLocaleString() : moviesdriveFilteredPosts.length}
                                       </>
                                     )}
                                   </button>
+                                  {skymoviesVisibleLimit < moviesdriveFilteredPosts.length && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSkymoviesVisibleLimit(moviesdriveFilteredPosts.length)}
+                                      className="px-4 py-2 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-400 font-bold text-xs transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+                                      title="Display all results from scraping/search"
+                                    >
+                                      Show All ({moviesdriveFilteredPosts.length})
+                                    </button>
+                                  )}
                                 </div>
                               )}
 

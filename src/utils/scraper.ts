@@ -5,6 +5,7 @@ import {
   getHdhub4uDomain,
   getSkymoviesDomain,
   getFilmyflyDomain,
+  normalizeHubcloudDomain,
 } from './domains';
 import {
   normalizeUrl,
@@ -165,7 +166,8 @@ export async function scrapeHdhub4uPostLinks(
 export async function scrapeSkymoviesPosts(
   query: string,
   pageOrSignal: number | AbortSignal = 1,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  minimal = false
 ): Promise<ProviderPost[]> {
   try {
     const page = typeof pageOrSignal === 'number' ? pageOrSignal : 1;
@@ -174,12 +176,38 @@ export async function scrapeSkymoviesPosts(
     const sUrl = page > 1
       ? `${domain}/search.php?search=${encodeURIComponent(query)}&page=${page}&cat=All`
       : `${domain}/search.php?search=${encodeURIComponent(query)}&cat=All`;
-    const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(sUrl)}`, { signal: sig });
+    const minimalParam = minimal ? '&minimal=true' : '';
+    const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(sUrl)}${minimalParam}`, { signal: sig });
     if (!res.ok) return [];
     const data = await res.json();
     return data.posts || [];
   } catch {
     return [];
+  }
+}
+
+/**
+ * Fast minimal check to see if content exists on SkyMoviesHD for library/catalog availability.
+ * Always in reverse of total search (newest items first) without slow poster fetching overhead.
+ */
+export async function checkSkymoviesAvailability(
+  query: string,
+  signal?: AbortSignal
+): Promise<{ available: boolean; totalFound: number; samplePosts: ProviderPost[] }> {
+  try {
+    const domain = getSkymoviesDomain();
+    const sUrl = `${domain}/search.php?search=${encodeURIComponent(query)}&cat=All`;
+    const res = await fetch(`/api/skymovieshd?url=${encodeURIComponent(sUrl)}&minimal=true&limit=10`, { signal });
+    if (!res.ok) return { available: false, totalFound: 0, samplePosts: [] };
+    const data = await res.json();
+    const posts = data.posts || [];
+    return {
+      available: posts.length > 0,
+      totalFound: data.total_found || posts.length,
+      samplePosts: posts
+    };
+  } catch {
+    return { available: false, totalFound: 0, samplePosts: [] };
   }
 }
 
@@ -293,10 +321,11 @@ export async function scrapeFilesdlLink(
  */
 export async function extractHubcloudDirectLink(url: string): Promise<any> {
   try {
+    const targetUrl = normalizeHubcloudDomain(url) || url;
     const res = await fetch('/api/hubcloud/direct-link', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url: targetUrl }),
     });
     if (!res.ok) return null;
     return await res.json();

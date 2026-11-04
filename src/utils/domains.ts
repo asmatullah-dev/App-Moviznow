@@ -1,7 +1,50 @@
 import { safeStorage } from './safeStorage';
 
 export const HUBCLOUD_DOMAIN = 'https://hubcloud.ist';
+export const DEFAULT_HUBCLOUD_DOMAIN = 'https://hubcloud.ist';
 export const HUBDRIVE_DOMAIN = 'https://hubdrive.space';
+
+/**
+ * Checks if a hostname or domain belongs to HubCloud (any legacy or active TLD).
+ */
+export function isHubcloudDomain(hostname: string): boolean {
+  if (!hostname) return false;
+  const host = hostname.toLowerCase().replace(/^www\./, '');
+  return host === 'hubcloud.ist' || /^(?:.*\.)?hubcloud\.[a-z0-9]+$/i.test(host) || /^(?:.*\.)?hubcould\.[a-z0-9]+$/i.test(host);
+}
+
+/**
+ * Automatically converts any old or legacy HubCloud URL (e.g. hubcloud.art, hubcloud.one,
+ * hubcloud.foo, hubcould, hubcloud.cx, hubcloud.club, hubcloud.lol, etc.) to the latest
+ * hubcloud domain (hubcloud.ist) before sending any request.
+ */
+export function normalizeHubcloudDomain(rawUrl: string): string {
+  if (!rawUrl) return '';
+  const trimmed = rawUrl.trim();
+  const latestDomain = getHubcloudDomain();
+  let targetHost = 'hubcloud.ist';
+  try {
+    targetHost = new URL(latestDomain).hostname;
+  } catch {}
+
+  try {
+    const parsed = new URL(trimmed.startsWith('http://') || trimmed.startsWith('https://') ? trimmed : `https://${trimmed}`);
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    if ((host.includes('hubcloud') || host.includes('hubcould')) && host !== targetHost) {
+      parsed.hostname = targetHost;
+      return parsed.toString();
+    }
+    return trimmed;
+  } catch {
+    if (/(?:hubcloud|hubcould)\.[a-z0-9]+/i.test(trimmed)) {
+      return trimmed.replace(
+        /https?:\/\/(?:www\.)?(?:hubcloud|hubcould)\.[a-z0-9]+/i,
+        latestDomain.replace(/\/+$/, '')
+      );
+    }
+    return trimmed;
+  }
+}
 
 export function getHubcloudDomain(): string {
   const stored = safeStorage.getItem('custom_hubcloud_domain');
@@ -11,7 +54,20 @@ export function getHubcloudDomain(): string {
       domain = 'https://' + domain;
     }
     const clean = domain.replace(/\/+$/, '');
-    if (clean.includes('hubcloud.one') || clean.includes('hubcloud.foo') || clean.includes('hubcould') || clean.includes('hubcloud.cx')) {
+    if (
+      clean.includes('hubcloud.art') ||
+      clean.includes('hubcloud.one') ||
+      clean.includes('hubcloud.foo') ||
+      clean.includes('hubcould') ||
+      clean.includes('hubcloud.cx') ||
+      clean.includes('hubcloud.club') ||
+      clean.includes('hubcloud.lol') ||
+      clean.includes('hubcloud.best') ||
+      clean.includes('hubcloud.ink') ||
+      clean.includes('hubcloud.top') ||
+      clean.includes('hubcloud.icu') ||
+      (clean.includes('hubcloud.') && !clean.includes('hubcloud.ist'))
+    ) {
       safeStorage.setItem('custom_hubcloud_domain', HUBCLOUD_DOMAIN);
       return HUBCLOUD_DOMAIN;
     }
@@ -25,7 +81,7 @@ export function setHubcloudDomain(domain: string): void {
 }
 
 export const DEFAULT_MOVIESDRIVE_DOMAIN = 'https://new3.moviesdrive.christmas';
-export const DEFAULT_SKYMOVIES_DOMAIN = 'https://new3.skymovieshd.clinic/';
+export const DEFAULT_SKYMOVIES_DOMAIN = 'https://new4.skymovieshd.clinic';
 export const DEFAULT_FILMYGO_DOMAIN = 'https://filmycab.im';
 export const DEFAULT_HDHUB4U_DOMAIN = 'https://new5.hdhub4u.cl';
 export const DEFAULT_FILMYFLY_DOMAIN = 'https://filmyfly.army';
@@ -59,7 +115,7 @@ export function getSkymoviesDomain(): string {
       domain = 'https://' + domain;
     }
     const clean = domain.replace(/\/+$/, '');
-    if (clean.includes('skymovieshd.ceo')) {
+    if (clean.includes('skymovieshd.ceo') || clean.includes('new3.skymovieshd.clinic') || clean.includes('new1.skymovieshd') || clean.includes('new2.skymovieshd')) {
       safeStorage.setItem('custom_skymovies_domain', DEFAULT_SKYMOVIES_DOMAIN);
       return DEFAULT_SKYMOVIES_DOMAIN;
     }

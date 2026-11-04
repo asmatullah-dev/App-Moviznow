@@ -5,9 +5,9 @@ export function normalizeDomain(url: string): string {
     if (!url) return "";
     let trimmed = url.trim();
     try {
-        const urlObj = new URL(trimmed);
-        const host = urlObj.hostname.toLowerCase();
-        if (/hubcloud\.(?:one|foo|club|lol|best|ink|top|icu|biz|pro|link|click|cx)/i.test(host) || host.includes("hubcould")) {
+        const urlObj = new URL(trimmed.startsWith("http://") || trimmed.startsWith("https://") ? trimmed : `https://${trimmed}`);
+        const host = urlObj.hostname.toLowerCase().replace(/^www\./, "");
+        if ((host.includes("hubcloud") || host.includes("hubcould")) && host !== "hubcloud.ist") {
             urlObj.hostname = "hubcloud.ist";
         }
         if (host.includes("hubcloud") || host.includes("hubcould") || host.includes("hubdrive") || urlObj.hostname.includes("hubcloud")) {
@@ -16,8 +16,8 @@ export function normalizeDomain(url: string): string {
         }
     } catch (e) {
         // Fallback for non-standard links or parsing issues
-        if (/https?:\/\/(?:www\.)?(?:hubcloud\.(?:one|foo|club|lol|best|ink|top|icu|biz|pro|link|click|cx)|hubcould\.\w+)/i.test(trimmed)) {
-            trimmed = trimmed.replace(/https?:\/\/(?:www\.)?(?:hubcloud\.(?:one|foo|club|lol|best|ink|top|icu|biz|pro|link|click|cx)|hubcould\.\w+)/i, "https://hubcloud.ist");
+        if (/(?:hubcloud|hubcould)\.[a-z0-9]+/i.test(trimmed)) {
+            trimmed = trimmed.replace(/https?:\/\/(?:www\.)?(?:hubcloud|hubcould)\.[a-z0-9]+/i, "https://hubcloud.ist");
         }
         if (trimmed.includes("hubcloud") || trimmed.includes("hubcould") || trimmed.includes("hubdrive")) {
             const hashIdx = trimmed.indexOf("#");

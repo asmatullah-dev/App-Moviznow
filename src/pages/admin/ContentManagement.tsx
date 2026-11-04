@@ -7155,6 +7155,7 @@ export default function ContentManagement() {
         initialInput={waterfallBulkInput}
         initialEnableWaterfall={true}
         isBatchMode={true}
+        autoStart={true}
         onBatchAddLinks={handleBatchAddLinks}
         languages={languages}
         qualities={qualities}

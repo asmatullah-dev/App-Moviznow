@@ -3629,22 +3629,32 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
 
       const urlObj = new URL(targetUrl);
       const searchParam = urlObj.searchParams.get('search') || urlObj.searchParams.get('q') || urlObj.searchParams.get('s') || '';
-      const isSearchUrl = targetUrl.includes('search.php') || Boolean(searchParam) || urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.php') || urlObj.pathname.endsWith('index.html');
+      const isSearchUrl = targetUrl.includes('search.php') ||
+                          Boolean(searchParam) ||
+                          urlObj.pathname === '/' ||
+                          urlObj.pathname === '' ||
+                          urlObj.pathname.endsWith('index.php') ||
+                          urlObj.pathname.endsWith('index.html') ||
+                          urlObj.pathname.includes('/category/') ||
+                          urlObj.pathname.includes('/genre/') ||
+                          urlObj.pathname.includes('/tag/') ||
+                          urlObj.pathname.includes('/catalog/');
 
       if (isSearchUrl) {
-        console.log(`[SkymoviesHD] Search page detected, checking cache and parsing catalog posts...`);
+        console.log(`[SkymoviesHD] Search or catalog page detected: ${targetUrl}`);
 
-        // Cache key strips pagination/slicing parameters
+        // Cache key strips offset and limit, but retains page for paginated categories
         let cacheKey = targetUrl;
         try {
           const ck = new URL(targetUrl);
-          ck.searchParams.delete('page');
           ck.searchParams.delete('offset');
           ck.searchParams.delete('limit');
           cacheKey = ck.toString();
         } catch (e) {}
 
-        const limit = Math.min(Math.max(parseInt((req.query.limit as string) || urlObj.searchParams.get('limit') || '500', 10), 1), 1000);
+        const isMinimal = req.query.minimal === 'true' || req.query.minimal === '1' || req.query.mode === 'minimal';
+        const defaultLimit = isMinimal ? 25 : 5000;
+        const limit = Math.min(Math.max(parseInt((req.query.limit as string) || urlObj.searchParams.get('limit') || String(defaultLimit), 10), 1), 10000);
         let offset = 0;
         if (req.query.offset || urlObj.searchParams.get('offset')) {
           offset = Math.max(0, parseInt((req.query.offset as string) || urlObj.searchParams.get('offset') || '0', 10));
@@ -3656,21 +3666,20 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         let allPosts: { title: string; url: string; image?: string }[] = [];
         const cached = skymoviesSearchCache.get(cacheKey);
 
-        if (cached && (Date.now() - cached.timestamp < 15 * 60 * 1000) && cached.allPosts.length > 0) {
+        if (cached && (Date.now() - cached.timestamp < 30 * 60 * 1000) && cached.allPosts.length > 0) {
           console.log(`[SkymoviesHD] Serving from cache: ${cached.allPosts.length} posts for ${cacheKey}`);
           allPosts = cached.allPosts;
         } else {
-          // Fetch remote HTML without offset/page params
+          // Fetch remote HTML without offset/limit (keep page for categories)
           let fetchUrl = targetUrl;
           try {
             const fu = new URL(targetUrl);
             fu.searchParams.delete('offset');
             fu.searchParams.delete('limit');
-            fu.searchParams.delete('page');
             fetchUrl = fu.toString();
           } catch(e) {}
 
-          const response = await fetch(fetchUrl, { headers, signal: AbortSignal.timeout(25000) });
+          const response = await fetch(fetchUrl, { headers, signal: AbortSignal.timeout(25000), redirect: 'follow' });
           if (!response.ok) throw new Error(`SkymoviesHD returned ${response.status}`);
           const text = await response.text();
 
@@ -3688,7 +3697,13 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             try {
               let href = match[1].trim();
               if (!href) continue;
-              if (href.startsWith("/")) href = urlObj.origin + href;
+
+              // Properly resolve all URLs including relative paths like 'movie/xyz.html' without leading slash
+              try {
+                href = new URL(href, fetchUrl).href;
+              } catch (e) {
+                continue;
+              }
               if (!href.startsWith("http")) continue;
 
               const u = new URL(href);
@@ -3700,7 +3715,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               const innerHtml = match[2];
               let title = innerHtml.replace(/<[^>]+>/g, " ").replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
               if (!title || title.length <= 2) continue;
-              if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) continue;
+              if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help|home|back)/i.test(title)) continue;
 
               let image = "";
               const imgMatch = innerHtml.match(/<img\s+[^>]*src=["']([^"']+)["']/i) ||
@@ -3708,7 +3723,7 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
               if (imgMatch) {
                 const src = imgMatch[1].trim();
                 if (src && !isDummyImg(src)) {
-                  try { image = new URL(src, targetUrl).href; } catch(e) { image = src; }
+                  try { image = new URL(src, fetchUrl).href; } catch(e) { image = src; }
                 }
               }
 
@@ -3726,7 +3741,11 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             $("a[href]").each((_, el) => {
               let href = $(el).attr("href") || "";
               if (!href) return;
-              if (href.startsWith("/")) href = urlObj.origin + href;
+              try {
+                href = new URL(href, fetchUrl).href;
+              } catch (e) {
+                return;
+              }
               if (!href.startsWith("http")) return;
 
               try {
@@ -3767,12 +3786,12 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
                   image = getImgSrc($(el).prev("img")) || getImgSrc($(el).next("img")) || getImgSrc($(el).parent().find("img"));
                 }
                 if (image) {
-                  try { image = new URL(image, targetUrl).href; } catch(e) {}
+                  try { image = new URL(image, fetchUrl).href; } catch(e) {}
                 }
                 if (isDummyImg(image)) image = "";
 
                 title = title.replace(/&#8211;/g, "-").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
-                if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help)/i.test(title)) return;
+                if (/(contact|dmca|about|privacy|disclaimer|telegram|facebook|twitter|instagram|login|register|request|how to|site search|search|faq|terms|sitemap|report|help|home|back)/i.test(title)) return;
 
                 if (title && title.length > 2) {
                   if (!postsMap.has(href)) {
@@ -3791,11 +3810,16 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
             image: data.image
           }));
 
-          // Arrange/group posts so variants of same movie (diff quality/size) sit together
-          allPosts = groupCatalogPosts(rawPosts);
+          // Reverse search results so newest content (which appears at the end of search.php) comes first!
+          // For home catalog pages (/), keep top-to-bottom order where Latest Updated Movies are already on top.
+          const isHomeCatalog = urlObj.pathname === '/' || urlObj.pathname === '' || urlObj.pathname.endsWith('index.php') || urlObj.pathname.endsWith('index.html');
+          const reversedRaw = isHomeCatalog ? rawPosts : [...rawPosts].reverse();
 
-          // Save in cache (capped to 25 entries)
-          if (skymoviesSearchCache.size >= 25) {
+          // Arrange/group posts so variants of same movie (diff quality/size) sit together, preserving newest-first order
+          allPosts = groupCatalogPosts(reversedRaw);
+
+          // Save in cache (capped to 100 entries, 30 min expiration)
+          if (skymoviesSearchCache.size >= 100) {
             const firstKey = skymoviesSearchCache.keys().next().value;
             if (firstKey) skymoviesSearchCache.delete(firstKey);
           }
@@ -3805,33 +3829,35 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
         const posts = allPosts.slice(offset, offset + limit);
         const hasMore = (offset + limit) < allPosts.length;
 
-        // Fetch real poster images for top 8 posts if image is missing/dummy
-        const isDummyImg = (src?: string) => {
-          if (!src) return true;
-          return /arw\.gif|logo|favicon|icon|blank|default|\.gif$/i.test(src);
-        };
-        const needPosterBatch = posts.slice(0, 8).filter(p => !p.image || isDummyImg(p.image));
-        if (needPosterBatch.length > 0) {
-          await Promise.all(needPosterBatch.map(async (p) => {
-            try {
-              const pRes = await fetch(p.url, {
-                headers: { 'User-Agent': headers['User-Agent'] },
-                signal: AbortSignal.timeout(1800)
-              });
-              if (pRes.ok) {
-                const pText = await pRes.text();
-                const imgMatch = pText.match(/<img\s+[^>]*src=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|webp))["']/i) ||
-                                 pText.match(/<img\s+[^>]*src=["'](\/images\/[^"']+\.(?:jpg|jpeg|png|webp))["']/i);
-                if (imgMatch) {
-                  let foundImg = imgMatch[1];
-                  if (!isDummyImg(foundImg)) {
-                    try { foundImg = new URL(foundImg, p.url).href; } catch(e) {}
-                    p.image = foundImg;
+        // Fetch real poster images for top posts ONLY if not in minimal mode (skip during fast minimal checks)
+        if (!isMinimal) {
+          const isDummyImg = (src?: string) => {
+            if (!src) return true;
+            return /arw\.gif|logo|favicon|icon|blank|default|\.gif$/i.test(src);
+          };
+          const needPosterBatch = posts.slice(0, 4).filter(p => !p.image || isDummyImg(p.image));
+          if (needPosterBatch.length > 0) {
+            await Promise.all(needPosterBatch.map(async (p) => {
+              try {
+                const pRes = await fetch(p.url, {
+                  headers: { 'User-Agent': headers['User-Agent'] },
+                  signal: AbortSignal.timeout(600)
+                });
+                if (pRes.ok) {
+                  const pText = await pRes.text();
+                  const imgMatch = pText.match(/<img\s+[^>]*src=["'](https?:\/\/[^"']+\.(?:jpg|jpeg|png|webp))["']/i) ||
+                                   pText.match(/<img\s+[^>]*src=["'](\/images\/[^"']+\.(?:jpg|jpeg|png|webp))["']/i);
+                  if (imgMatch) {
+                    let foundImg = imgMatch[1];
+                    if (!isDummyImg(foundImg)) {
+                      try { foundImg = new URL(foundImg, p.url).href; } catch(e) {}
+                      p.image = foundImg;
+                    }
                   }
                 }
-              }
-            } catch(e) {}
-          }));
+              } catch(e) {}
+            }));
+          }
         }
 
         return res.json({
@@ -3843,7 +3869,9 @@ async function fetchAndCacheHubcloud(url: string, force = false): Promise<any> {
           limit,
           page: Math.floor(offset / limit) + 1,
           total_pages: Math.ceil(allPosts.length / limit),
-          has_more: hasMore
+          has_more: hasMore,
+          is_minimal: isMinimal,
+          reversed: true
         });
       }
 

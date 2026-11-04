@@ -61,7 +61,7 @@ export function normalizeContentUrl(rawUrl: string): string {
   } catch (e) {
     // If URL parsing fails, attempt regex fallback
     return urlStr
-      .replace(/https?:\/\/(?:www\.)?(?:hubcloud\.one|hubcloud\.foo|hubcould\.\w+|hubcloud\.cx)/gi, HUBCLOUD_DOMAIN)
+      .replace(/https?:\/\/(?:www\.)?(?:hubcloud|hubcould)\.[a-z0-9]+/gi, HUBCLOUD_DOMAIN)
       .replace(/https?:\/\/(?:www\.)?hubdrive\.\w+/gi, HUBDRIVE_DOMAIN);
   }
 }

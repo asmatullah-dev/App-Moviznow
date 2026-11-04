@@ -229,7 +229,7 @@ async function scanAndVerifyCandidates(
 
     if (isMissingPixeldrain(r)) {
       // If candidates list was empty (e.g. momentary timeout during concurrent batch check),
-      // do a fast single targeted re-scan to rescue the working link before discarding
+      // do a fast single targeted re-scan to rescue the working link before fallback
       try {
         const recheck = await performFullLinkScan(
           r.url,
@@ -247,8 +247,10 @@ async function scanAndVerifyCandidates(
           validResults.push(recheck);
           continue;
         }
+        validResults.push(recheck);
+        continue;
       } catch {}
-      // If it still lacks pixeldrain, skip
+      validResults.push(r);
       continue;
     }
 
@@ -347,6 +349,7 @@ async function scanAndVerifyCandidates(
       detectedSubtitles = true;
     }
 
+    const hasPixel = hasPixeldrainDownload(r);
     const item: ScrapedLinkItem = {
       id: `bulk-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
       source: (r as any).source || 'FilmyGo',
@@ -368,6 +371,8 @@ async function scanAndVerifyCandidates(
       status: r.statusLabel,
       fileName: r.fileName,
       finalUrl: r.finalUrl,
+      hasPixeldrain: hasPixel,
+      candidates: r.candidates,
     };
 
     if (isSample && !sampleItem) {
@@ -392,7 +397,95 @@ async function scanAndVerifyCandidates(
   };
 }
 
+export function hasPixeldrainDownload(
+  item:
+    | ScrapedLinkItem
+    | LinkCheckResult
+    | {
+        url?: string;
+        finalUrl?: string;
+        candidates?: Array<{ text: string; href: string }>;
+        hasPixeldrain?: boolean;
+      }
+    | null
+    | undefined,
+  checkResults?: LinkCheckResult[]
+): boolean {
+  if (!item) return false;
+  if ((item as any).hasPixeldrain === true) return true;
+
+  const url = ((item as any).finalUrl || (item as any).url || '').toLowerCase();
+
+  // 1. Direct Pixeldrain URL
+  if (
+    url.includes('pixeldrain.com') ||
+    url.includes('pixeldrain.dev') ||
+    url.includes('pixeldrain.net') ||
+    url.includes('pixel.drain') ||
+    url.includes('pixeldra.in')
+  ) {
+    return true;
+  }
+
+  // 2. Candidates attached directly to item
+  const candidates = (item as any).candidates;
+  if (Array.isArray(candidates) && candidates.length > 0) {
+    const hasPixelCandidate = candidates.some((c) => {
+      const text = (c?.text || '').toLowerCase();
+      const href = (c?.href || '').toLowerCase();
+      return (
+        text.includes('pixeldrain') ||
+        text.includes('pixel.drain') ||
+        text.includes('pixeldra.in') ||
+        href.includes('pixeldrain') ||
+        href.includes('pixel.drain') ||
+        href.includes('pixeldra.in')
+      );
+    });
+    if (hasPixelCandidate) return true;
+  }
+
+  // 3. Match against checkResults if provided
+  if (checkResults && checkResults.length > 0) {
+    const normUrl = normalizeUrl((item as any).url || '');
+    const normFinal = normalizeUrl((item as any).finalUrl || '');
+    const matched = checkResults.find((r) => {
+      const rNorm = normalizeUrl(r.url || '');
+      const rFinal = normalizeUrl(r.finalUrl || '');
+      return (
+        (normUrl && (normUrl === rNorm || normUrl === rFinal)) ||
+        (normFinal && (normFinal === rNorm || normFinal === rFinal))
+      );
+    });
+    if (matched) {
+      if (
+        matched.url?.toLowerCase().includes('pixeldrain') ||
+        matched.finalUrl?.toLowerCase().includes('pixeldrain')
+      ) {
+        return true;
+      }
+      if (Array.isArray(matched.candidates) && matched.candidates.length > 0) {
+        return matched.candidates.some((c) => {
+          const text = (c?.text || '').toLowerCase();
+          const href = (c?.href || '').toLowerCase();
+          return (
+            text.includes('pixeldrain') ||
+            text.includes('pixel.drain') ||
+            text.includes('pixeldra.in') ||
+            href.includes('pixeldrain') ||
+            href.includes('pixel.drain') ||
+            href.includes('pixeldra.in')
+          );
+        });
+      }
+    }
+  }
+
+  return false;
+}
+
 export function isPixeldrainOrHubcloudLink(item: ScrapedLinkItem | string): boolean {
+  if (typeof item !== 'string' && hasPixeldrainDownload(item)) return true;
   const text = typeof item === 'string'
     ? item.toLowerCase()
     : `${item.url || ''} ${item.finalUrl || ''} ${item.fileName || ''} ${item.sourceTitle || ''}`.toLowerCase();
@@ -410,36 +503,87 @@ export function isPixeldrainOrHubcloudLink(item: ScrapedLinkItem | string): bool
   );
 }
 
-export function isSatisfiedFilmygoStage(links: ScrapedLinkItem[], type: 'movie' | 'series' = 'movie'): boolean {
-  if (!links || links.length === 0) return false;
+export interface WaterfallSatisfactionStatus {
+  isSatisfied: boolean;
+  missingReasons: string[];
+  has480pWithPixeldrain: boolean;
+  has720pWithPixeldrain: boolean;
+  has720pHevcWithPixeldrain: boolean;
+  is720pOver145GB: boolean;
+  has1080pWithPixeldrain: boolean;
+  over5gb1080pFound: boolean;
+}
 
-  // Filter links strictly to those pointing to Pixeldrain or HubCloud (which extracts/serves Pixeldrain direct links)
-  const pixeldrainLinks = links.filter((l) => isPixeldrainOrHubcloudLink(l));
-  if (pixeldrainLinks.length === 0) return false;
+export function evaluateWaterfallSatisfaction(
+  links: ScrapedLinkItem[],
+  type: 'movie' | 'series' = 'movie',
+  checkResults?: LinkCheckResult[]
+): WaterfallSatisfactionStatus {
+  const missingReasons: string[] = [];
 
-  const linksToUse = pixeldrainLinks;
+  if (!links || links.length === 0) {
+    return {
+      isSatisfied: false,
+      missingReasons: ['No links discovered yet'],
+      has480pWithPixeldrain: false,
+      has720pWithPixeldrain: false,
+      has720pHevcWithPixeldrain: false,
+      is720pOver145GB: false,
+      has1080pWithPixeldrain: false,
+      over5gb1080pFound: false,
+    };
+  }
 
   if (type === 'series') {
-    const validSeriesLinks = linksToUse.filter((l) => {
+    const validSeriesLinks = links.filter((l) => {
       if (l.isSample) return false;
       if (l.quality === '1080p') {
         const sizeGB = getHitSizeGB(l) || parseSizeInGB(l.size) || (l.bytes ? l.bytes / (1024 * 1024 * 1024) : 0);
         if (sizeGB >= 5.0) return false;
       }
-      return true;
+      return hasPixeldrainDownload(l, checkResults);
     });
-    return hasAnyHdLinks(validSeriesLinks) && validSeriesLinks.length >= 2;
+
+    const isSatisfied = hasAnyHdLinks(validSeriesLinks) && validSeriesLinks.length >= 2;
+    if (!isSatisfied) {
+      missingReasons.push('Series requires at least 2 HD episode links with Pixeldrain');
+    }
+    return {
+      isSatisfied,
+      missingReasons,
+      has480pWithPixeldrain: false,
+      has720pWithPixeldrain: false,
+      has720pHevcWithPixeldrain: false,
+      is720pOver145GB: false,
+      has1080pWithPixeldrain: false,
+      over5gb1080pFound: false,
+    };
   }
 
-  // Check 480p (strictly non-sample)
-  const has480p = linksToUse.some((l) => l.quality === '480p' && !l.isSample);
+  // === MOVIE EVALUATION ===
+  // 1. Check 480p (strictly non-sample with verified Pixeldrain)
+  const nonSample480p = links.filter((l) => l.quality === '480p' && !l.isSample);
+  const pixel480p = nonSample480p.filter((l) => hasPixeldrainDownload(l, checkResults));
+  const has480pWithPixeldrain = pixel480p.length > 0;
 
-  // Check 720p
-  const nonHevc720p = linksToUse.filter((l) => l.quality === '720p' && !l.isHevc && !l.isSample);
-  const hevc720p = linksToUse.filter((l) => l.quality === '720p' && l.isHevc && !l.isSample);
-  const has720p = nonHevc720p.length > 0 || hevc720p.length > 0;
+  if (!has480pWithPixeldrain) {
+    if (nonSample480p.length > 0) {
+      missingReasons.push('480p found but missing Pixeldrain download option');
+    } else {
+      missingReasons.push('480p missing completely');
+    }
+  }
+
+  // 2. Check 720p
+  const nonSample720p = links.filter((l) => l.quality === '720p' && !l.isSample);
+  const nonHevc720p = nonSample720p.filter((l) => !l.isHevc);
+  const hevc720p = nonSample720p.filter((l) => l.isHevc);
+
+  const pixelNonHevc720p = nonHevc720p.filter((l) => hasPixeldrainDownload(l, checkResults));
+  const pixelHevc720p = hevc720p.filter((l) => hasPixeldrainDownload(l, checkResults));
 
   let is720pOver145GB = false;
+  let smallest720pSizeGB = 0;
   if (nonHevc720p.length > 0) {
     const smallest720p = nonHevc720p.reduce((min, cur) => {
       const szMin = getHitSizeGB(min) || parseSizeInGB(min.size) || (min.bytes ? min.bytes / (1024 * 1024 * 1024) : 0);
@@ -447,31 +591,81 @@ export function isSatisfiedFilmygoStage(links: ScrapedLinkItem[], type: 'movie' 
       return (szCur > 0 && (szMin === 0 || szCur < szMin)) ? cur : min;
     }, nonHevc720p[0]);
 
-    const sizeGB =
+    smallest720pSizeGB =
       getHitSizeGB(smallest720p) ||
       parseSizeInGB(smallest720p.size) ||
       (smallest720p.bytes ? smallest720p.bytes / (1024 * 1024 * 1024) : 0);
-    if (sizeGB > 1.45) {
+    if (smallest720pSizeGB > 1.45) {
       is720pOver145GB = true;
     }
   }
 
-  // If 720p is greater than 1.45GB, then 720p HEVC is strictly COMPULSORY to get
-  const hasRequired720p = is720pOver145GB
-    ? hevc720p.length > 0
-    : has720p;
+  // If 720p is greater than 1.45GB, 720p HEVC with Pixeldrain is strictly COMPULSORY
+  const has720pHevcWithPixeldrain = pixelHevc720p.length > 0;
+  const has720pWithPixeldrain = is720pOver145GB
+    ? has720pHevcWithPixeldrain
+    : (pixelNonHevc720p.length > 0 || pixelHevc720p.length > 0);
 
-  // Check 1080p: strictly skip if 5GB or greater (< 5GB required)!
-  const has1080p = linksToUse.some((l) => {
-    if (l.quality !== '1080p' || l.isSample) return false;
-    const sizeGB =
-      getHitSizeGB(l) ||
-      parseSizeInGB(l.size) ||
-      (l.bytes ? l.bytes / (1024 * 1024 * 1024) : 0);
+  if (!has720pWithPixeldrain) {
+    if (is720pOver145GB) {
+      if (hevc720p.length > 0) {
+        missingReasons.push(`720p is ${smallest720pSizeGB.toFixed(2)} GB (>1.45GB); 720p HEVC found but missing Pixeldrain`);
+      } else {
+        missingReasons.push(`720p is ${smallest720pSizeGB.toFixed(2)} GB (>1.45GB); compulsory 720p HEVC with Pixeldrain not found`);
+      }
+    } else {
+      if (nonSample720p.length > 0) {
+        missingReasons.push('720p found but missing Pixeldrain download option');
+      } else {
+        missingReasons.push('720p missing completely');
+      }
+    }
+  }
+
+  // 3. Check 1080p (< 5.0 GB)
+  const nonSample1080p = links.filter((l) => l.quality === '1080p' && !l.isSample);
+  const over5gb1080pList = nonSample1080p.filter((l) => {
+    const sizeGB = getHitSizeGB(l) || parseSizeInGB(l.size) || (l.bytes ? l.bytes / (1024 * 1024 * 1024) : 0);
+    return sizeGB >= 5.0;
+  });
+  const under5gb1080p = nonSample1080p.filter((l) => {
+    const sizeGB = getHitSizeGB(l) || parseSizeInGB(l.size) || (l.bytes ? l.bytes / (1024 * 1024 * 1024) : 0);
     return sizeGB < 5.0;
   });
+  const pixel1080p = under5gb1080p.filter((l) => hasPixeldrainDownload(l, checkResults));
+  const has1080pWithPixeldrain = pixel1080p.length > 0;
 
-  return Boolean(has480p && hasRequired720p && has1080p);
+  if (!has1080pWithPixeldrain) {
+    if (under5gb1080p.length > 0) {
+      missingReasons.push('1080p (<5GB) found but missing Pixeldrain download option');
+    } else if (over5gb1080pList.length > 0) {
+      const sz = getHitSizeGB(over5gb1080pList[0]) || parseSizeInGB(over5gb1080pList[0].size);
+      missingReasons.push(`1080p (${sz ? sz.toFixed(2) + ' GB' : '>=5GB'}) is 5GB or greater (<5GB required)`);
+    } else {
+      missingReasons.push('1080p (<5GB) missing completely');
+    }
+  }
+
+  const isSatisfied = Boolean(has480pWithPixeldrain && has720pWithPixeldrain && has1080pWithPixeldrain);
+
+  return {
+    isSatisfied,
+    missingReasons,
+    has480pWithPixeldrain,
+    has720pWithPixeldrain,
+    has720pHevcWithPixeldrain,
+    is720pOver145GB,
+    has1080pWithPixeldrain,
+    over5gb1080pFound: over5gb1080pList.length > 0,
+  };
+}
+
+export function isSatisfiedFilmygoStage(
+  links: ScrapedLinkItem[],
+  type: 'movie' | 'series' = 'movie',
+  checkResults?: LinkCheckResult[]
+): boolean {
+  return evaluateWaterfallSatisfaction(links, type, checkResults).isSatisfied;
 }
 
 /**
@@ -848,8 +1042,9 @@ export async function runWaterfallLinkSearch(
     finalMetadata = { ...finalMetadata, ...s1Result.metadata };
     if (s1Result.sample) finalSample = s1Result.sample;
 
-    if (isSatisfiedFilmygoStage(s1Result.scrapedItems, type)) {
-      log(`✓ FilmyGo: Complete set (480p, 720p [HEVC if >1.45GB is compulsory], and 1080p [<5GB]) found by first stage! Stopping waterfall.`);
+    const s1Eval = evaluateWaterfallSatisfaction(s1Result.scrapedItems, type, allCheckResults);
+    if (s1Eval.isSatisfied) {
+      log(`✓ FilmyGo: Complete set (480p, 720p [HEVC if >1.45GB], and 1080p [<5GB]) ALL with Pixeldrain verified! Stopping waterfall immediately.`);
       finalProvider = 'FilmyGo (Complete)';
       return finishWaterfall(
         allDiscoveredLinks,
@@ -862,15 +1057,7 @@ export async function runWaterfallLinkSearch(
         type
       );
     } else {
-      const over5gb1080p = s1Result.scrapedItems.find(
-        (l) => l.quality === '1080p' && (getHitSizeGB(l) >= 5.0 || parseSizeInGB(l.size) >= 5.0)
-      );
-      if (over5gb1080p) {
-        const sz = getHitSizeGB(over5gb1080p) || parseSizeInGB(over5gb1080p.size);
-        log(`FilmyGo: 1080p link (${sz ? sz.toFixed(2) + ' GB' : '>=5GB'}) is 5GB or greater. Proceeding to Stage 2 (MoviesDrive) for 1080p < 5GB...`);
-      } else {
-        log(`FilmyGo: Missing one or more required qualities (480p, 720p [HEVC if >1.45GB is compulsory], 1080p [<5GB]). Proceeding to Stage 2 (MoviesDrive)...`);
-      }
+      log(`FilmyGo: ${s1Eval.missingReasons.join('; ')}. Proceeding to Stage 2 (MoviesDrive)...`);
     }
   } else {
     log(`FilmyGo: No matching posts/links found. Proceeding to Stage 2 (MoviesDrive)...`);
@@ -906,8 +1093,9 @@ export async function runWaterfallLinkSearch(
       finalMetadata = { ...finalMetadata, ...s2Result.metadata };
       if (s2Result.sample && !finalSample) finalSample = s2Result.sample;
 
-      if (isSatisfiedFilmygoStage(allDiscoveredLinks, type)) {
-        log(`✓ MoviesDrive: All required HD links verified in combination! Finalized at Stage 2.`);
+      const s2Eval = evaluateWaterfallSatisfaction(allDiscoveredLinks, type, allCheckResults);
+      if (s2Eval.isSatisfied) {
+        log(`✓ MoviesDrive: All required HD links (480p, 720p, 1080p) with Pixeldrain verified in combination! Finalized at Stage 2.`);
         finalProvider = 'MoviesDrive / Multi-Source';
         return finishWaterfall(
           allDiscoveredLinks,
@@ -920,7 +1108,7 @@ export async function runWaterfallLinkSearch(
           type
         );
       } else {
-        log(`MoviesDrive: Incomplete links. Proceeding to Stage 3 (HDHub4U)...`);
+        log(`MoviesDrive: ${s2Eval.missingReasons.join('; ')}. Proceeding to Stage 3 (HDHub4U)...`);
       }
     } else {
       log(`MoviesDrive: No matching posts/links found. Proceeding to Stage 3 (HDHub4U)...`);
@@ -957,8 +1145,9 @@ export async function runWaterfallLinkSearch(
       finalMetadata = { ...finalMetadata, ...s3Result.metadata };
       if (s3Result.sample && !finalSample) finalSample = s3Result.sample;
 
-      if (isSatisfiedFilmygoStage(allDiscoveredLinks, type)) {
-        log(`✓ HDHub4U: All required HD links verified in combination! Finalized at Stage 3.`);
+      const s3Eval = evaluateWaterfallSatisfaction(allDiscoveredLinks, type, allCheckResults);
+      if (s3Eval.isSatisfied) {
+        log(`✓ HDHub4U: All required HD links (480p, 720p, 1080p) with Pixeldrain verified in combination! Finalized at Stage 3.`);
         finalProvider = 'HDHub4U / Multi-Source';
         return finishWaterfall(
           allDiscoveredLinks,
@@ -970,29 +1159,11 @@ export async function runWaterfallLinkSearch(
           logs,
           type
         );
+      } else {
+        log(`HDHub4U: ${s3Eval.missingReasons.join('; ')}. Proceeding to Stage 4 (SkyMoviesHD)...`);
       }
-    }
-
-    // HD AVAILABILITY GATEKEEPER CHECK:
-    const hasAnyHdSoFar =
-      hasAnyHdLinks(allDiscoveredLinks) || hdHubPosts.some((p) => isHdPrint(p.title || ''));
-    if (!hasAnyHdSoFar) {
-      stoppedReason = 'HD Version not available yet across web (Halted after HDHub4U check)';
-      log(`⚠️ ${stoppedReason}. Halting waterfall search.`);
-      finalProvider = 'HDHub4U (No HD Available)';
-      return finishWaterfall(
-        allDiscoveredLinks,
-        allCheckResults,
-        finalMetadata,
-        finalSample,
-        finalProvider,
-        false,
-        logs,
-        type,
-        stoppedReason
-      );
     } else {
-      log(`HD version detected on web, but missing some qualities. Proceeding to Stage 4 (SkyMoviesHD)...`);
+      log(`HDHub4U: No matching posts/links found. Proceeding to Stage 4 (SkyMoviesHD)...`);
     }
   }
 
@@ -1025,8 +1196,9 @@ export async function runWaterfallLinkSearch(
       finalMetadata = { ...finalMetadata, ...s4Result.metadata };
       if (s4Result.sample && !finalSample) finalSample = s4Result.sample;
 
-      if (isSatisfiedFilmygoStage(allDiscoveredLinks, type)) {
-        log(`✓ SkyMoviesHD: All required HD links verified in combination! Finalized at Stage 4.`);
+      const s4Eval = evaluateWaterfallSatisfaction(allDiscoveredLinks, type, allCheckResults);
+      if (s4Eval.isSatisfied) {
+        log(`✓ SkyMoviesHD: All required HD links (480p, 720p, 1080p) with Pixeldrain verified in combination! Finalized at Stage 4.`);
         finalProvider = 'SkyMoviesHD / Multi-Source';
         return finishWaterfall(
           allDiscoveredLinks,
@@ -1039,7 +1211,7 @@ export async function runWaterfallLinkSearch(
           type
         );
       } else {
-        log(`SkyMoviesHD: Proceeding to final fallback Stage 5 (FilmyFly)...`);
+        log(`SkyMoviesHD: ${s4Eval.missingReasons.join('; ')}. Proceeding to final fallback Stage 5 (FilmyFly)...`);
       }
     } else {
       log(`SkyMoviesHD: No matching posts/links found. Proceeding to final Stage 5 (FilmyFly)...`);
@@ -1078,13 +1250,14 @@ export async function runWaterfallLinkSearch(
   }
 
   finalProvider = allDiscoveredLinks.length > 0 ? 'Multi-Source Combined' : 'None';
+  const finalEval = evaluateWaterfallSatisfaction(allDiscoveredLinks, type, allCheckResults);
   return finishWaterfall(
     allDiscoveredLinks,
     allCheckResults,
     finalMetadata,
     finalSample,
     finalProvider,
-    isSatisfiedFilmygoStage(allDiscoveredLinks, type),
+    finalEval.isSatisfied,
     logs,
     type,
     stoppedReason
