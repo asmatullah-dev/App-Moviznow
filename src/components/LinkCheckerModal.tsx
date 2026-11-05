@@ -74,7 +74,11 @@ import {
   setHdhub4uDomain,
   getFilmyflyDomain,
   setFilmyflyDomain,
-  DEFAULT_FILMYFLY_DOMAIN
+  DEFAULT_FILMYFLY_DOMAIN,
+  isHubcloudRecoveryLink,
+  isHubcloudLibraryLink,
+  getHubcloudLibraryUrl,
+  normalizeHubcloudDomain,
 } from '../utils/domains';
 
 import {
@@ -2459,18 +2463,52 @@ export const LinkCheckerModal: React.FC<Props> = ({
       return true;
     });
     
-    const lines = currentInputSnapshot.split('\n').map(l => l.trim()).filter(Boolean);
     const isUrlLine = (l: string) => {
-      const norm = l.toLowerCase();
+      const norm = l.trim().toLowerCase();
       return (
         norm.startsWith('http://') ||
         norm.startsWith('https://') ||
         norm.startsWith('ftp://') ||
-        (!norm.includes(' ') && (norm.includes('.lol') || norm.includes('.com') || norm.includes('.net') || norm.includes('.org') || norm.includes('.in') || norm.includes('.top') || norm.includes('.xyz') || norm.includes('.cab') || norm.includes('.club') || norm.includes('.co') || norm.includes('.app') || norm.includes('.cc') || norm.includes('.dev') || norm.includes('.ph')))
+        (!norm.includes(' ') &&
+          (norm.includes('hubcloud.') ||
+           norm.includes('vcloud.') ||
+           norm.includes('pixeldrain.') ||
+           norm.includes('filmygo.') ||
+           norm.includes('filmycab.') ||
+           norm.includes('moviesdrive.') ||
+           norm.includes('hdhub4u.') ||
+           norm.includes('skymovies') ||
+           norm.includes('filmyfly') ||
+           norm.includes('howblogs.xyz') ||
+           norm.includes('filesdl.') ||
+           norm.includes('mdrive.') ||
+           (norm.includes('/') && (norm.endsWith('.lol') || norm.endsWith('.com') || norm.endsWith('.in') || norm.endsWith('.top') || norm.endsWith('.net') || norm.endsWith('.org')))))
       );
     };
 
-    const titleLines = lines.filter(l => !isUrlLine(l));
+    let titleLines: string[] = [];
+    const rawLines = currentInputSnapshot.split(/[\r\n]+/).map(l => l.trim()).filter(Boolean);
+    if (currentLinks.length === 0) {
+      // If no valid URLs are found, allow comma or semicolon separated titles on single or multiple lines
+      titleLines = rawLines.flatMap(line => {
+        if (isUrlLine(line)) return [];
+        if (line.includes(',') && !/\b(inc|ltd|corp)\b/i.test(line)) {
+          const split = line.split(',').map(s => s.trim()).filter(Boolean);
+          if (split.length > 1 && split.every(s => !isUrlLine(s))) {
+            return split;
+          }
+        }
+        if (line.includes(';') && !/\b(inc|ltd|corp)\b/i.test(line)) {
+          const split = line.split(';').map(s => s.trim()).filter(Boolean);
+          if (split.length > 1 && split.every(s => !isUrlLine(s))) {
+            return split;
+          }
+        }
+        return [line];
+      });
+    } else {
+      titleLines = rawLines.filter(l => !isUrlLine(l));
+    }
 
     if (!currentLinks.length && titleLines.length === 0) {
       setError("Please paste at least one valid link or enter a title first.");
@@ -2525,7 +2563,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
             setError(`No links found for "${searchTitle}" across waterfall sources.`);
           }
         } else {
-          // Bulk titles search - process in concurrent batches to drastically improve speed
+          // Bulk titles search - process in concurrent batches (5 to 15 titles at once simultaneously)
           const batchItems: {
             key: string;
             title: string;
@@ -2544,7 +2582,6 @@ export const LinkCheckerModal: React.FC<Props> = ({
           });
 
           // True chunked parallel batching: process 5 to 15 titles at once simultaneously
-          // (e.g. for 4 movies, all 4 are launched concurrently in parallel at the exact same moment)
           const BATCH_CHUNK_SIZE = 15;
           const batches: typeof itemsToProcess[] = [];
           for (let i = 0; i < itemsToProcess.length; i += BATCH_CHUNK_SIZE) {
@@ -2554,13 +2591,20 @@ export const LinkCheckerModal: React.FC<Props> = ({
           let completed = 0;
           for (const currentBatch of batches) {
             const activeBatchTitles = new Set(currentBatch.map(item => item.searchTitle));
+            const titleStageMap = new Map<string, string>();
+            currentBatch.forEach(b => titleStageMap.set(b.searchTitle, 'Starting...'));
+
             const syncStatus = () => {
-              const list = Array.from(activeBatchTitles);
+              const activeList = Array.from(activeBatchTitles);
+              const detailedList = activeList.slice(0, 4).map(t => {
+                const stage = titleStageMap.get(t);
+                return stage ? `${t} (${stage})` : t;
+              });
               setBatchSearchStatus({
                 completed,
                 total: itemsToProcess.length,
-                currentTitle: list.slice(0, 4).join(', ') + (list.length > 4 ? ` (+${list.length - 4} more)` : ''),
-                activeCount: list.length,
+                currentTitle: detailedList.join(', ') + (activeList.length > 4 ? ` (+${activeList.length - 4} more)` : ''),
+                activeCount: activeList.length,
               });
             };
             syncStatus();
@@ -2574,6 +2618,14 @@ export const LinkCheckerModal: React.FC<Props> = ({
                     type: item.searchType as any,
                     languages,
                     qualities,
+                    onProgress: (msg: string) => {
+                      const stageMatch = msg.match(/\[(Stage\s*\d\/\d)\]/i);
+                      const stage = stageMatch ? stageMatch[1] : (msg.includes('TMDB') ? 'TMDB' : (msg.includes('Verified') ? 'Found' : ''));
+                      if (stage) {
+                        titleStageMap.set(item.searchTitle, stage);
+                        syncStatus();
+                      }
+                    },
                   });
 
                   if (res.links.length > 0) {
@@ -2597,6 +2649,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
                   console.error(`Error searching bulk title "${item.searchTitle}":`, err);
                 } finally {
                   activeBatchTitles.delete(item.searchTitle);
+                  titleStageMap.delete(item.searchTitle);
                   completed++;
                   syncStatus();
                 }
@@ -3314,10 +3367,18 @@ export const LinkCheckerModal: React.FC<Props> = ({
         }
       }
 
+      // Strictly reject HubCloud recovery links and select only valid HubCloud links
+      const isRecovery = isHubcloudRecoveryLink(r.url || '') || isHubcloudRecoveryLink(r.finalUrl || '');
+      if (isRecovery) {
+        return null;
+      }
+      const hubUrl = getHubcloudLibraryUrl(r);
+      const finalLibraryUrl = hubUrl || normalizeUrl(r.url);
+
       const linkItem: LinkDef = {
         id: Math.random().toString(36).substr(2, 9),
         name: finalName,
-        url: normalizeUrl(r.finalUrl || r.url),
+        url: finalLibraryUrl,
         size: sizeStr,
         unit: unit,
       };
@@ -3342,7 +3403,7 @@ export const LinkCheckerModal: React.FC<Props> = ({
       if (isSampleLink) linkItem.isSample = true;
 
       return linkItem;
-    });
+    }).filter((item): item is LinkDef => Boolean(item));
     
      if (isBatchMode && onBatchAddLinks) {
        const batchesMap = new Map<string, { 

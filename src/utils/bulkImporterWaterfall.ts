@@ -5,6 +5,10 @@ import {
   getHdhub4uDomain,
   getSkymoviesDomain,
   getFilmyflyDomain,
+  isHubcloudRecoveryLink,
+  isHubcloudLibraryLink,
+  getHubcloudLibraryUrl,
+  normalizeHubcloudDomain,
 } from './domains';
 import {
   normalizeUrl,
@@ -151,6 +155,7 @@ async function scanAndVerifyCandidates(
 
   const uniqueCandidateMap = new Map<string, { url: string; source: string; postTitle?: string; isSample?: boolean }>();
   candidates.forEach((c) => {
+    if (isHubcloudRecoveryLink(c.url)) return;
     const norm = normalizeUrl(c.url);
     if (norm && !uniqueCandidateMap.has(norm)) {
       uniqueCandidateMap.set(norm, c);
@@ -349,12 +354,23 @@ async function scanAndVerifyCandidates(
       detectedSubtitles = true;
     }
 
+    // Strictly reject any recovery links
+    if (isHubcloudRecoveryLink(r.url || '') || isHubcloudRecoveryLink(r.finalUrl || '')) {
+      return;
+    }
+
+    // Strictly select ONLY valid HubCloud links (never raw Pixeldrain or recovery)
+    const hubLibraryUrl = getHubcloudLibraryUrl(r);
+    if (!hubLibraryUrl) {
+      return;
+    }
+
     const hasPixel = hasPixeldrainDownload(r);
     const item: ScrapedLinkItem = {
       id: `bulk-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 4)}`,
       source: (r as any).source || 'FilmyGo',
       sourceTitle: r.fileName || title,
-      url: normalizeUrl(r.finalUrl || r.url),
+      url: hubLibraryUrl,
       quality: qCategory,
       label: isSample ? 'Sample' : `${qualityStr}${r.codecLabel ? ` ${r.codecLabel}` : ''}`,
       rawQuality: qualityStr,
@@ -848,6 +864,9 @@ export async function runWaterfallLinkSearch(
     }
 
     const dedupedResults = results.filter((r) => {
+      if (isHubcloudRecoveryLink(r.url || '') || isHubcloudRecoveryLink(r.finalUrl || '')) {
+        return false;
+      }
       const u1 = normalizeUrl(r.url);
       const u2 = normalizeUrl(r.finalUrl || r.url);
       return dedupedUrlSet.has(u1) || dedupedUrlSet.has(u2);

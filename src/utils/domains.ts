@@ -14,6 +14,78 @@ export function isHubcloudDomain(hostname: string): boolean {
 }
 
 /**
+ * Checks if a link is a HubCloud recovery / report / broken redirect link.
+ * Recovery links MUST NEVER be added to the library or selected as quality links.
+ */
+export function isHubcloudRecoveryLink(rawUrl: string): boolean {
+  if (!rawUrl) return false;
+  const u = rawUrl.toLowerCase();
+  return (
+    u.includes('/recover/') ||
+    u.includes('/recovery/') ||
+    u.includes('/recovery') ||
+    u.includes('/recover') ||
+    u.includes('recovery.php') ||
+    u.includes('recover.php') ||
+    u.includes('hubcloudreport') ||
+    u.includes('gamerxyt.com') ||
+    u.includes('sportverse.cc') ||
+    u.includes('gadgetscloud') ||
+    u.includes('hubcloud.recovery') ||
+    /[?&](?:action=)?recover(?:y)?\b/i.test(u) ||
+    /\brecovery[-_]?link\b/i.test(u)
+  );
+}
+
+/**
+ * Checks if a link is a valid HubCloud link suitable for the movie library.
+ * Direct Pixeldrain URLs, third-party CDN streams, and recovery links are strictly rejected.
+ */
+export function isHubcloudLibraryLink(rawUrl: string): boolean {
+  if (!rawUrl) return false;
+  if (isHubcloudRecoveryLink(rawUrl)) return false;
+  const u = rawUrl.toLowerCase();
+  if (
+    u.includes('pixeldrain') ||
+    u.includes('pixel.drain') ||
+    u.includes('pixeldra.in') ||
+    u.includes('workers.dev') ||
+    u.includes('fsl') ||
+    u.includes('telegram') ||
+    u.includes('t.me') ||
+    u.includes('gdflix')
+  ) {
+    return false;
+  }
+  return (
+    u.includes('hubcloud') ||
+    u.includes('hubcould') ||
+    u.includes('hubdrive') ||
+    u.includes('drivehub') ||
+    u.includes('vcloud')
+  );
+}
+
+/**
+ * Extracts and normalizes the canonical HubCloud library URL from an item or link check result.
+ * Always prefers the HubCloud landing page URL and converts legacy domains to the latest hubcloud.ist.
+ * Never returns recovery links or direct Pixeldrain URLs.
+ */
+export function getHubcloudLibraryUrl(item: { url?: string; finalUrl?: string } | string | null | undefined): string {
+  if (!item) return '';
+  const url = typeof item === 'string' ? item : item.url || '';
+  const finalUrl = typeof item === 'string' ? '' : item.finalUrl || '';
+
+  if (url && isHubcloudLibraryLink(url)) {
+    return normalizeHubcloudDomain(url);
+  }
+  if (finalUrl && isHubcloudLibraryLink(finalUrl)) {
+    return normalizeHubcloudDomain(finalUrl);
+  }
+  return '';
+}
+
+/**
  * Automatically converts any old or legacy HubCloud URL (e.g. hubcloud.art, hubcloud.one,
  * hubcloud.foo, hubcould, hubcloud.cx, hubcloud.club, hubcloud.lol, etc.) to the latest
  * hubcloud domain (hubcloud.ist) before sending any request.

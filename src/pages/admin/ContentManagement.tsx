@@ -36,6 +36,7 @@ import { useNotifications } from "../../contexts/NotificationContext";
 import { useUsers } from "../../contexts/UsersContext";
 import { isEpisodeRange } from "../../utils/linkScanner";
 import { extractTitleAndYear } from "../../utils/titleMatcher";
+import { isHubcloudRecoveryLink } from "../../utils/domains";
 import {
   Content,
   Genre,
@@ -2477,15 +2478,21 @@ export default function ContentManagement() {
           order: currentMaxOrder + index + 1,
         };
 
-        const sampleLink = b.links.find((l: LinkDef) => l.isSample && l.url);
+        // Filter out any recovery links from batch links
+        const cleanBatchLinks = (b.links || []).filter((l: LinkDef) => {
+          const u = l.url || '';
+          return !isHubcloudRecoveryLink(u);
+        });
+
+        const sampleLink = cleanBatchLinks.find((l: LinkDef) => l.isSample && l.url);
         const sampleUrlToSave = b.metadata?.sampleUrl || sampleLink?.url || "";
-        if (sampleUrlToSave) {
+        if (sampleUrlToSave && !isHubcloudRecoveryLink(sampleUrlToSave)) {
           contentData.sampleUrl = sampleUrlToSave;
         }
 
         if (b.metadata.type === "movie" || !b.metadata.type) {
-          const downloadLinks = b.links.filter((l: LinkDef) => !l.isSample);
-          const linksToSave = downloadLinks.length > 0 ? downloadLinks : b.links;
+          const downloadLinks = cleanBatchLinks.filter((l: LinkDef) => !l.isSample);
+          const linksToSave = downloadLinks.length > 0 ? downloadLinks : cleanBatchLinks;
           contentData.movieLinks = JSON.stringify(
             [...linksToSave].sort(
               (a, b) =>
@@ -2498,7 +2505,7 @@ export default function ContentManagement() {
           contentData.type = "series";
           const seasonMap = new Map<number, Season>();
 
-          b.links.forEach((l: LinkDef) => {
+          cleanBatchLinks.forEach((l: LinkDef) => {
             const textToScan = `${(l as any).fileName || ''} ${l.name || ''} ${l.url || ''}`;
             const isZip = l.isFullSeasonZIP || (!l.isFullSeasonMKV && l.url && l.url.toLowerCase().includes(".zip"));
             const isMkvFullSeason = l.isFullSeasonMKV || isEpisodeRange(textToScan) || /full season|all episodes|complete/i.test(textToScan);

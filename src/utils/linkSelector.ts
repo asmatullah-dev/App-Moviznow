@@ -1,6 +1,12 @@
 import { Language, Quality, QualityLinks, LinkDef } from '../types';
 import { LinkCheckResult } from './linkScanner';
 import {
+  isHubcloudRecoveryLink,
+  isHubcloudLibraryLink,
+  getHubcloudLibraryUrl,
+  normalizeHubcloudDomain,
+} from './domains';
+import {
   extractTitleAndYear,
   isPreciseTitleMatch,
   normalizeCleanForMatch,
@@ -1379,11 +1385,18 @@ export function deduplicateQualityLinks(
     for (const it of items) {
       if (it.isSample) continue;
 
+      // Strictly enforce HubCloud link and reject any HubCloud recovery link
+      const hubUrl = getHubcloudLibraryUrl(it);
+      if (!hubUrl || isHubcloudRecoveryLink(hubUrl) || isHubcloudRecoveryLink(it.url || '') || isHubcloudRecoveryLink(it.finalUrl || '')) {
+        continue;
+      }
+
       const confirmedQ = resolveConfirmedQuality(it);
       if (!confirmedQ) continue;
 
       const normalizedItem: ScrapedLinkItem = {
         ...it,
+        url: hubUrl,
         quality: confirmedQ,
         label: `${confirmedQ}${it.isHevc ? ' HEVC' : ''}`.trim(),
       };
@@ -1490,6 +1503,12 @@ export function deduplicateQualityLinks(
     for (const it of items) {
       if (it.isSample) continue;
 
+      // Strictly enforce HubCloud link and reject any HubCloud recovery link
+      const hubUrl = getHubcloudLibraryUrl(it);
+      if (!hubUrl || isHubcloudRecoveryLink(hubUrl) || isHubcloudRecoveryLink(it.url || '') || isHubcloudRecoveryLink(it.finalUrl || '')) {
+        continue;
+      }
+
       const confirmedQ = resolveConfirmedQuality(it);
       if (!confirmedQ) continue;
 
@@ -1502,6 +1521,7 @@ export function deduplicateQualityLinks(
 
       const normalizedItem: ScrapedLinkItem = {
         ...it,
+        url: hubUrl,
         quality: confirmedQ,
         label: `${confirmedQ}${it.isHevc ? ' HEVC' : ''}`.trim(),
       };
@@ -1693,18 +1713,27 @@ export function rankAndVerifyPosts(
 
 /**
  * Builds standard QualityLinks array formatted for storage with sample links, sizes, and season/episode flags.
+ * Strictly selects ONLY HubCloud links and never adds HubCloud recovery links or direct Pixeldrain URLs.
  */
 export function buildQualityLinksPayload(items: ScrapedLinkItem[]): QualityLinks {
-  return items.map((s) => ({
-    id: s.id || Math.random().toString(36).substr(2, 9),
-    name: s.label,
-    url: normalizeUrl(s.finalUrl || s.url),
-    size: s.size ? s.size.replace(/MB|GB/i, '').trim() : '',
-    unit: s.size && s.size.toLowerCase().includes('gb') ? 'GB' : 'MB',
-    season: s.season,
-    episode: s.episode,
-    isFullSeasonMKV: s.isFullSeasonMKV,
-    isFullSeasonZIP: s.isFullSeasonZIP,
-    isSample: s.isSample,
-  }));
+  return items
+    .filter((s) => {
+      const hubUrl = getHubcloudLibraryUrl(s);
+      return Boolean(hubUrl && !isHubcloudRecoveryLink(hubUrl) && !isHubcloudRecoveryLink(s.url || ''));
+    })
+    .map((s) => {
+      const hubUrl = getHubcloudLibraryUrl(s) || normalizeHubcloudDomain(s.url);
+      return {
+        id: s.id || Math.random().toString(36).substr(2, 9),
+        name: s.label,
+        url: hubUrl,
+        size: s.size ? s.size.replace(/MB|GB/i, '').trim() : '',
+        unit: s.size && s.size.toLowerCase().includes('gb') ? 'GB' : 'MB',
+        season: s.season,
+        episode: s.episode,
+        isFullSeasonMKV: s.isFullSeasonMKV,
+        isFullSeasonZIP: s.isFullSeasonZIP,
+        isSample: s.isSample,
+      };
+    });
 }

@@ -72,7 +72,7 @@ class HubcloudQueue {
     }
   }
 }
-const hubcloudFetchQueue = new HubcloudQueue(5);
+const hubcloudFetchQueue = new HubcloudQueue(30);
 
 export function getCachedHubcloudData(url: string) {
   if (!url) return null;
@@ -956,7 +956,15 @@ export async function fetchHtml(url: string, isVcloud = false, force = false) {
             !lText.includes("mdrive") &&
             !lHref.includes("mdrive") &&
             !lText.includes("telegram") &&
-            !lHref.includes("telegram")
+            !lHref.includes("telegram") &&
+            !lText.includes("recover") &&
+            !lHref.includes("recover") &&
+            !lText.includes("recovery") &&
+            !lHref.includes("recovery") &&
+            !lHref.includes("gamerxyt") &&
+            !lHref.includes("sportverse") &&
+            !lHref.includes("hubcloudreport") &&
+            !lHref.includes("gadgetscloud")
           );
         })
         .map((c) => {
