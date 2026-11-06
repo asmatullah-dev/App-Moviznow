@@ -56,6 +56,7 @@ import { getOptimizedImageUrl } from '../utils/imageUtils';
 import { getOttBadgeConfig } from '../utils/contentUtils';
 import { canUserUseAiTranslation } from '../utils/roleUtils';
 import SharePreviewModal from './SharePreviewModal';
+import { TrailerDownloadDropdown } from './TrailerDownloadDropdown';
 
 interface ComingSoonSectionProps {
   className?: string;
@@ -1236,17 +1237,25 @@ export const ComingSoonSection: React.FC<ComingSoonSectionProps> = ({ className,
                     </span>
                   </div>
 
-                  <button
-                    id="close-fullscreen-trailer-btn"
-                    onClick={() => {
-                      vibrate(20);
-                      setIsPlayingTrailer(false);
-                    }}
-                    className="w-10 h-10 rounded-full bg-black/75 hover:bg-black text-white flex items-center justify-center border border-white/20 transition-all active:scale-95 shadow-xl cursor-pointer"
-                    title={t('Close Trailer')}
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {trailerUrl && (
+                      <TrailerDownloadDropdown
+                        trailerUrl={trailerUrl}
+                        title={selectedItem.title}
+                      />
+                    )}
+                    <button
+                      id="close-fullscreen-trailer-btn"
+                      onClick={() => {
+                        vibrate(20);
+                        setIsPlayingTrailer(false);
+                      }}
+                      className="w-10 h-10 rounded-full bg-black/75 hover:bg-black text-white flex items-center justify-center border border-white/20 transition-all active:scale-95 shadow-xl cursor-pointer"
+                      title={t('Close Trailer')}
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Video Player or Loading State */}

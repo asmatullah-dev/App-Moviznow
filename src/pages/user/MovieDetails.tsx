@@ -94,6 +94,7 @@ import NativePlayer, {
   findFslCandidate,
   getStreamingApiBase,
 } from "../../components/nativePlayer";
+import { TrailerDownloadDropdown } from "../../components/TrailerDownloadDropdown";
 import { clsx } from "clsx";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -5360,30 +5361,65 @@ export default function MovieDetails() {
                         allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                         allowFullScreen
                       ></iframe>
-                      <div className="absolute top-4 right-12 z-50">
+                      <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
+                        <TrailerDownloadDropdown
+                          trailerUrl={activeTrailerUrl || mergedContent.trailerUrl || ""}
+                          sampleUrl={mergedContent.sampleUrl}
+                          title={mergedContent.title}
+                        />
                         <a
                           href={
                             activeTrailerUrl || mergedContent.trailerUrl || ""
                           }
                           target="_blank"
                           rel="noreferrer"
-                          className="bg-black/60 backdrop-blur-md text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-black/80 transition-colors border border-white/10 shadow-lg flex items-center gap-1.5"
+                          className="bg-black/60 hover:bg-black/80 backdrop-blur-md text-white w-8 h-8 rounded-lg text-xs font-medium hover:border-red-500/40 transition-colors border border-white/10 shadow-lg flex items-center justify-center cursor-pointer active:scale-95 group"
                           onClick={(e) => e.stopPropagation()}
+                          title={t('Open on YouTube')}
+                          aria-label={t('Open on YouTube')}
                         >
-                          <Youtube className="w-3.5 h-3.5" />
-                          {t('Open externally')}
+                          <Youtube className="w-4 h-4 text-red-500 group-hover:scale-110 transition-transform" />
                         </a>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsTrailerPopupOpen(false);
+                            setActiveTrailerUrl(null);
+                          }}
+                          className="bg-black/60 hover:bg-black/80 backdrop-blur-md text-white w-8 h-8 rounded-lg text-xs font-medium hover:text-red-400 hover:border-red-500/40 transition-colors border border-white/10 shadow-lg flex items-center justify-center cursor-pointer active:scale-95"
+                          title={t('Close')}
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
                       </div>
                     </div>
                   ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-zinc-900 dark:text-white gap-4 bg-zinc-50 dark:bg-zinc-900">
+                    <div className="w-full h-full flex flex-col items-center justify-center text-zinc-900 dark:text-white gap-4 bg-zinc-50 dark:bg-zinc-900 relative">
+                      <div className="absolute top-4 right-4 z-50 flex items-center gap-2">
+                        <TrailerDownloadDropdown
+                          trailerUrl={activeTrailerUrl || mergedContent.trailerUrl || ""}
+                          sampleUrl={mergedContent.sampleUrl}
+                          title={mergedContent.title}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsTrailerPopupOpen(false);
+                            setActiveTrailerUrl(null);
+                          }}
+                          className="bg-black/60 hover:bg-black/80 backdrop-blur-md text-white w-8 h-8 rounded-lg text-xs font-medium hover:text-red-400 hover:border-red-500/40 transition-colors border border-white/10 shadow-lg flex items-center justify-center cursor-pointer active:scale-95"
+                          title={t('Close')}
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
                       <Play className="w-16 h-16 opacity-50" />
                       <p>{t('This trailer cannot be played directly here.')}</p>
                       <a
                         href={activeTrailerUrl || mergedContent.trailerUrl || ""}
                         target="_blank"
                         rel="noreferrer"
-                        className="bg-emerald-500 hover:bg-emerald-600 px-6 py-3 text-sm sm:text-base rounded-xl font-bold transition-colors"
+                        className="bg-emerald-500 hover:bg-emerald-600 px-6 py-3 text-sm sm:text-base rounded-xl font-bold transition-colors cursor-pointer"
                       >
                         {t('Open in New Tab')}
                       </a>
